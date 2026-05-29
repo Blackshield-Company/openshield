@@ -1,0 +1,56 @@
+[package]
+name = "openshark"
+version = "0.1.0"
+edition = "2024"
+authors = ["synth <synthalorian@gmail.com>"]
+description = "The harness that learns. The agent that decides."
+license = "MIT"
+repository = "https://github.com/synthalorian/openshark"
+keywords = ["ai", "harness", "coding", "agent", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.85"
+
+[[bin]]
+name = "openshark"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.44", features = ["full"] }
+
+# CLI + TUI
+clap = { version = "4.5", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.29"
+
+# HTTP + API
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+eventsource-stream = "0.2"
+futures = "0.3"
+
+# Database
+rusqlite = { version = "0.34", features = ["bundled", "chrono"] }
+
+# Config + Utils
+toml = "0.8"
+dirs = "6.0"
+anyhow = "1.0"
+thiserror = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.16", features = ["v4", "serde"] }
+walkdir = "2.5"
+regex = "1.11"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
