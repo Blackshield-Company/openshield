@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::Config;
 use crate::providers::{Message, Provider};
+use crate::skills::{format_skills_prompt, SkillRegistry};
 
 /// Per-channel conversation state.
 #[derive(Clone)]
@@ -57,18 +58,33 @@ impl ChannelState {
         );
 
         let soul = crate::agent::soul::load_soul_from_config(config);
+        let skills_dir = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("openshark")
+            .join("skills");
+        let skill_registry = SkillRegistry::new(skills_dir).ok();
+        let skills_prompt = skill_registry
+            .as_ref()
+            .map(|r| {
+                let all = r.all_skills();
+                let refs: Vec<_> = all.iter().collect();
+                format_skills_prompt(&refs)
+            })
+            .unwrap_or_default();
+
         let system_msg = Message {
             role: "system".to_string(),
             content: format!(
                 "{}\n\nYou are chatting in Discord. Be concise. Use markdown.\n\
                  You have access to tools:\n{}\n\
-                 When you need to use a tool, respond with: TOOL:tool_name args",
+                 When you need to use a tool, respond with: TOOL:tool_name args{}",
                 soul.system_prompt(),
                 crate::tools::get_tools()
                     .iter()
                     .map(|t| format!("- {}: {}", t.name(), t.description()))
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n"),
+                skills_prompt
             ),
         };
 
