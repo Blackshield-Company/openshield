@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serenity::async_trait;
-use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
+use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseFollowup, CreateInteractionResponseMessage};
 use serenity::client::{Context as SerenityContext, EventHandler};
 use serenity::all::Interaction;
 use serenity::model::channel::Message;
@@ -169,6 +169,15 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: SerenityContext, interaction: Interaction) {
         if let Some(command) = interaction.as_command() {
+            // Defer the response immediately for slow operations
+            let deferred = CreateInteractionResponse::Defer(
+                CreateInteractionResponseMessage::new(),
+            );
+            if let Err(e) = command.create_response(&ctx.http, deferred).await {
+                error!("Failed to defer slash command: {}", e);
+                return;
+            }
+
             let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<String>();
 
             let event = DiscordEvent::SlashCommand {
@@ -181,18 +190,48 @@ impl EventHandler for Handler {
                 return;
             }
 
-            // Wait for response
+            // Collect all response parts
             let mut full_response = String::new();
             while let Some(chunk) = reply_rx.recv().await {
                 full_response.push_str(&chunk);
             }
 
             if !full_response.is_empty() {
-                let data = CreateInteractionResponseMessage::new().content(full_response);
-                let builder = CreateInteractionResponse::Message(data);
+                // Discord has a 2000 char limit for followup messages
+                let max_len = self.config.gateway.discord.max_message_length;
+                if full_response.len() > max_len {
+                    // Send first chunk as followup, rest as additional followups
+                    let chunks: Vec<String> = full_response
+                        .chars()
+                        .collect::<Vec<_>>()
+                        .chunks(max_len)
+                        .map(|c| c.iter().collect())
+                        .collect();
 
-                if let Err(e) = command.create_response(&ctx.http, builder).await {
-                    error!("Failed to send slash command response: {}", e);
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        if i == 0 {
+                            if let Err(e) = command
+                                .create_followup(&ctx.http, CreateInteractionResponseFollowup::new().content(chunk))
+                                .await
+                            {
+                                error!("Failed to send followup: {}", e);
+                            }
+                        } else {
+                            if let Err(e) = command
+                                .create_followup(&ctx.http, CreateInteractionResponseFollowup::new().content(chunk))
+                                .await
+                            {
+                                error!("Failed to send followup chunk: {}", e);
+                            }
+                        }
+                    }
+                } else {
+                    if let Err(e) = command
+                        .create_followup(&ctx.http, CreateInteractionResponseFollowup::new().content(full_response))
+                        .await
+                    {
+                        error!("Failed to send slash command followup: {}", e);
+                    }
                 }
             }
         }
