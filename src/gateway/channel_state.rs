@@ -22,6 +22,10 @@ pub struct ChannelState {
     pub max_history: usize,
     /// Whether @mention is required.
     pub require_mention: bool,
+    /// Whether multi-model mode is enabled for this channel.
+    pub multi_model_enabled: bool,
+    /// Secondary models for multi-model comparisons.
+    pub multi_model_secondary: Vec<String>,
 }
 
 impl ChannelState {
@@ -96,6 +100,8 @@ impl ChannelState {
             typing_indicator: config.gateway.discord.typing_indicator,
             max_history: 20,
             require_mention: config.gateway.discord.require_mention,
+            multi_model_enabled: config.gateway.discord.multi_model_enabled,
+            multi_model_secondary: config.gateway.discord.multi_model_secondary.clone(),
         }
     }
 

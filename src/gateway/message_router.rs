@@ -192,44 +192,55 @@ impl MessageRouter {
         });
 
         // Stream response
-        let req = ChatRequest::new(state.model.clone(), messages, true);
+        let req = ChatRequest::new(state.model.clone(), messages.clone(), true);
         let provider = state.provider.clone();
 
-        let tool_result = match provider.chat_stream(req).await {
-            Ok((chunks, _metrics)) => {
-                let full_response: String = chunks.join("");
-                let tool_result = self.try_execute_tools(&full_response).await;
-                (full_response, tool_result)
-            }
-            Err(e) => {
-                let _ = reply_tx.send(format!("Error: {}", e));
-                return Ok(());
-            }
-        };
-
-        let full_response = tool_result.0;
-
-        // Handle tool execution and follow-up
-        if let Some(tool_result) = tool_result.1 {
-            state.add_assistant_message(full_response.clone());
-            state.add_tool_result("tool", &tool_result);
-
-            let messages = state.get_messages();
-            let req = ChatRequest::new(state.model.clone(), messages, true);
-
-            match provider.chat_stream(req).await {
+        // ── Multi-Model Mode (Optional) ────────────────────────────────────
+        if state.multi_model_enabled && !state.multi_model_secondary.is_empty() {
+            self.handle_multi_model_response(
+                channel_id,
+                &state,
+                &messages,
+                &reply_tx,
+            ).await;
+        } else {
+            // Standard single-model response
+            let tool_result = match provider.chat_stream(req).await {
                 Ok((chunks, _metrics)) => {
-                    let follow_up: String = chunks.join("");
-                    state.add_assistant_message(follow_up.clone());
-                    let _ = reply_tx.send(follow_up);
+                    let full_response: String = chunks.join("");
+                    let tool_result = self.try_execute_tools(&full_response).await;
+                    (full_response, tool_result)
                 }
                 Err(e) => {
                     let _ = reply_tx.send(format!("Error: {}", e));
+                    return Ok(());
                 }
+            };
+
+            let full_response = tool_result.0;
+
+            // Handle tool execution and follow-up
+            if let Some(tool_result) = tool_result.1 {
+                state.add_assistant_message(full_response.clone());
+                state.add_tool_result("tool", &tool_result);
+
+                let messages = state.get_messages();
+                let req = ChatRequest::new(state.model.clone(), messages, true);
+
+                match provider.chat_stream(req).await {
+                    Ok((chunks, _metrics)) => {
+                        let follow_up: String = chunks.join("");
+                        state.add_assistant_message(follow_up.clone());
+                        let _ = reply_tx.send(follow_up);
+                    }
+                    Err(e) => {
+                        let _ = reply_tx.send(format!("Error: {}", e));
+                    }
+                }
+            } else {
+                state.add_assistant_message(full_response.clone());
+                let _ = reply_tx.send(full_response);
             }
-        } else {
-            state.add_assistant_message(full_response.clone());
-            let _ = reply_tx.send(full_response);
         }
 
         // Save updated state
@@ -342,23 +353,26 @@ impl MessageRouter {
             "!help" => {
                 let help = r#"🦈 **OpenShark Keyword Commands**
 
-**Prefix commands:**
+|**Prefix commands:**
 • `!model` — List models
 • `!model <name>` — Switch model
 • `!tools` — List available tools
 • `!status` — Show status
 • `!new` — Start fresh conversation
 • `!reset` — Reset to defaults
+• `!multi` — Toggle multi-model mode
+• `!multi on/off` — Enable/disable multi-model
+• `!multi <model1, model2>` — Set secondary models
 • `!help` — This message
 
-**Natural language queries:**
+|**Natural language queries:**
 • "What did we do about X?"
 • "How did we solve X?"
 • "Tell me about X"
 • "What was the issue with X?"
 • "Remember when we..."
 
-**Slash commands:**
+|**Slash commands:**
 Use `/help` for the full slash command list.
 "#;
                 let _ = reply_tx.send(help.to_string());
@@ -372,6 +386,38 @@ Use `/help` for the full slash command list.
                 state.reset(&self.config);
                 self.channel_states.update(channel_id, state);
                 let _ = reply_tx.send("🔄 Reset complete.".to_string());
+            }
+            "!multi" => {
+                let mut state = self.channel_states.get_or_create(channel_id);
+                if arg.is_empty() {
+                    // Toggle multi-model mode
+                    state.multi_model_enabled = !state.multi_model_enabled;
+                    let status = if state.multi_model_enabled { "✅ ON" } else { "❌ OFF" };
+                    let _ = reply_tx.send(format!(
+                        "🤖 Multi-model mode: {}\n\nSecondary models: {}",
+                        status,
+                        if state.multi_model_secondary.is_empty() {
+                            "none configured".to_string()
+                        } else {
+                            state.multi_model_secondary.join(", ")
+                        }
+                    ));
+                } else if arg == "on" {
+                    state.multi_model_enabled = true;
+                    let _ = reply_tx.send("🤖 Multi-model mode: ✅ ON".to_string());
+                } else if arg == "off" {
+                    state.multi_model_enabled = false;
+                    let _ = reply_tx.send("🤖 Multi-model mode: ❌ OFF".to_string());
+                } else {
+                    // Set secondary models
+                    let models: Vec<String> = arg.split(',').map(|s| s.trim().to_string()).collect();
+                    state.multi_model_secondary = models.clone();
+                    let _ = reply_tx.send(format!(
+                        "🤖 Secondary models set to: {}\nUse `!multi on` to enable.",
+                        models.join(", ")
+                    ));
+                }
+                self.channel_states.update(channel_id, state);
             }
             _ => {
                 let _ = reply_tx.send(format!("❓ Unknown command: `{}`. Try `!help`", cmd));
@@ -799,6 +845,63 @@ Use `/help` for the full slash command list.
                     }
                 }
 
+                // ─── Multi-Model ───
+                "multi" => {
+                    let mut state = self.channel_states.get_or_create(channel_id);
+                    let action = get_string_option(&cmd.data.options, "action");
+                    let models = get_string_option(&cmd.data.options, "models");
+
+                    if let Some(action) = action {
+                        match action {
+                            "on" => {
+                                state.multi_model_enabled = true;
+                                let _ = reply_tx.send("🤖 Multi-model mode: ✅ ON".to_string());
+                            }
+                            "off" => {
+                                state.multi_model_enabled = false;
+                                let _ = reply_tx.send("🤖 Multi-model mode: ❌ OFF".to_string());
+                            }
+                            "toggle" => {
+                                state.multi_model_enabled = !state.multi_model_enabled;
+                                let status = if state.multi_model_enabled { "✅ ON" } else { "❌ OFF" };
+                                let _ = reply_tx.send(format!("🤖 Multi-model mode: {}", status));
+                            }
+                            "set" => {
+                                if let Some(models_str) = models {
+                                    let model_list: Vec<String> = models_str.split(',').map(|s| s.trim().to_string()).collect();
+                                    state.multi_model_secondary = model_list.clone();
+                                    let _ = reply_tx.send(format!(
+                                        "🤖 Secondary models set to: {}\nUse `/multi action:on` to enable.",
+                                        model_list.join(", ")
+                                    ));
+                                } else {
+                                    let _ = reply_tx.send(
+                                        "❌ Please provide models. Usage: `/multi action:set models:model1,model2`".to_string(),
+                                    );
+                                }
+                            }
+                            _ => {
+                                let _ = reply_tx.send(
+                                    "❌ Unknown action. Use: on, off, toggle, set".to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        // Show current status
+                        let status = if state.multi_model_enabled { "✅ ON" } else { "❌ OFF" };
+                        let secondary = if state.multi_model_secondary.is_empty() {
+                            "none configured".to_string()
+                        } else {
+                            state.multi_model_secondary.join(", ")
+                        };
+                        let _ = reply_tx.send(format!(
+                            "🤖 Multi-model mode: {}\nSecondary models: {}\n\nUsage: `/multi action:on/off/toggle/set models:model1,model2`",
+                            status, secondary
+                        ));
+                    }
+                    self.channel_states.update(channel_id, state);
+                }
+
                 // ─── Help ───
                 "help" => {
                     let help_text = r#"🦈 **OpenShark Discord Commands**
@@ -809,12 +912,13 @@ Use `/help` for the full slash command list.
 • `/system prompt:<text>` — Set custom system prompt
 • `/reset` — Reset to defaults
 
-**Models:**
+|**Models:**
 • `/model` — List models
 • `/model name:<model>` — Switch model
 • `/models` — Detailed model list
+• `/multi` — Multi-model mode control
 
-**Tools:**
+|**Tools:**
 • `/tools` — List available tools
 • `/tool name:<tool> args:<args>` — Execute a tool
 
@@ -854,8 +958,89 @@ Use `/help` for the full slash command list.
         Ok(())
     }
 
+    /// Handle multi-model response: query primary + secondary models, format comparison.
+    async fn handle_multi_model_response(
+        &self,
+        channel_id: u64,
+        state: &ChannelState,
+        messages: &[Message],
+        reply_tx: &mpsc::UnboundedSender<String>,
+    ) {
+        let primary_model = state.model.clone();
+        let secondary_models = state.multi_model_secondary.clone();
+
+        // Query primary model
+        let primary_req = ChatRequest::new(primary_model.clone(), messages.to_vec(), true);
+        let primary_provider = state.provider.clone();
+
+        let primary_response = match primary_provider.chat_stream(primary_req).await {
+            Ok((chunks, _)) => chunks.join(""),
+            Err(e) => {
+                let _ = reply_tx.send(format!("❌ Primary model error: {}", e));
+                return;
+            }
+        };
+
+        // Query secondary models in parallel
+        let mut secondary_responses: Vec<(String, String)> = Vec::new();
+
+        for model_name in &secondary_models {
+            if let Some((provider_name, provider_cfg)) =
+                self.config.find_provider_for_model(model_name)
+            {
+                let provider = Provider::new(
+                    provider_name.clone(),
+                    provider_cfg.base_url.clone(),
+                    provider_cfg.api_key.clone(),
+                    provider_cfg.kind.clone(),
+                    provider_cfg.headers.clone(),
+                );
+
+                let req = ChatRequest::new(model_name.clone(), messages.to_vec(), true);
+
+                match provider.chat_stream(req).await {
+                    Ok((chunks, _)) => {
+                        let response = chunks.join("");
+                        secondary_responses.push((model_name.clone(), response));
+                    }
+                    Err(e) => {
+                        secondary_responses.push((
+                            model_name.clone(),
+                            format!("❌ Error: {}", e),
+                        ));
+                    }
+                }
+            } else {
+                secondary_responses.push((
+                    model_name.clone(),
+                    "❌ Model not found in config".to_string(),
+                ));
+            }
+        }
+
+        // Format comparison response
+        let mut output = format!(
+            "🤖 **Primary** (`{}`)\n{}",
+            primary_model, primary_response
+        );
+
+        if !secondary_responses.is_empty() {
+            output.push_str("\n\n---\n\n");
+            for (model_name, response) in &secondary_responses {
+                output.push_str(&format!(
+                    "🤖 **{}**\n{}\n\n",
+                    model_name, response
+                ));
+            }
+        }
+
+        let _ = reply_tx.send(output);
+    }
+
     /// Try to execute any TOOL: invocations in the response.
-    async fn try_execute_tools(&self, response: &str) -> Option<String> {
+    async fn try_execute_tools(&self,
+        response: &str,
+    ) -> Option<String> {
         if let Some(tool_start) = response.find("TOOL:") {
             let tool_line = &response[tool_start..];
             let tool_line = tool_line.lines().next()?;
