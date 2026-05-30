@@ -1,1 +1,11 @@
 /target
+/config.toml
+*.db
+*.db-journal
+.env
+.env.local
+*.key
+*.pem
+secrets/
+.cache/
+.openshark/

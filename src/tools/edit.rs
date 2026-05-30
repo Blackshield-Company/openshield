@@ -155,3 +155,136 @@ impl EditTool {
             .to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = format!("/tmp/openshark_edit_test_{}_{}", std::process::id(), count);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &str) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_read_file() {
+        let dir = temp_dir();
+        let path = format!("{}/test_read.txt", dir);
+        fs::write(&path, "line1\nline2\nline3").unwrap();
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("read {}", path)).unwrap();
+
+        assert!(result.contains("line1"));
+        assert!(result.contains("line2"));
+        assert!(result.contains("line3"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_write_file() {
+        let dir = temp_dir();
+        let path = format!("{}/test_write.txt", dir);
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("write {} Hello World", path)).unwrap();
+
+        assert!(result.contains("Written"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "Hello World");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_write_file_creates_dirs() {
+        let dir = temp_dir();
+        let path = format!("{}/subdir/nested/test.txt", dir);
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("write {} content", path)).unwrap();
+
+        assert!(result.contains("Written"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("content"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_replace_in_file() {
+        let dir = temp_dir();
+        let path = format!("{}/test_replace.txt", dir);
+        fs::write(&path, "Hello old world").unwrap();
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("replace {} old ||| new", path)).unwrap();
+
+        assert!(result.contains("Replaced"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "Hello new world");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_replace_string_not_found() {
+        let dir = temp_dir();
+        let path = format!("{}/test_replace_notfound.txt", dir);
+        fs::write(&path, "Hello world").unwrap();
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("replace {} nonexistent ||| new", path)).unwrap();
+
+        assert!(result.contains("not found"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_patch_file() {
+        let dir = temp_dir();
+        let path = format!("{}/test_patch.txt", dir);
+        fs::write(&path, "line1\nline2\nline3").unwrap();
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("patch {} line2\nline3 ||| line2_new\nline3_new", path)).unwrap();
+
+        assert!(result.contains("Patched"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("line2_new"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_patch_context_not_found() {
+        let dir = temp_dir();
+        let path = format!("{}/test_patch_notfound.txt", dir);
+        fs::write(&path, "Hello world").unwrap();
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("patch {} nonexistent ||| new", path)).unwrap();
+
+        assert!(result.contains("not found"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_unknown_command() {
+        let tool = EditTool;
+        let result = tool.execute("unknown something").unwrap();
+        assert!(result.contains("Unknown edit command"));
+    }
+
+    #[test]
+    fn test_empty_args() {
+        let tool = EditTool;
+        let result = tool.execute("").unwrap();
+        assert!(result.contains("Edit tool usage"));
+    }
+}

@@ -145,3 +145,80 @@ impl Tool for GrepTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = format!("/tmp/openshark_search_test_{}_{}", std::process::id(), count);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &str) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_grep_tool_finds_matches() {
+        let dir = temp_dir();
+        fs::write(format!("{}/test.txt", dir), "Hello world\nRust is great\nHello again").unwrap();
+
+        let tool = GrepTool;
+        let result = tool.execute(&format!("Hello {}", dir)).unwrap();
+
+        assert!(result.contains("Hello world"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_grep_tool_no_matches() {
+        let dir = temp_dir();
+        fs::write(format!("{}/test.txt", dir), "Hello world").unwrap();
+
+        let tool = GrepTool;
+        let result = tool.execute(&format!("nonexistent {}", dir)).unwrap();
+
+        assert!(result.contains("No matches found"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_grep_tool_invalid_regex() {
+        let tool = GrepTool;
+        let result = tool.execute("[invalid( /tmp");
+        match result {
+            Ok(output) => {
+                assert!(output.contains("Invalid regex"));
+            }
+            Err(e) => {
+                assert!(e.to_string().contains("Invalid regex"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_grep_tool_empty_args() {
+        let tool = GrepTool;
+        let result = tool.execute("").unwrap();
+        assert!(result.contains("Usage"));
+    }
+
+    #[test]
+    fn test_grep_tool_case_insensitive() {
+        let dir = temp_dir();
+        fs::write(format!("{}/test.txt", dir), "HELLO WORLD").unwrap();
+
+        let tool = GrepTool;
+        let result = tool.execute(&format!("hello {}", dir)).unwrap();
+
+        assert!(result.contains("HELLO WORLD") || result.contains("hello world"));
+        cleanup(&dir);
+    }
+}

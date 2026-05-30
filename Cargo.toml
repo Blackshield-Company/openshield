@@ -35,6 +35,7 @@ rusqlite = { version = "0.34", features = ["bundled", "chrono"] }
 
 # Config + Utils
 toml = "0.8"
+serde_yaml = "0.9"
 dirs = "6.0"
 anyhow = "1.0"
 thiserror = "2.0"
@@ -46,6 +47,8 @@ regex = "1.11"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+shellexpand = "3.1.2"
+serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

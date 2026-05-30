@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::Path;
 use super::Tool;
 
 pub struct FsTool;
@@ -51,5 +50,80 @@ impl Tool for FsTool {
             }
             _ => Ok(format!("Unknown fs command: {}", cmd)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = format!("/tmp/openshark_fs_test_{}_{}", std::process::id(), count);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &str) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_fs_read() {
+        let dir = temp_dir();
+        let path = format!("{}/test_read.txt", dir);
+        fs::write(&path, "Hello, World!").unwrap();
+
+        let tool = FsTool;
+        let result = tool.execute(&format!("read {}", path)).unwrap();
+
+        assert_eq!(result, "Hello, World!");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_fs_write() {
+        let dir = temp_dir();
+        let path = format!("{}/test_write.txt", dir);
+
+        let tool = FsTool;
+        let result = tool.execute(&format!("write {} Hello World", path)).unwrap();
+
+        assert_eq!(result, "Written successfully");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "Hello World");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_fs_list() {
+        let dir = temp_dir();
+        fs::write(format!("{}/file1.txt", dir), "").unwrap();
+        fs::write(format!("{}/file2.txt", dir), "").unwrap();
+
+        let tool = FsTool;
+        let result = tool.execute(&format!("list {}", dir)).unwrap();
+
+        assert!(result.contains("file1.txt"));
+        assert!(result.contains("file2.txt"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_fs_unknown_command() {
+        let tool = FsTool;
+        let result = tool.execute("unknown /tmp").unwrap();
+        assert!(result.contains("Unknown fs command"));
+    }
+
+    #[test]
+    fn test_fs_empty_args() {
+        let tool = FsTool;
+        let result = tool.execute("").unwrap();
+        assert!(result.contains("Usage"));
     }
 }
