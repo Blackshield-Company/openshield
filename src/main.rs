@@ -11,6 +11,7 @@ mod providers;
 mod router;
 mod security;
 mod self_improve;
+mod skills;
 mod tools;
 mod tui;
 

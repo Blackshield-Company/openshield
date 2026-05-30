@@ -6,8 +6,9 @@ use tracing::{error, info, warn};
 use crate::config::Config;
 use crate::gateway::channel_state::{ChannelState, ChannelStateStore};
 use crate::gateway::discord::DiscordEvent;
-use crate::memory::{MemoryStore, Message as MemoryMessage};
+use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage};
 use crate::providers::{ChatRequest, Message, Provider};
+use crate::skills::{format_skills_prompt, SkillRegistry};
 use crate::tools::{find_tool, get_tools};
 
 /// Routes incoming Discord messages and slash commands to the OpenShark engine.
@@ -15,17 +16,24 @@ pub struct MessageRouter {
     config: Config,
     memory: MemoryStore,
     channel_states: ChannelStateStore,
+    skill_registry: Option<SkillRegistry>,
 }
 
 impl MessageRouter {
     pub fn new(config: Config) -> Result<Self> {
         let memory = MemoryStore::new(&config.memory_db_path)?;
         let channel_states = ChannelStateStore::new(config.clone());
+        let skills_dir = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("openshark")
+            .join("skills");
+        let skill_registry = SkillRegistry::new(skills_dir).ok();
 
         Ok(Self {
             config,
             memory,
             channel_states,
+            skill_registry,
         })
     }
 
@@ -71,11 +79,109 @@ impl MessageRouter {
         // Get or create channel state
         let mut state = self.channel_states.get_or_create(channel_id);
 
+        // ── Keyword Detection ──────────────────────────────────────────────
+        // Check for natural language memory queries and command keywords
+        let content_lower = content.to_lowercase();
+        let is_memory_query = content_lower.starts_with("what did we do about ")
+            || content_lower.starts_with("how did we solve ")
+            || content_lower.starts_with("tell me about ")
+            || content_lower.starts_with("what was the issue with ")
+            || content_lower.starts_with("remember when we ")
+            || content_lower.starts_with("do you recall ");
+
+        let is_command_keyword = content_lower.starts_with("!model ")
+            || content_lower.starts_with("!tools")
+            || content_lower.starts_with("!status")
+            || content_lower.starts_with("!help")
+            || content_lower.starts_with("!new")
+            || content_lower.starts_with("!reset");
+
+        // Handle command keywords directly
+        if is_command_keyword {
+            self.handle_keyword_command(&content_lower, channel_id, &reply_tx);
+            return Ok(());
+        }
+
+        // Handle natural language memory queries
+        if is_memory_query {
+            let injector = ContextInjector::new(&self.memory);
+            match injector.answer_natural_query(&content) {
+                Ok(answer) => {
+                    let _ = reply_tx.send(answer);
+                }
+                Err(e) => {
+                    let _ = reply_tx.send(format!("❌ Memory query error: {}", e));
+                }
+            }
+            return Ok(());
+        }
+
+        // ── Auto Memory Recall ─────────────────────────────────────────────
+        // Search memory for relevant context and inject into system prompt
+        let session_id = format!("discord-{}", channel_id);
+        let relevant_context = self.fetch_relevant_memory(&session_id, &content);
+
+        // ── Dynamic Skill Injection ────────────────────────────────────────
+        // Check if any skills are triggered by the user's query
+        let triggered_skills = self
+            .skill_registry
+            .as_ref()
+            .map(|r| r.find_triggered(&content))
+            .unwrap_or_default();
+        let skills_prompt = if !triggered_skills.is_empty() {
+            let skill_refs: Vec<_> = triggered_skills.iter().map(|s| *s).collect();
+            format_skills_prompt(&skill_refs)
+        } else {
+            String::new()
+        };
+
+        // Build messages with context injection
+        let mut messages = state.get_messages();
+
+        // If we found relevant memory, inject it as a system context message
+        if !relevant_context.is_empty() {
+            let context_msg = Message {
+                role: "system".to_string(),
+                content: format!(
+                    "[RELEVANT CONTEXT FROM MEMORY]\n{}\n[END CONTEXT]",
+                    relevant_context
+                ),
+            };
+            // Insert after the first system message
+            if messages.len() > 1 {
+                messages.insert(1, context_msg);
+            } else {
+                messages.push(context_msg);
+            }
+        }
+
+        // If skills were triggered, inject them as a system message
+        if !skills_prompt.is_empty() {
+            let skills_msg = Message {
+                role: "system".to_string(),
+                content: skills_prompt,
+            };
+            // Insert after system prompt (and after memory context if present)
+            let insert_pos = if messages.len() > 1 && messages[1].role == "system" {
+                2
+            } else {
+                1
+            };
+            if insert_pos <= messages.len() {
+                messages.insert(insert_pos, skills_msg);
+            } else {
+                messages.push(skills_msg);
+            }
+        }
+
         // Add user message
         state.add_user_message(format!("{}: {}", username, content));
+        messages.push(Message {
+            role: "user".to_string(),
+            content: format!("{}: {}", username, content),
+        });
 
         // Persist to memory
-        let session_id = format!("discord-{}", channel_id);
         let _ = self.memory.save_message(&MemoryMessage {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.clone(),
@@ -86,7 +192,6 @@ impl MessageRouter {
         });
 
         // Stream response
-        let messages = state.get_messages();
         let req = ChatRequest::new(state.model.clone(), messages, true);
         let provider = state.provider.clone();
 
@@ -131,6 +236,147 @@ impl MessageRouter {
         self.channel_states.update(channel_id, state);
 
         Ok(())
+    }
+
+    /// Fetch relevant memory context for a query.
+    fn fetch_relevant_memory(&self, session_id: &str, query: &str) -> String {
+        let injector = ContextInjector::new(&self.memory);
+        
+        // Try semantic search first
+        match self.memory.semantic_search(query, 3) {
+            Ok(results) if !results.is_empty() => {
+                let mut context = String::new();
+                for (msg, score) in results.iter().take(3) {
+                    if *score > 0.3 {
+                        context.push_str(&format!(
+                            "[{}] {}: {}\n",
+                            msg.created_at.format("%Y-%m-%d"),
+                            msg.role,
+                            &msg.content[..msg.content.len().min(150)]
+                        ));
+                    }
+                }
+                context
+            }
+            _ => {
+                // Fallback: keyword search
+                match self.memory.search_messages(query, 3) {
+                    Ok(messages) if !messages.is_empty() => {
+                        messages
+                            .iter()
+                            .map(|msg| {
+                                format!(
+                                    "[{}] {}: {}",
+                                    msg.created_at.format("%Y-%m-%d"),
+                                    msg.role,
+                                    &msg.content[..msg.content.len().min(150)]
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                    _ => String::new(),
+                }
+            }
+        }
+    }
+
+    /// Handle text-based keyword commands (e.g., !model, !tools, !status).
+    fn handle_keyword_command(
+        &self,
+        content: &str,
+        channel_id: u64,
+        reply_tx: &mpsc::UnboundedSender<String>,
+    ) {
+        let parts: Vec<&str> = content.splitn(2, ' ').collect();
+        let cmd = parts[0];
+        let arg = parts.get(1).unwrap_or(&"").trim();
+
+        match cmd {
+            "!model" => {
+                if arg.is_empty() {
+                    let state = self.channel_states.get_or_create(channel_id);
+                    let mut lines = vec![format!("Current model: `{}`\n", state.model)];
+                    for (provider_name, provider) in &self.config.providers {
+                        for m in &provider.models {
+                            let marker = if m.name == state.model { "●" } else { "○" };
+                            lines.push(format!(
+                                "{} `{}` | ctx={} | {}",
+                                marker, m.name, m.context_length, provider_name
+                            ));
+                        }
+                    }
+                    let _ = reply_tx.send(lines.join("\n"));
+                } else {
+                    let mut state = self.channel_states.get_or_create(channel_id);
+                    match state.switch_model(arg, &self.config) {
+                        Ok(()) => {
+                            self.channel_states.update(channel_id, state);
+                            let _ = reply_tx.send(format!("🤖 Model switched to: `{}`", arg));
+                        }
+                        Err(e) => {
+                            let _ = reply_tx.send(format!("❌ {}", e));
+                        }
+                    }
+                }
+            }
+            "!tools" => {
+                let tools = get_tools();
+                let mut lines = vec!["🔧 **Available Tools**\n".to_string()];
+                for tool in tools {
+                    lines.push(format!("• `{}`: {}", tool.name(), tool.description()));
+                }
+                let _ = reply_tx.send(lines.join("\n"));
+            }
+            "!status" => {
+                let state = self.channel_states.get_or_create(channel_id);
+                let mut lines = vec!["🦈 **OpenShark Status**\n".to_string()];
+                lines.push(format!("Model: `{}`", state.model));
+                lines.push(format!(
+                    "History: {} messages",
+                    state.history.len().saturating_sub(1)
+                ));
+                lines.push(format!("Version: {}", self.config.version));
+                let _ = reply_tx.send(lines.join("\n"));
+            }
+            "!help" => {
+                let help = r#"🦈 **OpenShark Keyword Commands**
+
+**Prefix commands:**
+• `!model` — List models
+• `!model <name>` — Switch model
+• `!tools` — List available tools
+• `!status` — Show status
+• `!new` — Start fresh conversation
+• `!reset` — Reset to defaults
+• `!help` — This message
+
+**Natural language queries:**
+• "What did we do about X?"
+• "How did we solve X?"
+• "Tell me about X"
+• "What was the issue with X?"
+• "Remember when we..."
+
+**Slash commands:**
+Use `/help` for the full slash command list.
+"#;
+                let _ = reply_tx.send(help.to_string());
+            }
+            "!new" => {
+                self.channel_states.remove(channel_id);
+                let _ = reply_tx.send("🆕 Fresh conversation started.".to_string());
+            }
+            "!reset" => {
+                let mut state = self.channel_states.get_or_create(channel_id);
+                state.reset(&self.config);
+                self.channel_states.update(channel_id, state);
+                let _ = reply_tx.send("🔄 Reset complete.".to_string());
+            }
+            _ => {
+                let _ = reply_tx.send(format!("❓ Unknown command: `{}`. Try `!help`", cmd));
+            }
+        }
     }
 
     async fn handle_slash_command(
@@ -584,6 +830,14 @@ impl MessageRouter {
 • `/stats` — Usage statistics
 • `/settings` — View/change settings
 • `/help` — This message
+
+**Keyword commands (no slash needed):**
+• `!model`, `!tools`, `!status`, `!help`, `!new`, `!reset`
+
+**Natural language memory:**
+• "What did we do about X?"
+• "How did we solve X?"
+• "Tell me about X"
 "#;
                     let _ = reply_tx.send(help_text.to_string());
                 }
