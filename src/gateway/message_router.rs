@@ -13,7 +13,7 @@ use crate::tools::{find_tool, get_tools};
 
 /// Routes incoming Discord messages and slash commands to the OpenShark engine.
 pub struct MessageRouter {
-    config: Config,
+    pub config: Config,
     memory: MemoryStore,
     channel_states: ChannelStateStore,
     skill_registry: Option<SkillRegistry>,

@@ -30,9 +30,6 @@ serde_json = "1.0"
 eventsource-stream = "0.2"
 futures = "0.3"
 
-# Database
-rusqlite = { version = "0.34", features = ["bundled", "chrono"] }
-
 # Config + Utils
 toml = "0.8"
 serde_yaml = "0.9"
@@ -50,6 +47,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shellexpand = "3.1.2"
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"] }
 async-trait = "0.1"
+teloxide = { version = "0.17", features = ["macros"] }
+slack-morphism = "2.22"
+matrix-sdk = "0.17"
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
