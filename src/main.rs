@@ -6,6 +6,7 @@ mod cache;
 mod config;
 mod gateway;
 mod lsp;
+mod mcp;
 mod memory;
 mod providers;
 mod router;
@@ -67,6 +68,10 @@ enum Commands {
         cmd: String,
         #[arg(default_value = "")]
         arg: String,
+    },
+    Mcp {
+        #[arg(default_value = "status")]
+        cmd: String,
     },
 }
 
@@ -566,6 +571,48 @@ async fn main() -> anyhow::Result<()> {
                     println!("  openshark security status       - Show security configuration");
                     println!("  openshark security audit [n]    - Show audit log (default 10)");
                     println!("  openshark security test [input] - Test security detection");
+                }
+            }
+        }
+        Some(Commands::Mcp { cmd }) => {
+            match cmd.as_str() {
+                "status" => {
+                    println!("🔌 MCP Status");
+                    println!("{}", "─".repeat(60));
+
+                    if !config.gateway.mcp.enabled {
+                        println!("  MCP is disabled in config.");
+                        println!("  Set [gateway.mcp] enabled = true to enable.");
+                    } else if config.gateway.mcp.servers.is_empty() {
+                        println!("  MCP enabled but no servers configured.");
+                        println!("  Add servers under [[gateway.mcp.servers]] in config.");
+                    } else {
+                        println!("  Configured servers: {}", config.gateway.mcp.servers.len());
+                        for server in &config.gateway.mcp.servers {
+                            let transport_type = match &server.transport {
+                                crate::gateway::McpTransport::Stdio { command, .. } => {
+                                    format!("stdio: {}", command)
+                                }
+                                crate::gateway::McpTransport::Sse { url, .. } => {
+                                    format!("sse: {}", url)
+                                }
+                            };
+                            println!("  • {} ({})", server.name, transport_type);
+                        }
+                        println!();
+                        println!("  Run `openshark` (TUI mode) to connect to MCP servers.");
+                    }
+                }
+                "tools" => {
+                    println!("🔌 MCP Tools");
+                    println!("{}", "─".repeat(60));
+                    println!("  MCP tools are discovered dynamically at runtime.");
+                    println!("  Start the TUI to connect to servers and discover tools.");
+                }
+                _ => {
+                    println!("🔌 MCP Commands");
+                    println!("  openshark mcp status - Show MCP configuration");
+                    println!("  openshark mcp tools  - Show tool discovery info");
                 }
             }
         }

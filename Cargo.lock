@@ -1467,6 +1467,7 @@ name = "openshark"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "crossterm 0.29.0",

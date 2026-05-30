@@ -4,6 +4,7 @@ pub mod edit;
 pub mod fs;
 pub mod git;
 pub mod lsp;
+pub mod mcp;
 pub mod refactor;
 pub mod search;
 pub mod terminal;
