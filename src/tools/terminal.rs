@@ -31,3 +31,36 @@ impl Tool for TerminalTool {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_terminal_echo() {
+        let tool = TerminalTool;
+        let result = tool.execute("echo 'Hello World'").unwrap();
+        assert!(result.contains("Hello World"));
+    }
+
+    #[test]
+    fn test_terminal_pwd() {
+        let tool = TerminalTool;
+        let result = tool.execute("pwd").unwrap();
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_terminal_invalid_command() {
+        let tool = TerminalTool;
+        let result = tool.execute("this_command_should_not_exist_12345").unwrap();
+        assert!(result.contains("[stderr]") || result.is_empty());
+    }
+
+    #[test]
+    fn test_terminal_empty_command() {
+        let tool = TerminalTool;
+        let result = tool.execute("").unwrap();
+        assert!(result.is_empty() || result.contains("[stderr]"));
+    }
+}

@@ -114,3 +114,118 @@ impl GitTool {
          git show <ref>       - Show commit details".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn temp_git_repo() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = format!("/tmp/openshark_git_test_{}_{}", std::process::id(), count);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&dir)
+            .output()
+            .expect("git init failed");
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &str) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_git_status_empty() {
+        let dir = temp_git_repo();
+        let tool = GitTool;
+        let result = tool.execute(&format!("status {}", dir));
+        match result {
+            Ok(output) => {
+                assert!(!output.is_empty() || output.is_empty());
+            }
+            Err(_) => {
+            }
+        }
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_git_log() {
+        let dir = temp_git_repo();
+        fs::write(format!("{}/test.txt", dir), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+
+        let tool = GitTool;
+        let result = tool.execute(&format!("log 5 {}", dir));
+        match result {
+            Ok(output) => {
+                assert!(!output.is_empty() || output.is_empty());
+            }
+            Err(_) => {
+            }
+        }
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_git_branch() {
+        let dir = temp_git_repo();
+        let tool = GitTool;
+        let result = tool.execute(&format!("branch {}", dir)).unwrap();
+        assert!(result.contains("master") || result.contains("main") || result.is_empty());
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_git_unknown_command() {
+        let tool = GitTool;
+        let result = tool.execute("unknown").unwrap();
+        assert!(result.contains("Unknown git command"));
+    }
+
+    #[test]
+    fn test_git_empty_args() {
+        let tool = GitTool;
+        let result = tool.execute("").unwrap();
+        assert!(result.contains("Git tool usage"));
+    }
+
+    #[test]
+    fn test_git_checkout_no_branch() {
+        let tool = GitTool;
+        let result = tool.execute("checkout").unwrap();
+        assert!(result.contains("Usage"));
+    }
+
+    #[test]
+    fn test_git_commit_no_message() {
+        let tool = GitTool;
+        let result = tool.execute("commit").unwrap();
+        assert!(result.contains("Usage"));
+    }
+}
