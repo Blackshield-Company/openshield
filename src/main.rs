@@ -115,6 +115,115 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            // Spawn Telegram gateway if enabled
+            if config.gateway.telegram.enabled {
+                info!("Telegram gateway enabled — spawning bot");
+                let telegram_config = config.clone();
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            tracing::error!("Failed to create Telegram runtime: {}", e);
+                            return;
+                        }
+                    };
+                    rt.block_on(async {
+                        let mut event_rx = crate::gateway::telegram::spawn_bot(telegram_config.clone());
+                        let mut router = match crate::gateway::message_router::MessageRouter::new(telegram_config) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::error!("Failed to create message router: {}", e);
+                                return;
+                            }
+                        };
+
+                        while let Some(event) = event_rx.recv().await {
+                            // Convert TelegramEvent to DiscordEvent via unified router
+                            let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
+                                Ok(u) => u,
+                                Err(e) => {
+                                    tracing::error!("Failed to create unified router: {}", e);
+                                    return;
+                                }
+                            };
+                            unified.handle_telegram_event(event).await;
+                        }
+                    });
+                });
+            }
+
+            // Spawn Slack gateway if enabled
+            if config.gateway.slack.enabled {
+                info!("Slack gateway enabled — spawning bot");
+                let slack_config = config.clone();
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            tracing::error!("Failed to create Slack runtime: {}", e);
+                            return;
+                        }
+                    };
+                    rt.block_on(async {
+                        let mut event_rx = crate::gateway::slack::spawn_bot(slack_config.clone());
+                        let mut router = match crate::gateway::message_router::MessageRouter::new(slack_config) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::error!("Failed to create message router: {}", e);
+                                return;
+                            }
+                        };
+
+                        while let Some(event) = event_rx.recv().await {
+                            let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
+                                Ok(u) => u,
+                                Err(e) => {
+                                    tracing::error!("Failed to create unified router: {}", e);
+                                    return;
+                                }
+                            };
+                            unified.handle_slack_event(event).await;
+                        }
+                    });
+                });
+            }
+
+            // Spawn Matrix gateway if enabled
+            if config.gateway.matrix.enabled {
+                info!("Matrix gateway enabled — spawning bot");
+                let matrix_config = config.clone();
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            tracing::error!("Failed to create Matrix runtime: {}", e);
+                            return;
+                        }
+                    };
+                    rt.block_on(async {
+                        let mut event_rx = crate::gateway::matrix::spawn_bot(matrix_config.clone());
+                        let mut router = match crate::gateway::message_router::MessageRouter::new(matrix_config) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::error!("Failed to create message router: {}", e);
+                                return;
+                            }
+                        };
+
+                        while let Some(event) = event_rx.recv().await {
+                            let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
+                                Ok(u) => u,
+                                Err(e) => {
+                                    tracing::error!("Failed to create unified router: {}", e);
+                                    return;
+                                }
+                            };
+                            unified.handle_matrix_event(event).await;
+                        }
+                    });
+                });
+            }
+
             tui::run(config).await?;
         }
         Some(Commands::Setup) => {

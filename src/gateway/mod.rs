@@ -1,7 +1,12 @@
 pub mod channel_state;
 pub mod commands;
 pub mod discord;
+pub mod matrix;
 pub mod message_router;
+pub mod platform;
+pub mod slack;
+pub mod telegram;
+pub mod unified_router;
 
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +17,12 @@ pub struct GatewayConfig {
     pub discord: DiscordConfig,
     #[serde(default)]
     pub telegram: TelegramConfig,
+    #[serde(default)]
+    pub slack: SlackConfig,
+    #[serde(default)]
+    pub whatsapp: WhatsAppConfig,
+    #[serde(default)]
+    pub matrix: MatrixConfig,
     #[serde(default)]
     pub mcp: McpGatewayConfig,
 }
@@ -59,6 +70,63 @@ pub struct TelegramConfig {
     pub enabled: bool,
     #[serde(default)]
     pub bot_token: Option<String>,
+    /// Allowed chat IDs (empty = all).
+    #[serde(default)]
+    pub allowed_chats: Vec<i64>,
+    /// Require commands to start with / (default: false — responds to all messages).
+    #[serde(default)]
+    pub require_command_prefix: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SlackConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Bot token (xoxb-...).
+    #[serde(default)]
+    pub bot_token: Option<String>,
+    /// App-level token for Socket Mode (xapp-...).
+    #[serde(default)]
+    pub app_token: Option<String>,
+    /// Allowed channel IDs (empty = all).
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WhatsAppConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// For official Cloud API: permanent access token.
+    #[serde(default)]
+    pub access_token: Option<String>,
+    /// Phone number ID for the WhatsApp Business account.
+    #[serde(default)]
+    pub phone_number_id: Option<String>,
+    /// For unofficial (ruwa): session file path for QR login persistence.
+    #[serde(default)]
+    pub session_path: Option<String>,
+    /// Use official Cloud API vs unofficial Web protocol.
+    #[serde(default)]
+    pub use_official_api: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MatrixConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Homeserver URL (e.g., https://matrix.org).
+    #[serde(default)]
+    pub homeserver: Option<String>,
+    /// User ID (e.g., @openshark:matrix.org).
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Access token.
+    #[serde(default)]
+    pub access_token: Option<String>,
+    /// Allowed room IDs (empty = all).
+    #[serde(default)]
+    pub allowed_rooms: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
