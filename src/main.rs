@@ -79,6 +79,36 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Commands::Tui) | None => {
             info!("Starting OpenShark TUI");
+
+            // Spawn Discord gateway if enabled
+            if config.gateway.discord.enabled {
+                info!("Discord gateway enabled — spawning bot");
+                let discord_config = config.clone();
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            tracing::error!("Failed to create Discord runtime: {}", e);
+                            return;
+                        }
+                    };
+                    rt.block_on(async {
+                        let mut event_rx = crate::gateway::discord::spawn_bot(discord_config.clone());
+                        let mut router = match crate::gateway::message_router::MessageRouter::new(discord_config) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                tracing::error!("Failed to create message router: {}", e);
+                                return;
+                            }
+                        };
+
+                        while let Some(event) = event_rx.recv().await {
+                            router.handle_event(event).await;
+                        }
+                    });
+                });
+            }
+
             tui::run(config).await?;
         }
         Some(Commands::Setup) => {

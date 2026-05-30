@@ -1,6 +1,7 @@
+pub mod channel_state;
+pub mod commands;
 pub mod discord;
 pub mod message_router;
-pub mod commands;
 
 use serde::{Deserialize, Serialize};
 
