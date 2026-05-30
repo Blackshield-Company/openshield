@@ -103,25 +103,31 @@ impl EventHandler for Handler {
 
         let content = msg.content.clone();
 
-        // Check for mention
+        // Determine if we should respond:
+        // - If require_mention is false: respond to ALL messages (free-form chat mode)
+        // - If require_mention is true: only respond to mentions or prefix commands
         let bot_mentioned = msg.mentions_me(&ctx).await.unwrap_or(false);
-        let has_prefix = content.starts_with(&discord_config.command_prefix);
+        let has_prefix = !discord_config.command_prefix.is_empty()
+            && content.starts_with(&discord_config.command_prefix);
 
-        if discord_config.require_mention && !bot_mentioned && !has_prefix {
+        let should_respond = if discord_config.require_mention {
+            // Legacy mode: need mention or prefix
+            bot_mentioned || has_prefix
+        } else {
+            // Free-form mode: respond to everything (except our own messages, filtered above)
+            true
+        };
+
+        if !should_respond {
             return;
         }
 
-        // Strip prefix if present
+        // Strip prefix if present (for commands like !shark status)
         let clean_content = if has_prefix {
             content[discord_config.command_prefix.len()..].trim().to_string()
         } else {
             content.clone()
         };
-
-        // Also require mention if configured, unless using prefix
-        if discord_config.require_mention && !has_prefix && !bot_mentioned {
-            return;
-        }
 
         // Typing indicator
         if discord_config.typing_indicator {

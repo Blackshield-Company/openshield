@@ -41,6 +41,18 @@ pub async fn register_commands(
         CreateCommand::new("models")
             .description("List all available models with details"),
 
+        // ─── Multi-Model ───
+        CreateCommand::new("multi")
+            .description("Control multi-model comparison mode")
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::String, "action", "Action: on, off, toggle, set")
+                    .required(false),
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::String, "models", "Comma-separated model names for comparison (used with action:set)")
+                    .required(false),
+            ),
+
         // ─── Agent / Task ───
         CreateCommand::new("agent")
             .description("Run an autonomous agent task")

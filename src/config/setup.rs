@@ -234,10 +234,12 @@ pub async fn run() -> Result<()> {
             application_id: if app_id.is_empty() { None } else { Some(app_id) },
             guild_ids: vec![],
             allowed_channels: vec![],
-            require_mention: true,
+            require_mention: false, // Default: free-form chat mode
             command_prefix: "!shark".to_string(),
             max_message_length: 2000,
             typing_indicator: true,
+            multi_model_enabled: false,
+            multi_model_secondary: vec![],
         };
         println!("✅ Discord gateway configured");
     }

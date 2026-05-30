@@ -31,9 +31,11 @@ pub struct DiscordConfig {
     #[serde(default)]
     pub allowed_channels: Vec<u64>,
     /// Require @mention to trigger responses.
-    #[serde(default = "default_true")]
+    /// Default: false — bot responds to all messages in allowed channels.
+    #[serde(default)]
     pub require_mention: bool,
     /// Prefix for text commands (e.g., "!shark").
+    /// Default: "!shark" — set to empty string to disable prefix commands.
     #[serde(default = "default_prefix")]
     pub command_prefix: String,
     /// Max message length before splitting.
@@ -42,6 +44,13 @@ pub struct DiscordConfig {
     /// Enable typing indicator while generating.
     #[serde(default = "default_true")]
     pub typing_indicator: bool,
+    /// Enable multi-model mode (query multiple models, compare responses).
+    /// Default: false — single model responses for lower latency/cost.
+    #[serde(default)]
+    pub multi_model_enabled: bool,
+    /// Secondary models for multi-model mode (when enabled).
+    #[serde(default)]
+    pub multi_model_secondary: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
