@@ -129,6 +129,8 @@ struct App {
     security_engine: crate::security::SecurityEngine,
     /// Autonomous mode — temporarily elevate risk tolerance for full-send coding.
     autonomous_mode: bool,
+    /// MCP manager for external tool servers.
+    mcp_manager: Option<std::sync::Arc<tokio::sync::Mutex<crate::mcp::McpManager>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +250,7 @@ impl App {
             secondary_providers: Vec::new(),
             security_engine,
             autonomous_mode: false,
+            mcp_manager: None,
         })
     }
 
@@ -289,6 +292,40 @@ impl App {
         if let Some(branch) = self.branches.get_mut(self.active_branch) {
             branch.messages = self.messages.clone();
             branch.model_messages = self.model_messages.clone();
+        }
+    }
+
+    /// Initialize MCP connections.
+    async fn init_mcp(&mut self) {
+        let manager = crate::mcp::McpManager::new();
+        let arc_manager = std::sync::Arc::new(tokio::sync::Mutex::new(manager));
+
+        {
+            let mut mgr = arc_manager.lock().await;
+            if let Err(e) = mgr.connect_all(&self.config.gateway.mcp.servers).await {
+                tracing::warn!("MCP connect_all error: {}", e);
+            }
+
+            let status = mgr.status().await;
+            for (name, connected, tool_count) in status {
+                let status_str = if connected { "✅" } else { "❌" };
+                self.add_system_message(format!(
+                    "🔌 MCP server {} {} — {} tools discovered",
+                    name, status_str, tool_count
+                ));
+            }
+        }
+
+        self.mcp_manager = Some(arc_manager);
+    }
+
+    /// Shutdown MCP connections.
+    async fn shutdown_mcp(&mut self) {
+        if let Some(manager) = self.mcp_manager.take() {
+            let mgr = manager.lock().await;
+            if let Err(e) = mgr.disconnect_all().await {
+                tracing::warn!("MCP disconnect error: {}", e);
+            }
         }
     }
 
@@ -588,6 +625,11 @@ pub async fn run(config: Config) -> Result<()> {
 
     let mut app = App::new(config.clone())?;
 
+    // Initialize MCP connections if enabled
+    if config.gateway.mcp.enabled && !config.gateway.mcp.servers.is_empty() {
+        app.init_mcp().await;
+    }
+
     // Inject welcome message using the agent's configured identity
     let welcome = format!(
         "\n{} {}\n{}\n\n{}",
@@ -600,6 +642,9 @@ pub async fn run(config: Config) -> Result<()> {
     let mut last_tick = Instant::now();
 
     let result = run_app(&mut terminal, &mut app, &mut last_tick).await;
+
+    // Cleanup MCP connections
+    app.shutdown_mcp().await;
 
     ratatui::restore();
     result

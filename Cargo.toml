@@ -49,6 +49,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shellexpand = "3.1.2"
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"] }
+async-trait = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
