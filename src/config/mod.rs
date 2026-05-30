@@ -175,7 +175,7 @@ impl Config {
         }
     }
 
-    /// Resolve env vars and env files for provider API keys.
+    /// Resolve env vars and env files for provider API keys and gateway tokens.
     fn resolve_env_keys(&mut self) -> Result<()> {
         for (_name, provider) in self.providers.iter_mut() {
             // If api_key looks like ${VAR}, resolve from env
@@ -220,6 +220,14 @@ impl Config {
                 }
             }
         }
+
+        // Resolve gateway tokens from env vars
+        resolve_gateway_token(&mut self.gateway.discord.bot_token);
+        resolve_gateway_token(&mut self.gateway.telegram.bot_token);
+        resolve_gateway_token(&mut self.gateway.slack.bot_token);
+        resolve_gateway_token(&mut self.gateway.slack.app_token);
+        resolve_gateway_token(&mut self.gateway.matrix.access_token);
+
         Ok(())
     }
 
@@ -490,6 +498,18 @@ impl Default for Config {
 
 fn env_or_placeholder(key: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| format!("${{{}}}", key))
+}
+
+/// Resolve a gateway token from env var if it uses ${VAR} syntax.
+fn resolve_gateway_token(token: &mut Option<String>) {
+    if let Some(t) = token {
+        if t.starts_with("${") && t.ends_with("}") {
+            let var_name = &t[2..t.len() - 1];
+            if let Ok(val) = std::env::var(var_name) {
+                *token = Some(val);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
