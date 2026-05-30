@@ -220,21 +220,22 @@ pub async fn run() -> Result<()> {
     // ── Gateway Configuration ───────────────────────────────────────────────
     println!("🔗 Gateway Configuration");
     println!("────────────────────────");
-    println!("Connect OpenShark to Discord, Telegram, and MCP servers.");
+    println!("Connect OpenShark to Discord, Telegram, Slack, Matrix, and MCP servers.");
     println!();
     
     let mut gateway = GatewayConfig::default();
     
+    // Discord
     if prompt_bool("Enable Discord bot", false)? {
-        let token = prompt("Discord bot token:", None)?;
-        let app_id = prompt("Discord application ID:", None)?;
+        let token = prompt("Discord bot token (or ${DISCORD_BOT_TOKEN} for env):", None)?;
+        let app_id = prompt("Discord application ID (optional):", None)?;
         gateway.discord = DiscordConfig {
             enabled: true,
             bot_token: if token.is_empty() { None } else { Some(token) },
             application_id: if app_id.is_empty() { None } else { Some(app_id) },
             guild_ids: vec![],
             allowed_channels: vec![],
-            require_mention: false, // Default: free-form chat mode
+            require_mention: false,
             command_prefix: "!shark".to_string(),
             max_message_length: 2000,
             typing_indicator: true,
@@ -242,6 +243,49 @@ pub async fn run() -> Result<()> {
             multi_model_secondary: vec![],
         };
         println!("✅ Discord gateway configured");
+    }
+    println!();
+    
+    // Telegram
+    if prompt_bool("Enable Telegram bot", false)? {
+        let token = prompt("Telegram bot token (from @BotFather, or ${TELEGRAM_BOT_TOKEN} for env):", None)?;
+        gateway.telegram.enabled = true;
+        gateway.telegram.bot_token = if token.is_empty() { None } else { Some(token) };
+        println!("✅ Telegram gateway configured");
+    }
+    println!();
+    
+    // Slack
+    if prompt_bool("Enable Slack bot", false)? {
+        let bot_token = prompt("Slack bot token (xoxb-..., or ${SLACK_BOT_TOKEN} for env):", None)?;
+        let app_token = prompt("Slack app token (xapp-..., or ${SLACK_APP_TOKEN} for env):", None)?;
+        gateway.slack.enabled = true;
+        gateway.slack.bot_token = if bot_token.is_empty() { None } else { Some(bot_token) };
+        gateway.slack.app_token = if app_token.is_empty() { None } else { Some(app_token) };
+        println!("✅ Slack gateway configured (Socket Mode)");
+    }
+    println!();
+    
+    // Matrix
+    if prompt_bool("Enable Matrix bot", false)? {
+        let homeserver = prompt("Matrix homeserver URL (e.g., https://matrix.org):", None)?;
+        let user_id = prompt("Matrix user ID (e.g., @openshark:matrix.org):", None)?;
+        let access_token = prompt("Matrix access token (or ${MATRIX_ACCESS_TOKEN} for env):", None)?;
+        gateway.matrix.enabled = true;
+        gateway.matrix.homeserver = if homeserver.is_empty() { None } else { Some(homeserver) };
+        gateway.matrix.user_id = if user_id.is_empty() { None } else { Some(user_id) };
+        gateway.matrix.access_token = if access_token.is_empty() { None } else { Some(access_token) };
+        println!("✅ Matrix gateway configured");
+    }
+    println!();
+    
+    // MCP
+    if prompt_bool("Enable MCP (Model Context Protocol) servers", false)? {
+        gateway.mcp.enabled = true;
+        println!("✅ MCP enabled — add servers manually to config.toml");
+        println!("   Example: [[gateway.mcp.servers]]");
+        println!("   name = \"filesystem\"");
+        println!("   transport = {{ stdio = {{ command = \"npx\", args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/home\"] }} }}");
     }
     println!();
     
