@@ -1680,6 +1680,7 @@ async fn stream_model_response_task(
                                 result: e.to_string(),
                                 success: false,
                             });
+                            let _ = tx.send(StreamEvent::Done);
                         }
                     }
                 }
@@ -1751,6 +1752,7 @@ async fn stream_model_response_task(
                                         result: e.to_string(),
                                         success: false,
                                     });
+                                    let _ = tx.send(StreamEvent::Done);
                                 }
                             }
                         }
@@ -1759,12 +1761,14 @@ async fn stream_model_response_task(
                                 "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
                                 suggestion.tool_name, reason, risk_level
                             )));
+                            let _ = tx.send(StreamEvent::Done);
                         }
                         crate::security::SecurityDecision::Deny { reason } => {
                             let _ = tx.send(StreamEvent::Error(format!(
                                 "🚫 Security: Tool '{}' blocked\n  Reason: {}",
                                 suggestion.tool_name, reason
                             )));
+                            let _ = tx.send(StreamEvent::Done);
                         }
                     }
                 }
