@@ -1348,26 +1348,32 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 if prompt.is_empty() {
                     app.add_system_message("Usage: /swarm init <seed prompt>".to_string());
                     app.add_system_message("Example: /swarm init Build a REST API with auth".to_string());
-                } else if !app.config.swarm.enabled {
-                    app.add_system_message("🐝 Swarm mode is disabled in config.".to_string());
-                    app.add_system_message("Set [swarm] enabled = true in ~/.config/openshark/config.toml".to_string());
                 } else {
-                    let engine = crate::swarm::SwarmEngine::new(app.config.swarm.clone());
-                    match engine.init(&prompt, &app.config).await {
-                        Ok(()) => {
-                            let agents = engine.agent_snapshot().await;
-                            app.swarm_agents = agents.clone();
-                            app.swarm_running = false;
-                            app.add_system_message(format!("🐝 Swarm initialized with {} agents", agents.len()));
-                            for agent in agents {
-                                app.add_system_message(format!("  🐝 {} ({}) — {}", agent.name, agent.role.name, agent.status));
+                    // Reload config from disk to pick up any edits
+                    let fresh_config = crate::config::Config::load_or_default().unwrap_or_else(|_| app.config.clone());
+                    if !fresh_config.swarm.enabled {
+                        app.add_system_message("🐝 Swarm mode is disabled in config.".to_string());
+                        app.add_system_message("Set [swarm] enabled = true in ~/.config/openshark/config.toml".to_string());
+                    } else {
+                        // Update cached config
+                        app.config = fresh_config.clone();
+                        let engine = crate::swarm::SwarmEngine::new(app.config.swarm.clone());
+                        match engine.init(&prompt, &app.config).await {
+                            Ok(()) => {
+                                let agents = engine.agent_snapshot().await;
+                                app.swarm_agents = agents.clone();
+                                app.swarm_running = false;
+                                app.add_system_message(format!("🐝 Swarm initialized with {} agents", agents.len()));
+                                for agent in agents {
+                                    app.add_system_message(format!("  🐝 {} ({}) — {}", agent.name, agent.role.name, agent.status));
+                                }
+                                app.add_system_message("Run /swarm start to begin the autonomous loop.".to_string());
+                                app.swarm = Some(engine);
+                                app.swarm_active = true;
+                                app.sidebar_tab = 2;
                             }
-                            app.add_system_message("Run /swarm start to begin the autonomous loop.".to_string());
-                            app.swarm = Some(engine);
-                            app.swarm_active = true;
-                            app.sidebar_tab = 2;
+                            Err(e) => app.add_system_message(format!("❌ Swarm init failed: {}", e)),
                         }
-                        Err(e) => app.add_system_message(format!("❌ Swarm init failed: {}", e)),
                     }
                 }
             }
