@@ -145,6 +145,7 @@ impl MessageRouter {
                     "[RELEVANT CONTEXT FROM MEMORY]\n{}\n[END CONTEXT]",
                     relevant_context
                 ),
+                images: None,
             };
             // Insert after the first system message
             if messages.len() > 1 {
@@ -159,6 +160,7 @@ impl MessageRouter {
             let skills_msg = Message {
                 role: "system".to_string(),
                 content: skills_prompt,
+                images: None,
             };
             // Insert after system prompt (and after memory context if present)
             let insert_pos = if messages.len() > 1 && messages[1].role == "system" {
@@ -178,6 +180,7 @@ impl MessageRouter {
         messages.push(Message {
             role: "user".to_string(),
             content: format!("{}: {}", username, content),
+            images: None,
         });
 
         // Persist to memory

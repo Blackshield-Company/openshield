@@ -22,6 +22,7 @@ impl AgentContext {
             messages: vec![Message {
                 role: "system".to_string(),
                 content: system_prompt.to_string(),
+                images: None,
             }],
             task_history: Vec::new(),
             tool_calls_count: 0,
@@ -32,6 +33,7 @@ impl AgentContext {
         self.messages.push(Message {
             role: "user".to_string(),
             content: content.to_string(),
+            images: None,
         });
     }
 
@@ -39,6 +41,7 @@ impl AgentContext {
         self.messages.push(Message {
             role: "assistant".to_string(),
             content: content.to_string(),
+            images: None,
         });
     }
 
@@ -46,6 +49,7 @@ impl AgentContext {
         self.messages.push(Message {
             role: "user".to_string(),
             content: format!("TOOL_RESULT:{}\n{}", tool_name, result),
+            images: None,
         });
     }
 

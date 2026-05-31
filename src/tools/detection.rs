@@ -45,9 +45,9 @@ pub fn parse_tool_invocation(text: &str) -> Option<ToolSuggestion> {
 }
 
 fn detect_explicit_tool(text: &str, out: &mut Vec<ToolSuggestion>) {
-    // Pattern: TOOL:tool_name args...
+    // Pattern: TOOL:tool_name args...  OR  TOOL: tool_name args... (with space after colon)
     // Must be at the start of a line or after whitespace.
-    let re = match Regex::new(r"(?m)^\s*TOOL:(\S+)(?:\s+(.*))?$") {
+    let re = match Regex::new(r"(?m)^\s*TOOL:\s*(\S+)(?:\s+(.*))?$") {
         Ok(r) => r,
         Err(_) => return,
     };
@@ -185,6 +185,17 @@ mod tests {
     }
 
     #[test]
+    fn test_explicit_tool_with_space_after_colon() {
+        // Model sometimes outputs "TOOL: fs cat" instead of "TOOL:fs cat"
+        let text = "TOOL: fs cat /home/synth/projects/README.md";
+        let suggestions = detect_tool_suggestions(text);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].tool_name, "fs");
+        assert_eq!(suggestions[0].args, "cat /home/synth/projects/README.md");
+        assert!((suggestions[0].confidence - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_explicit_tool_no_args() {
         let text = "TOOL:git";
         let suggestions = detect_tool_suggestions(text);
@@ -201,6 +212,17 @@ mod tests {
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].tool_name, "edit");
         assert_eq!(suggestions[0].args, "src/main.rs");
+    }
+
+    #[test]
+    fn test_multiple_embedded_tools() {
+        let text = "I see the grid already has some vectors running.\nTOOL: fs cat /home/synth/projects/README.md\nTOOL: fs tree /home/synth/projects/0x7-web 2\nLet me analyze...";
+        let suggestions = detect_tool_suggestions(text);
+        assert_eq!(suggestions.len(), 2);
+        assert_eq!(suggestions[0].tool_name, "fs");
+        assert_eq!(suggestions[0].args, "cat /home/synth/projects/README.md");
+        assert_eq!(suggestions[1].tool_name, "fs");
+        assert_eq!(suggestions[1].args, "tree /home/synth/projects/0x7-web 2");
     }
 
     #[test]

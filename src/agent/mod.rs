@@ -263,10 +263,12 @@ impl Agent {
                 Message {
                     role: "system".to_string(),
                     content: system_prompt,
+                    images: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: format!("Create a plan for this task: {}", task),
+                    images: None,
                 },
             ],
             false,
@@ -418,10 +420,12 @@ impl Agent {
                 Message {
                     role: "system".to_string(),
                     content: system_prompt,
+                    images: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: "Create a recovery plan.".to_string(),
+                    images: None,
                 },
             ],
             false,
