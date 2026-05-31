@@ -14,6 +14,7 @@ use super::Tool;
 /// An adapter that wraps an MCP tool as an OpenShark Tool.
 pub struct McpToolAdapter {
     tool: McpTool,
+    #[allow(dead_code)]
     server_name: String,
     manager: std::sync::Arc<tokio::sync::Mutex<McpManager>>,
 }
@@ -32,6 +33,7 @@ impl McpToolAdapter {
     }
 
     /// Build a description that includes the server name.
+    #[allow(dead_code)]
     fn full_description(&self) -> String {
         let base = self.tool.description.as_deref().unwrap_or("MCP tool");
         format!("{} [via MCP server: {}]", base, self.server_name)
@@ -125,6 +127,7 @@ fn format_call_result(result: &CallToolResult) -> String {
 }
 
 /// Build OpenShark ToolDefinition schemas from MCP tools for LLM tool calling.
+#[allow(dead_code)]
 pub fn mcp_tool_to_definition(tool: &McpTool) -> super::ToolDefinition {
     super::ToolDefinition {
         name: tool.name.clone(),

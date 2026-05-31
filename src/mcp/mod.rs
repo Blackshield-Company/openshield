@@ -12,10 +12,10 @@ use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use crate::gateway::{McpServerConfig, McpTransport};
+use crate::gateway::McpServerConfig;
 
 use protocol::*;
-use transport::{parse_transport_message, StdioTransport, SseTransport, Transport, TransportMessage};
+use transport::{parse_transport_message, StdioTransport, SseTransport, TransportMessage};
 
 /// An active MCP server connection.
 pub struct McpConnection {
@@ -253,6 +253,7 @@ impl McpManager {
     }
 
     /// Check if a tool exists across all servers.
+    #[allow(dead_code)]
     pub async fn has_tool(&self, tool_name: &str) -> bool {
         let connections = self.connections.read().await;
         for conn in connections.values() {

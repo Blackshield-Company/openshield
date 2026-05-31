@@ -6,15 +6,14 @@
 //! duplicating that for each platform, we normalize all events to the same shape.
 
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::gateway::discord::DiscordEvent;
 use crate::gateway::message_router::MessageRouter;
-use crate::gateway::platform::PlatformEvent;
-use crate::gateway::telegram::TelegramEvent;
-use crate::gateway::slack::SlackEvent;
-use crate::gateway::matrix::MatrixEvent;
+use crate::gateway::telegram::TelegramReplySender;
+use crate::gateway::slack::SlackReplySender;
+use crate::gateway::matrix::MatrixReplySender;
 
 /// Unified event router that handles all platforms.
 pub struct UnifiedRouter {
@@ -28,22 +27,27 @@ impl UnifiedRouter {
     }
 
     /// Handle a Discord event directly.
+    #[allow(dead_code)]
     pub async fn handle_discord_event(&mut self, event: DiscordEvent) {
         self.inner.handle_event(event).await;
     }
 
     /// Handle a Telegram event by converting to DiscordEvent format.
-    pub async fn handle_telegram_event(&mut self, event: TelegramEvent) {
+    pub async fn handle_telegram_event(
+        &mut self,
+        event: crate::gateway::telegram::TelegramEvent,
+        reply_sender: &TelegramReplySender,
+    ) {
         match event {
-            TelegramEvent::UserMessage { chat_id, user_id, username, content } => {
-                let (reply_tx, mut reply_rx) = mpsc::unbounded_channel();
+            crate::gateway::telegram::TelegramEvent::UserMessage { chat_id, user_id, username, content } => {
+                let (reply_tx, mut reply_rx): (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) =
+                    mpsc::unbounded_channel();
 
                 // Spawn a task to send replies back to Telegram
+                let sender = reply_sender.clone();
                 tokio::spawn(async move {
-                    // In a real implementation, this would send messages back via the Telegram bot
-                    // For now, we just log the replies
                     while let Some(reply) = reply_rx.recv().await {
-                        info!("Telegram reply to chat {}: {}", chat_id, reply);
+                        sender.send_message(chat_id, &reply).await;
                     }
                 });
 
@@ -56,60 +60,71 @@ impl UnifiedRouter {
                 };
                 self.inner.handle_event(discord_event).await;
             }
-            TelegramEvent::Ready => {
+            crate::gateway::telegram::TelegramEvent::Ready => {
                 info!("Telegram gateway ready");
             }
-            TelegramEvent::Disconnected => {
+            crate::gateway::telegram::TelegramEvent::Disconnected => {
                 warn!("Telegram gateway disconnected");
             }
         }
     }
 
     /// Handle a Slack event by converting to DiscordEvent format.
-    pub async fn handle_slack_event(&mut self, event: SlackEvent) {
+    pub async fn handle_slack_event(
+        &mut self,
+        event: crate::gateway::slack::SlackEvent,
+        reply_sender: &SlackReplySender,
+    ) {
         match event {
-            SlackEvent::UserMessage { channel_id, user_id, username, content } => {
+            crate::gateway::slack::SlackEvent::UserMessage { channel_id, user_id, username, content } => {
                 let channel_id_clone = channel_id.clone();
-                let (reply_tx, mut reply_rx) = mpsc::unbounded_channel();
+                let (reply_tx, mut reply_rx): (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) =
+                    mpsc::unbounded_channel();
 
+                let sender = reply_sender.clone();
                 tokio::spawn(async move {
                     while let Some(reply) = reply_rx.recv().await {
-                        info!("Slack reply to channel {}: {}", channel_id_clone, reply);
+                        sender.send_message(&channel_id_clone, &reply).await;
                     }
                 });
 
                 let discord_event = DiscordEvent::UserMessage {
-                    channel_id: channel_id.parse().unwrap_or(0),
-                    user_id: user_id.parse().unwrap_or(0),
+                    channel_id: hash_string_to_u64(&channel_id),
+                    user_id: hash_string_to_u64(&user_id),
                     username,
                     content,
                     reply_tx,
                 };
                 self.inner.handle_event(discord_event).await;
             }
-            SlackEvent::Ready => {
+            crate::gateway::slack::SlackEvent::Ready => {
                 info!("Slack gateway ready");
             }
-            SlackEvent::Disconnected => {
+            crate::gateway::slack::SlackEvent::Disconnected => {
                 warn!("Slack gateway disconnected");
             }
         }
     }
 
     /// Handle a Matrix event by converting to DiscordEvent format.
-    pub async fn handle_matrix_event(&mut self, event: MatrixEvent) {
+    pub async fn handle_matrix_event(
+        &mut self,
+        event: crate::gateway::matrix::MatrixEvent,
+        reply_sender: &MatrixReplySender,
+    ) {
         match event {
-            MatrixEvent::UserMessage { room_id, user_id, username, content } => {
+            crate::gateway::matrix::MatrixEvent::UserMessage { room_id, user_id, username, content } => {
                 let room_id_clone = room_id.clone();
-                let (reply_tx, mut reply_rx) = mpsc::unbounded_channel();
+                let (reply_tx, mut reply_rx): (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) =
+                    mpsc::unbounded_channel();
 
+                let sender = reply_sender.clone();
                 tokio::spawn(async move {
                     while let Some(reply) = reply_rx.recv().await {
-                        info!("Matrix reply to room {}: {}", room_id_clone, reply);
+                        sender.send_message(&room_id_clone, &reply).await;
                     }
                 });
 
-                // Use a hash of the room_id as the channel_id since Matrix room IDs are strings
                 let channel_id = hash_string_to_u64(&room_id);
                 let discord_event = DiscordEvent::UserMessage {
                     channel_id,
@@ -120,10 +135,10 @@ impl UnifiedRouter {
                 };
                 self.inner.handle_event(discord_event).await;
             }
-            MatrixEvent::Ready => {
+            crate::gateway::matrix::MatrixEvent::Ready => {
                 info!("Matrix gateway ready");
             }
-            MatrixEvent::Disconnected => {
+            crate::gateway::matrix::MatrixEvent::Disconnected => {
                 warn!("Matrix gateway disconnected");
             }
         }

@@ -1,9 +1,13 @@
 use clap::{Parser, Subcommand};
 use tracing::info;
 
+/// The current version of OpenShark.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 mod agent;
 mod cache;
 mod config;
+mod evolution;
 mod gateway;
 mod lsp;
 mod mcp;
@@ -22,7 +26,7 @@ use crate::tools::Tool;
 #[derive(Parser)]
 #[command(name = "openshark")]
 #[command(about = "🦈 The harness that learns. The agent that decides.")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -128,8 +132,8 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let mut event_rx = crate::gateway::telegram::spawn_bot(telegram_config.clone());
-                        let mut router = match crate::gateway::message_router::MessageRouter::new(telegram_config) {
+                        let (mut event_rx, reply_sender) = crate::gateway::telegram::spawn_bot(telegram_config.clone());
+                        let router = match crate::gateway::message_router::MessageRouter::new(telegram_config) {
                             Ok(r) => r,
                             Err(e) => {
                                 tracing::error!("Failed to create message router: {}", e);
@@ -138,7 +142,6 @@ async fn main() -> anyhow::Result<()> {
                         };
 
                         while let Some(event) = event_rx.recv().await {
-                            // Convert TelegramEvent to DiscordEvent via unified router
                             let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
                                 Ok(u) => u,
                                 Err(e) => {
@@ -146,7 +149,7 @@ async fn main() -> anyhow::Result<()> {
                                     return;
                                 }
                             };
-                            unified.handle_telegram_event(event).await;
+                            unified.handle_telegram_event(event, &reply_sender).await;
                         }
                     });
                 });
@@ -165,8 +168,8 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let mut event_rx = crate::gateway::slack::spawn_bot(slack_config.clone());
-                        let mut router = match crate::gateway::message_router::MessageRouter::new(slack_config) {
+                        let (mut event_rx, reply_sender) = crate::gateway::slack::spawn_bot(slack_config.clone());
+                        let router = match crate::gateway::message_router::MessageRouter::new(slack_config) {
                             Ok(r) => r,
                             Err(e) => {
                                 tracing::error!("Failed to create message router: {}", e);
@@ -182,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
                                     return;
                                 }
                             };
-                            unified.handle_slack_event(event).await;
+                            unified.handle_slack_event(event, &reply_sender).await;
                         }
                     });
                 });
@@ -201,8 +204,8 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let mut event_rx = crate::gateway::matrix::spawn_bot(matrix_config.clone());
-                        let mut router = match crate::gateway::message_router::MessageRouter::new(matrix_config) {
+                        let (mut event_rx, reply_sender) = crate::gateway::matrix::spawn_bot(matrix_config.clone());
+                        let router = match crate::gateway::message_router::MessageRouter::new(matrix_config) {
                             Ok(r) => r,
                             Err(e) => {
                                 tracing::error!("Failed to create message router: {}", e);
@@ -218,7 +221,7 @@ async fn main() -> anyhow::Result<()> {
                                     return;
                                 }
                             };
-                            unified.handle_matrix_event(event).await;
+                            unified.handle_matrix_event(event, &reply_sender).await;
                         }
                     });
                 });

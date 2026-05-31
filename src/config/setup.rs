@@ -46,30 +46,33 @@ pub async fn run() -> Result<()> {
     
     // ── Agent Identity ──────────────────────────────────────────────────────
     println!();
-    println!("🎭 Agent Identity");
-    println!("─────────────────");
-    println!("Configure your personal AI agent's name and personality.");
+    println!("🎭 Agent Identity (Your AI Assistant)");
+    println!("──────────────────────────────────────");
+    println!("This is the AI that will help you code. Give it a name and personality.");
     println!();
     
     let agent_name = prompt("Agent name (lowercase, no spaces):", Some("synthshark"))?;
     let display_name = prompt("Display name:", Some(&capitalize_first(&agent_name)))?;
-    let emoji = prompt("Emoji:", Some("🎹🦈"))?;
-    let role = prompt("Role:", Some("synthesis engine"))?;
-    let tagline = prompt("Tagline:", Some("Write the future in the present while preserving the past."))?;
-    let greeting = prompt("Greeting:", Some("Ready to build. What are we shipping today?"))?;
+    println!();
+    println!("ℹ️  Use Unicode emoji (e.g. 🎹🦈) not Discord codes (:emoji:)");
+    let emoji = prompt("Emoji:", Some(""))?;
+    let tagline = prompt("Tagline:", Some(""))?;
+    let greeting = prompt("Greeting:", Some("The grid is endless. What are we building?"))?;
     
     // ── User Identity ───────────────────────────────────────────────────────
     println!();
-    println!("👤 Your Identity");
-    println!("────────────────");
-    let user_name = prompt("Your name/username:", Some("user"))?;
+    println!("👤 Your Identity (The Human)");
+    println!("─────────────────────────────");
+    println!("This is YOU — the person using the agent. The agent will know you by this name.");
+    println!();
+    let user_name = prompt("Your name/username:", Some("synth"))?;
     config.user_name = user_name;
     println!();
     
     config.agent = AgentIdentity {
         name: agent_name.clone(),
         display_name: display_name.clone(),
-        role,
+        role: prompt("Role:", Some("synthesis engine"))?,
         origin: prompt("Origin story:", Some("Born from the VHS tracking static of 1984"))?,
         purpose: prompt("Purpose:", Some("To build, debug, and ship code with surgical accuracy"))?,
         tagline: tagline.clone(),
@@ -315,6 +318,44 @@ pub async fn run() -> Result<()> {
     }
     println!();
     
+    // ── Filesystem Access ─────────────────────────────────────────────────────
+    println!();
+    println!("📁 Filesystem Access");
+    println!("─────────────────────");
+    println!("Configure which directories OpenShark can access.");
+    println!("This lets the AI inspect configs, browse projects, and debug issues.");
+    println!();
+
+    let home_dir = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "/home".to_string());
+    let fs_default = format!("{}", home_dir);
+    let fs_paths = prompt(
+        "Allowed directories (comma-separated, or 'all' for no restriction):",
+        Some(&fs_default),
+    )?;
+
+    let allowed_paths: Vec<String> = if fs_paths.to_lowercase() == "all" {
+        vec![]
+    } else {
+        fs_paths
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    config.filesystem.allowed_paths = allowed_paths.clone();
+    if allowed_paths.is_empty() {
+        println!("✅ Filesystem access: FULL (no restrictions)");
+    } else {
+        println!("✅ Filesystem access restricted to:");
+        for path in &allowed_paths {
+            println!("   - {}", path);
+        }
+    }
+    println!();
+
     config.save()?;
     
     println!("✅ Config saved to ~/.config/openshark/config.toml");

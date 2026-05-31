@@ -424,6 +424,19 @@ impl MemoryStore {
         Ok(results)
     }
 
+    /// Get a single analysis result by category and key.
+    pub fn get_analysis_result(&self, category: &str, key: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT value FROM analysis_results WHERE category = ?1 AND key = ?2 ORDER BY created_at DESC LIMIT 1"
+        )?;
+        let result = stmt.query_map(params![category, key], |row| {
+            Ok(row.get::<_, String>(0)?)
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to get analysis result")?;
+        Ok(result.into_iter().next())
+    }
+
     #[allow(dead_code)]
     pub fn get_all_tool_calls_with_sessions(&self, limit: usize) -> Result<Vec<(ToolCall, Session)>> {
         let mut stmt = self.conn.prepare(

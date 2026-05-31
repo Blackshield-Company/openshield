@@ -9,11 +9,14 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Manages working directory isolation for tool execution.
+#[derive(Clone)]
 pub struct Sandbox {
     /// The enforced working directory. None = no restriction.
     working_dir: Option<PathBuf>,
     /// Whether to allow commands to escape the working directory.
     allow_escape: bool,
+    /// User-configured allowed paths. Empty = no restriction.
+    allowed_paths: Vec<PathBuf>,
 }
 
 impl Sandbox {
@@ -34,6 +37,7 @@ impl Sandbox {
         Ok(Self {
             working_dir: wd,
             allow_escape: false,
+            allowed_paths: Vec::new(),
         })
     }
 
@@ -42,6 +46,18 @@ impl Sandbox {
         let mut sandbox = Self::new(working_dir)?;
         sandbox.allow_escape = allow_escape;
         Ok(sandbox)
+    }
+
+    /// Set user-configured allowed paths (from FilesystemConfig).
+    pub fn set_allowed_paths(&mut self, paths: Vec<String>) {
+        self.allowed_paths = paths
+            .into_iter()
+            .map(|p| {
+                let expanded = shellexpand::tilde(&p).to_string();
+                PathBuf::from(expanded)
+            })
+            .collect();
+        info!("Sandbox allowed paths updated: {:?}", self.allowed_paths);
     }
 
     /// Get the current working directory restriction.
@@ -56,11 +72,44 @@ impl Sandbox {
         self.allow_escape
     }
 
+    /// Check if a path is within any of the allowed paths.
+    fn is_in_allowed_paths(&self, path: &Path) -> bool {
+        if self.allowed_paths.is_empty() {
+            return true; // No restriction
+        }
+
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        for allowed in &self.allowed_paths {
+            let allowed_canonical = allowed.canonicalize().unwrap_or_else(|_| allowed.clone());
+            if canonical.starts_with(&allowed_canonical) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Validate that a tool's arguments stay within the sandbox.
     pub fn validate_path(&self, tool_name: &str, args: &str) -> Result<(), String> {
         // Tools that don't access filesystem are always allowed
         let fs_tools = ["fs", "terminal", "edit", "search", "git"];
         if !fs_tools.contains(&tool_name) {
+            return Ok(());
+        }
+
+        // If allowed_paths is set, use that instead of working_dir
+        if !self.allowed_paths.is_empty() {
+            let paths = extract_paths_from_args(args);
+            for path_str in paths {
+                let path = PathBuf::from(&path_str);
+                if !self.is_in_allowed_paths(&path) {
+                    return Err(format!(
+                        "Path '{}' is outside the allowed directories. \
+                         Allowed: {:?}",
+                        path_str,
+                        self.allowed_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
+                    ));
+                }
+            }
             return Ok(());
         }
 
@@ -185,6 +234,30 @@ mod tests {
         // Outside sandbox should succeed when escape is allowed
         let result = sandbox.validate_path("fs", "read /etc/passwd");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sandbox_allowed_paths() {
+        let mut sandbox = Sandbox::new(None).unwrap();
+        sandbox.set_allowed_paths(vec!["/tmp".to_string()]);
+
+        // Within allowed path should succeed
+        assert!(sandbox.validate_path("fs", "read /tmp/test.txt").is_ok());
+
+        // Outside allowed path should fail
+        let result = sandbox.validate_path("fs", "read /etc/passwd");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sandbox_allowed_paths_home() {
+        let mut sandbox = Sandbox::new(None).unwrap();
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+        sandbox.set_allowed_paths(vec![home.to_string_lossy().to_string()]);
+
+        // Home path should succeed
+        let test_path = home.join(".config/test");
+        assert!(sandbox.validate_path("fs", &format!("read {}", test_path.display())).is_ok());
     }
 
     #[test]

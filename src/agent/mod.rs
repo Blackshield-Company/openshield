@@ -30,7 +30,7 @@ impl Default for AgentConfig {
         Self {
             max_iterations: MAX_ITERATIONS,
             require_approval: true,
-            default_model: "kimi-for-coding".to_string(),
+            default_model: "kimi-k2.6".to_string(),
         }
     }
 }
@@ -460,7 +460,7 @@ impl Agent {
     /// Infer a minimal Config for router calls.
     fn infer_config(&self) -> Config {
         Config {
-            version: "0.1.0".to_string(),
+            version: crate::VERSION.to_string(),
             default_model: self.config.default_model.clone(),
             providers: std::collections::HashMap::new(),
             memory_db_path: std::path::PathBuf::from("/tmp/openshark_agent_memory.db"),
@@ -471,6 +471,7 @@ impl Agent {
             gateway: crate::gateway::GatewayConfig::default(),
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
+            filesystem: crate::config::FilesystemConfig::default(),
         }
     }
 }

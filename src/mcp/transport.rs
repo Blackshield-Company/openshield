@@ -16,6 +16,7 @@ use super::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 
 /// A message received from the transport.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum TransportMessage {
     Response(JsonRpcResponse),
     Notification(JsonRpcNotification),
@@ -43,6 +44,7 @@ impl McpTransport {
         }
     }
 
+    #[allow(dead_code)]
     pub fn start_message_stream(&mut self, tx: mpsc::Sender<TransportMessage>) -> Result<()> {
         match self {
             McpTransport::Stdio(t) => t.start_message_stream(tx),
@@ -100,6 +102,7 @@ impl StdioTransport {
 pub trait Transport: Send + Sync {
     async fn send_request(&mut self, request: &JsonRpcRequest) -> Result<String>;
     async fn send_notification(&mut self, notification: &JsonRpcRequest) -> Result<()>;
+    #[allow(dead_code)]
     fn start_message_stream(&mut self, tx: mpsc::Sender<TransportMessage>) -> Result<()>;
     async fn close(&mut self) -> Result<()>;
 }

@@ -6,6 +6,7 @@
 use regex::Regex;
 
 /// Guardrails for prompt/output validation.
+#[derive(Clone)]
 pub struct Guardrails {
     injection_patterns: Vec<Regex>,
     enabled: bool,

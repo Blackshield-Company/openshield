@@ -41,6 +41,9 @@ pub struct SecurityConfig {
     pub tool_permissions: HashMap<String, PermissionLevel>,
     /// Sensitive paths that require approval to access.
     pub sensitive_paths: Vec<String>,
+    /// User-configured allowed paths (from FilesystemConfig). Empty = no restriction.
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
     /// Patterns for sensitive data detection.
     pub sensitive_patterns: Vec<String>,
     /// Maximum output size to send to model (bytes).
@@ -142,6 +145,7 @@ impl Default for SecurityConfig {
                 "~/.config/openshark".to_string(),
                 "~/.hermes".to_string(),
             ],
+            allowed_paths: vec![],
             sensitive_patterns: vec![
                 r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b".to_string(),
                 r"\b(?:\d{4}-?){3}\d{4}\b".to_string(),
@@ -153,9 +157,9 @@ impl Default for SecurityConfig {
             max_model_output_bytes: 32768,
             pii_redaction_enabled: true,
             prompt_injection_detection_enabled: true,
-            // CODING MODE: Auto-approve up to Medium risk (git push, package install, etc.)
-            // Only High (curl/wget/ssh) and Critical (rm -rf, mkfs) require approval
-            auto_approve_risk_level: RiskLevel::Medium,
+            // FULL-SEND MODE: Auto-approve up to High risk (mkdir, curl, redirects, ssh)
+            // Only Critical (rm -rf, mkfs, fdisk, format) requires approval
+            auto_approve_risk_level: RiskLevel::High,
             identity: IdentityConfig {
                 zero_trust_enabled: true,
                 credential_ttl_secs: 3600,
@@ -191,17 +195,31 @@ impl SecurityConfig {
             .join("openshark");
         let path = config_dir.join("security.toml");
 
-        if path.exists() {
+        let mut config = if path.exists() {
             let content = std::fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read {}", path.display()))?;
             let config: SecurityConfig = toml::from_str(&content)
                 .context("Failed to parse security.toml")?;
-            Ok(config)
+            config
         } else {
             let config = SecurityConfig::default();
             config.save()?;
-            Ok(config)
+            config
+        };
+
+        // Sync allowed_paths from main config.toml
+        let main_config_path = config_dir.join("config.toml");
+        if main_config_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&main_config_path) {
+                if let Ok(main_config) = toml::from_str::<crate::config::Config>(&content) {
+                    if !main_config.filesystem.allowed_paths.is_empty() {
+                        config.allowed_paths = main_config.filesystem.allowed_paths.clone();
+                    }
+                }
+            }
         }
+
+        Ok(config)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -232,6 +250,7 @@ impl SecurityConfig {
 }
 
 /// The central security engine that coordinates all security layers.
+#[derive(Clone)]
 pub struct SecurityEngine {
     config: SecurityConfig,
     /// Tracks approved sudo sessions (command -> expiry time).
@@ -274,7 +293,8 @@ pub enum SecurityDecision {
 
 impl SecurityEngine {
     pub fn new(config: SecurityConfig) -> Result<Self> {
-        let sandbox = Sandbox::new(config.working_directory.clone())?;
+        let mut sandbox = Sandbox::new(config.working_directory.clone())?;
+        sandbox.set_allowed_paths(config.allowed_paths.clone());
         let pii_detector = PiiDetector::new(&config.sensitive_patterns);
         let guardrails = Guardrails::new(config.prompt_injection_detection_enabled);
         let identity_manager = IdentityManager::new(config.identity.clone());

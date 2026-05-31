@@ -16,6 +16,7 @@ use crate::security::IdentityConfig;
 
 /// Manages agent identities and their scoped credentials.
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct IdentityManager {
     config: IdentityConfig,
     /// Active sessions: session_id -> SessionInfo
