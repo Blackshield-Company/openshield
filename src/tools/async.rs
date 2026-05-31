@@ -1,3 +1,4 @@
+//! Async tool executor for non-blocking tool calls.
 use anyhow::Result;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;

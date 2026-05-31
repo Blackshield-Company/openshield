@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
@@ -97,25 +98,38 @@ impl AgentRunner {
     }
 
     /// Execute a task: call LLM, optionally run tools, return result.
-    pub async fn execute_task(&self, task: &str, agent_ref: &Arc<RwLock<SwarmAgent>>) -> Result<String> {
+    pub async fn execute_task(
+        &self,
+        task: &str,
+        agents: &Arc<RwLock<HashMap<AgentId, SwarmAgent>>>,
+        agent_id: &AgentId,
+    ) -> Result<String> {
         info!("🐝 Agent {} executing: {}", self.agent_id, task.chars().take(60).collect::<String>());
 
         // Update status to Working
         {
-            let mut agent = agent_ref.write().await;
-            agent.status = AgentStatus::Working {
-                task: task.to_string(),
-                started_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            };
+            let mut agents_lock = agents.write().await;
+            if let Some(agent) = agents_lock.get_mut(agent_id) {
+                agent.status = AgentStatus::Working {
+                    task: task.to_string(),
+                    started_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                };
+            }
         }
+
+        // Broadcast activity start
+        let _ = self.event_tx.send(SwarmEvent::AgentActivity {
+            agent_id: self.agent_id.clone(),
+            activity: format!("Starting: {}", task.chars().take(80).collect::<String>()),
+        });
 
         let mut ctx = self.context.write().await;
         ctx.add_user_message(task);
         ctx.trim_context(20); // Keep last 20 messages + system
-        let messages = ctx.messages.clone();
+        let mut messages = ctx.messages.clone();
         drop(ctx);
 
         let mut final_result = String::new();
@@ -123,11 +137,41 @@ impl AgentRunner {
         for iteration in 0..self.max_iterations {
             debug!("🐝 Agent {} iteration {}/{}", self.agent_id, iteration + 1, self.max_iterations);
 
-            let request = ChatRequest::new(self.model.clone(), messages.clone(), false);
+            let request = ChatRequest::new(self.model.clone(), messages.clone(), true);
 
-            let response = match self.provider.chat(request).await {
-                Ok(resp) => resp,
-                Err(e) => {
+            // Get agent name/role for chunk events
+            let (agent_name, agent_role) = {
+                let agents_lock = agents.read().await;
+                if let Some(agent) = agents_lock.get(agent_id) {
+                    (agent.name.clone(), agent.role.name.clone())
+                } else {
+                    (self.agent_id.clone(), "Unknown".to_string())
+                }
+            };
+
+            let response = match tokio::time::timeout(
+                std::time::Duration::from_secs(180), // 3 min — swarm agents run in parallel, requests queue
+                self.provider.chat_stream(request)
+            ).await {
+                Ok(Ok((chunks, _metrics))) => {
+                    let mut full_content = String::new();
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        full_content.push_str(chunk);
+                        // Filter persona-preamble from streaming chunks
+                        let filtered_chunk = crate::swarm::persona_filter::strip_persona_preamble(chunk);
+                        if !filtered_chunk.is_empty() {
+                            let _ = self.event_tx.send(SwarmEvent::AgentChunk {
+                                agent_id: self.agent_id.clone(),
+                                agent_name: agent_name.clone(),
+                                role: agent_role.clone(),
+                                chunk: filtered_chunk,
+                                is_final: i == chunks.len() - 1,
+                            });
+                        }
+                    }
+                    crate::swarm::persona_filter::strip_persona_preamble(&full_content)
+                }
+                Ok(Err(e)) => {
                     let err_msg = format!("LLM call failed: {}", e);
                     error!("🐝 Agent {}: {}", self.agent_id, err_msg);
                     let _ = self.event_tx.send(SwarmEvent::AgentError {
@@ -135,18 +179,33 @@ impl AgentRunner {
                         error: err_msg.clone(),
                     });
                     {
-                        let mut agent = agent_ref.write().await;
-                        agent.status = AgentStatus::Error { message: err_msg.clone() };
-                        agent.errors_count += 1;
+                        let mut agents_lock = agents.write().await;
+                        if let Some(agent) = agents_lock.get_mut(agent_id) {
+                            agent.status = AgentStatus::Error { message: err_msg.clone() };
+                            agent.errors_count += 1;
+                        }
+                    }
+                    return Err(anyhow::anyhow!(err_msg));
+                }
+                Err(_) => {
+                    let err_msg = "LLM call timed out after 180s".to_string();
+                    error!("🐝 Agent {}: {}", self.agent_id, err_msg);
+                    let _ = self.event_tx.send(SwarmEvent::AgentError {
+                        agent_id: self.agent_id.clone(),
+                        error: err_msg.clone(),
+                    });
+                    {
+                        let mut agents_lock = agents.write().await;
+                        if let Some(agent) = agents_lock.get_mut(agent_id) {
+                            agent.status = AgentStatus::Error { message: err_msg.clone() };
+                            agent.errors_count += 1;
+                        }
                     }
                     return Err(anyhow::anyhow!(err_msg));
                 }
             };
 
-            let content = response.choices.into_iter()
-                .next()
-                .map(|c| c.message.content)
-                .unwrap_or_default();
+            let content = response;
 
             if content.is_empty() {
                 warn!("🐝 Agent {} returned empty response", self.agent_id);
@@ -169,20 +228,44 @@ impl AgentRunner {
             let suggestion = &suggestions[0];
             info!("🐝 Agent {} using tool: {}", self.agent_id, suggestion.tool_name);
 
+            // Broadcast tool call
+            let _ = self.event_tx.send(SwarmEvent::AgentToolCall {
+                agent_id: self.agent_id.clone(),
+                tool_name: suggestion.tool_name.clone(),
+                args: suggestion.args.chars().take(100).collect::<String>(),
+            });
+
             let executor = AsyncToolExecutor::new();
-            let tool_result = match executor.execute_with_timeout(
+            let (tool_result, success) = match executor.execute_with_timeout(
                 suggestion.tool_name.clone(),
                 suggestion.args.clone(),
                 30000, // 30s timeout per tool call
             ).await {
                 Ok((result, metrics)) => {
-                    if metrics.success {
+                    let success = metrics.success;
+                    let formatted = if success {
                         format!("✅ {} ({}ms)\n{}", suggestion.tool_name, metrics.duration_ms, result)
                     } else {
                         format!("❌ {} ({}ms)\n{}", suggestion.tool_name, metrics.duration_ms, result)
-                    }
+                    };
+                    let _ = self.event_tx.send(SwarmEvent::AgentToolResult {
+                        agent_id: self.agent_id.clone(),
+                        tool_name: suggestion.tool_name.clone(),
+                        result: result.clone(),
+                        success,
+                    });
+                    (formatted, success)
                 }
-                Err(e) => format!("Tool execution error: {}", e),
+                Err(e) => {
+                    let err = format!("Tool execution error: {}", e);
+                    let _ = self.event_tx.send(SwarmEvent::AgentToolResult {
+                        agent_id: self.agent_id.clone(),
+                        tool_name: suggestion.tool_name.clone(),
+                        result: err.clone(),
+                        success: false,
+                    });
+                    (err, false)
+                }
             };
 
             {
@@ -194,18 +277,20 @@ impl AgentRunner {
 
             // Update messages for next iteration
             let ctx = self.context.read().await;
-            let _messages = ctx.messages.clone();
+            messages = ctx.messages.clone();
             drop(ctx);
 
-            final_result = format!("{}", tool_result);
+            final_result.push_str(&format!("\n\n[Tool: {}]\n{}", suggestion.tool_name, tool_result));
         }
 
         // Update agent status to completed
         {
-            let mut agent = agent_ref.write().await;
-            agent.status = AgentStatus::Completed { result: final_result.clone() };
-            agent.cycles_completed += 1;
-            agent.last_activity = Some(format!("Completed: {}", task));
+            let mut agents_lock = agents.write().await;
+            if let Some(agent) = agents_lock.get_mut(agent_id) {
+                agent.status = AgentStatus::Completed { result: final_result.clone() };
+                agent.cycles_completed += 1;
+                agent.last_activity = Some(format!("Completed: {}", task));
+            }
         }
 
         // Send work completed event

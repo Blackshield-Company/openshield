@@ -3113,6 +3113,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width 0.2.0",
+ "urlencoding",
  "uuid",
  "walkdir",
 ]
@@ -3741,6 +3742,7 @@ dependencies = [
  "base64",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

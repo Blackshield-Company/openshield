@@ -28,6 +28,7 @@ mod theme;
 use theme::*;
 
 mod ascii_art;
+mod syntax_highlight;
 
 #[allow(dead_code)]
 const MAX_CONTEXT_MESSAGES: usize = 5;
@@ -71,6 +72,17 @@ struct SecondaryResponse {
     content: String,
     latency_ms: u64,
     tokens: u32,
+}
+
+/// Per-agent streaming state for swarm mode.
+#[derive(Debug, Clone)]
+struct AgentStreamState {
+    agent_id: String,
+    agent_name: String,
+    role: String,
+    content: String,
+    is_streaming: bool,
+    tool_results: Vec<(String, String, bool)>, // (tool_name, result, success)
 }
 
 /// A single message in the chat history.
@@ -169,12 +181,18 @@ struct App {
     skill_registry: Option<crate::skills::SkillRegistry>,
     /// Swarm engine for multi-agent mode.
     swarm: Option<crate::swarm::SwarmEngine>,
+    /// Broadcast receiver for swarm activity events.
+    swarm_event_rx: Option<tokio::sync::broadcast::Receiver<crate::swarm::SwarmEvent>>,
     /// Whether swarm mode is active in the sidebar.
     swarm_active: bool,
     /// Cached swarm agent snapshot for sync rendering.
     swarm_agents: Vec<crate::swarm::SwarmAgent>,
     /// Cached swarm running state.
     swarm_running: bool,
+    /// Per-agent streaming buffers for swarm mode.
+    agent_streams: std::collections::HashMap<String, AgentStreamState>,
+    /// Which agents have their tool results expanded in the inspector.
+    agent_tool_expanded: std::collections::HashSet<String>,
     /// Pending image attachment for the next user message.
     pending_image: Option<String>,
     /// Context compression engine.
@@ -372,9 +390,12 @@ impl App {
                 SkillRegistry::new(skills_dir).ok()
             },
             swarm: None,
+            swarm_event_rx: None,
             swarm_active: false,
             swarm_agents: Vec::new(),
             swarm_running: false,
+            agent_streams: std::collections::HashMap::new(),
+            agent_tool_expanded: std::collections::HashSet::new(),
             pending_image: None,
             compressor: Some(crate::memory::compression::ContextCompressor::new(
                 config.context_compression.clone(),
@@ -848,9 +869,11 @@ impl App {
 
     /// Estimate context used in tokens (rough word-count based).
     fn context_used(&self) -> usize {
-        self.model_messages.iter()
-            .map(|m| m.content.split_whitespace().count())
-            .sum()
+        // Rough token estimate: ~4 chars per token for English text
+        let total_chars: usize = self.model_messages.iter()
+            .map(|m| m.content.len())
+            .sum();
+        total_chars / 4
     }
 }
 
@@ -920,6 +943,65 @@ async fn run_app(
 
         // Poll swarm status and inject updates into chat
         if app.swarm_running {
+            // Poll broadcast channel for real-time agent activity
+            let mut swarm_updates: Vec<String> = Vec::new();
+            if let Some(ref mut rx) = app.swarm_event_rx {
+                while let Ok(event) = rx.try_recv() {
+                    match event {
+                        crate::swarm::SwarmEvent::AgentActivity { agent_id, activity } => {
+                            swarm_updates.push(format!("🐝 **{}**: {}", agent_id, activity));
+                        }
+                        crate::swarm::SwarmEvent::AgentToolCall { agent_id, tool_name, args } => {
+                            app.tool_calls_count += 1;
+                            swarm_updates.push(format!(
+                                "🐝 **{}** → 🔧 `{}` {}",
+                                agent_id, tool_name,
+                                if args.is_empty() { "".to_string() } else { format!("({})", args) }
+                            ));
+                        }
+                        crate::swarm::SwarmEvent::AgentThinking { agent_id, thought } => {
+                            swarm_updates.push(format!(
+                                "🐝 **{}** 💭 {}",
+                                agent_id,
+                                &thought[..thought.len().min(300)]
+                            ));
+                        }
+                        crate::swarm::SwarmEvent::AgentError { agent_id, error } => {
+                            swarm_updates.push(format!("🐝 **{}** ❌ {}", agent_id, error));
+                        }
+                        crate::swarm::SwarmEvent::AgentChunk { agent_id, agent_name, role, chunk, is_final } => {
+                            use std::collections::hash_map::Entry;
+                            match app.agent_streams.entry(agent_id.clone()) {
+                                Entry::Occupied(mut entry) => {
+                                    let state = entry.get_mut();
+                                    state.content.push_str(&chunk);
+                                    state.is_streaming = !is_final;
+                                }
+                                Entry::Vacant(entry) => {
+                                    entry.insert(AgentStreamState {
+                                        agent_id: agent_id.clone(),
+                                        agent_name: agent_name.clone(),
+                                        role: role.clone(),
+                                        content: chunk.clone(),
+                                        is_streaming: !is_final,
+                                        tool_results: Vec::new(),
+                                    });
+                                }
+                            }
+                        }
+                        crate::swarm::SwarmEvent::AgentToolResult { agent_id, tool_name, result, success } => {
+                            if let Some(state) = app.agent_streams.get_mut(&agent_id) {
+                                state.tool_results.push((tool_name, result, success));
+                            }
+                        }
+                        _ => {} // Other events handled by the status poll below
+                    }
+                }
+            }
+            for update in swarm_updates {
+                app.add_system_message(update);
+            }
+
             if let Some(ref engine) = app.swarm {
                 let status = engine.status().await;
                 let agents = engine.agent_snapshot().await;
@@ -1108,12 +1190,13 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.sidebar_tab = (app.sidebar_tab + 1) % 3;
+            app.sidebar_tab = (app.sidebar_tab + 1) % 4; // Now 4 tabs: Tools, Skills, Swarm, Inspector
             app.sidebar_scroll = 0;
             let tab_name = match app.sidebar_tab {
                 0 => "Tools",
                 1 => "Skills",
                 2 => "Swarm",
+                3 => "Inspector",
                 _ => "Tools",
             };
             app.add_system_message(format!("📋 Sidebar: {}", tab_name));
@@ -1220,6 +1303,19 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.scroll_down(10);
             }
         }
+        KeyCode::Enter => {
+            // Toggle tool expansion in Inspector tab when sidebar is focused
+            if app.focused_pane == 0 && app.sidebar_tab == 3 {
+                let visible_agents: Vec<String> = app.agent_streams.keys().cloned().collect();
+                if let Some(agent_id) = visible_agents.get(app.sidebar_scroll) {
+                    if app.agent_tool_expanded.contains(agent_id) {
+                        app.agent_tool_expanded.remove(agent_id);
+                    } else {
+                        app.agent_tool_expanded.insert(agent_id.clone());
+                    }
+                }
+            }
+        }
         KeyCode::Esc => {
             if app.show_comparison {
                 app.show_comparison = false;
@@ -1234,6 +1330,9 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 async fn process_user_input(app: &mut App, input: String) -> Result<()> {
+    // Track tokens for ALL input, including slash commands
+    app.tokens_used += input.len() as u64 / 4;
+
     if input == "exit" || input == "quit" {
         app.should_exit = true;
         return Ok(());
@@ -1339,6 +1438,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input == "/swarm" || input.starts_with("/swarm ") {
+        // Track tokens for swarm commands too
+        app.tokens_used += input.len() as u64 / 4;
+
         let parts: Vec<&str> = input.split_whitespace().collect();
         let cmd = parts.get(1).map(|s| *s).unwrap_or("status");
         let prompt = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
@@ -1351,29 +1453,24 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 } else {
                     // Reload config from disk to pick up any edits
                     let fresh_config = crate::config::Config::load_or_default().unwrap_or_else(|_| app.config.clone());
-                    if !fresh_config.swarm.enabled {
-                        app.add_system_message("🐝 Swarm mode is disabled in config.".to_string());
-                        app.add_system_message("Set [swarm] enabled = true in ~/.config/openshark/config.toml".to_string());
-                    } else {
-                        // Update cached config
-                        app.config = fresh_config.clone();
-                        let engine = crate::swarm::SwarmEngine::new(app.config.swarm.clone());
-                        match engine.init(&prompt, &app.config).await {
-                            Ok(()) => {
-                                let agents = engine.agent_snapshot().await;
-                                app.swarm_agents = agents.clone();
-                                app.swarm_running = false;
-                                app.add_system_message(format!("🐝 Swarm initialized with {} agents", agents.len()));
-                                for agent in agents {
-                                    app.add_system_message(format!("  🐝 {} ({}) — {}", agent.name, agent.role.name, agent.status));
-                                }
-                                app.add_system_message("Run /swarm start to begin the autonomous loop.".to_string());
-                                app.swarm = Some(engine);
-                                app.swarm_active = true;
-                                app.sidebar_tab = 2;
+                    // Update cached config
+                    app.config = fresh_config.clone();
+                    let engine = crate::swarm::SwarmEngine::new(app.config.swarm.clone());
+                    match engine.init(&prompt, &app.config).await {
+                        Ok(()) => {
+                            let agents = engine.agent_snapshot().await;
+                            app.swarm_agents = agents.clone();
+                            app.swarm_running = false;
+                            app.add_system_message(format!("🐝 Swarm initialized with {} agents", agents.len()));
+                            for agent in agents {
+                                app.add_system_message(format!("  🐝 {} ({}) — {}", agent.name, agent.role.name, agent.status));
                             }
-                            Err(e) => app.add_system_message(format!("❌ Swarm init failed: {}", e)),
+                            app.add_system_message("Run /swarm start to begin the autonomous loop.".to_string());
+                            app.swarm = Some(engine);
+                            app.swarm_active = true;
+                            app.sidebar_tab = 2;
                         }
+                        Err(e) => app.add_system_message(format!("❌ Swarm init failed: {}", e)),
                     }
                 }
             }
@@ -1382,6 +1479,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     match engine.start().await {
                         Ok(()) => {
                             app.swarm_running = true;
+                            // Subscribe to swarm activity events
+                            app.swarm_event_rx = Some(engine.subscribe());
                             // Initialize swarm_agents so we can detect state changes
                             app.swarm_agents = engine.agent_snapshot().await;
                             app.add_system_message("🐝 Swarm loop started. Agents are working...".to_string());
@@ -1412,8 +1511,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     app.add_system_message(format!("{}", status));
                 } else {
                     app.add_system_message("🐝 No swarm active.".to_string());
-                    app.add_system_message(format!("Config: enabled={}, max_agents={}, roles={:?}",
-                        app.config.swarm.enabled,
+                    app.add_system_message(format!("Config: max_agents={}, roles={:?}",
                         app.config.swarm.max_agents,
                         app.config.swarm.roles));
                 }
@@ -1533,6 +1631,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     app.add_user_message(input.clone());
+
+    // ── Swarm Guard: Block regular chat while swarm is working ─────────────
+    if app.swarm_running {
+        app.add_system_message(
+            "⏸ Swarm is active. Regular chat is paused while agents work.\n\
+             Use `/swarm status` for progress or `/swarm stop` to halt agents."
+                .to_string(),
+        );
+        return Ok(());
+    }
 
     if input.starts_with("agent:") {
         let task = input[6..].trim();
@@ -1699,6 +1807,18 @@ fn strip_tool_lines(text: &str) -> String {
     result
 }
 
+/// Extract thinking/reasoning content from <think>...</think> blocks.
+fn extract_thinking(text: &str) -> String {
+    let start = text.find("<think>");
+    let end = text.find("</think>");
+    match (start, end) {
+        (Some(s), Some(e)) if e > s => {
+            text[s + 7..e].trim().to_string()
+        }
+        _ => String::new(),
+    }
+}
+
 /// Execute a chain of tools and stream follow-up via the event channel.
 async fn execute_tool_chain(
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
@@ -1844,8 +1964,31 @@ async fn stream_model_response_task(
     match provider.chat_stream(request).await {
         Ok((chunks, metrics)) => {
             let mut full_content = String::new();
+            let mut in_think_block = false;
+            let mut think_buffer = String::new();
+
             for chunk in &chunks {
                 full_content.push_str(chunk);
+
+                // Extract thinking/reasoning content from <think> blocks
+                if chunk.contains("<think>") {
+                    in_think_block = true;
+                }
+                if in_think_block {
+                    think_buffer.push_str(chunk);
+                    if chunk.contains("</think>") {
+                        in_think_block = false;
+                        // Send thinking content as a separate event
+                        let thinking = extract_thinking(&think_buffer);
+                        if !thinking.is_empty() {
+                            let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                "💭 {}", thinking.chars().take(200).collect::<String>()
+                            )));
+                        }
+                        think_buffer.clear();
+                    }
+                }
+
                 let _ = tx.send(StreamEvent::Chunk(chunk.clone()));
             }
 
@@ -2504,7 +2647,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             ]);
         let count = app.skill_registry.as_ref().map(|r| r.all_skills().len()).unwrap_or(0);
         (format!(" Skills [{}] ", count), skills)
-    } else {
+    } else if app.sidebar_tab == 2 {
         // Swarm tab
         let swarm_lines: Vec<Line> = if !app.swarm_agents.is_empty() {
             let mut lines = vec![
@@ -2547,6 +2690,70 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             ]
         };
         (" Swarm ".to_string(), swarm_lines)
+    } else {
+        // Inspector tab — per-agent raw output
+        let inspector_lines: Vec<Line> = if !app.agent_streams.is_empty() {
+            let mut lines = vec![
+                Line::from(vec![Span::styled("Agent Inspector", title_style())]),
+                Line::from(vec![]),
+            ];
+            for (_, state) in app.agent_streams.iter().skip(app.sidebar_scroll).take(8) {
+                let role_color = match state.role.as_str() {
+                    "Architect" => current_theme().accent,
+                    "Implementer" => current_theme().success,
+                    "Reviewer" => current_theme().highlight,
+                    "Tester" => current_theme().error,
+                    _ => current_theme().accent,
+                };
+                let role_style = Style::default().fg(role_color).add_modifier(Modifier::BOLD);
+                let status = if state.is_streaming { "🟡 streaming" } else { "⏹ done" };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("🐝 {} ", state.agent_name), role_style),
+                    Span::styled(format!("({}) {}", state.role, status), muted_style()),
+                ]));
+                // Show truncated content preview with code detection
+                let preview = &state.content[..state.content.len().min(120)];
+                let has_code = preview.contains("```") || preview.contains("fn ") || preview.contains("def ");
+                if has_code {
+                    lines.push(Line::from(vec![
+                        Span::styled("  📄 ".to_string(), muted_style()),
+                        Span::styled(preview.replace('\n', " "), muted_style()),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {}", preview.replace('\n', " ")), muted_style()),
+                    ]));
+                }
+                if !state.tool_results.is_empty() {
+                    let expanded = app.agent_tool_expanded.contains(&state.agent_id);
+                    let expand_icon = if expanded { "▼" } else { "▶" };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} 🔧 {} tools", expand_icon, state.tool_results.len()), tool_style()),
+                    ]));
+                    if expanded {
+                        for (tool_name, result, success) in &state.tool_results {
+                            let icon = if *success { "✅" } else { "❌" };
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("    {} {}", icon, tool_name), muted_style()),
+                            ]));
+                            for res_line in result.lines().take(4) {
+                                lines.push(Line::from(vec![
+                                    Span::styled(format!("      {}", res_line.chars().take(50).collect::<String>()), muted_style()),
+                                ]));
+                            }
+                        }
+                    }
+                }
+                lines.push(Line::from(vec![]));
+            }
+            lines
+        } else {
+            vec![
+                Line::from(vec![Span::styled("No agent data", muted_style())]),
+                Line::from(vec![Span::styled("Start a swarm to inspect agents", muted_style())]),
+            ]
+        };
+        (" Inspector ".to_string(), inspector_lines)
     };
 
     let tools_para = Paragraph::new(Text::from(tab_items))
@@ -2560,7 +2767,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .style(bg_style());
     f.render_widget(tools_para, sidebar_layout[3]);
 
-    // Performance — per-session metrics
+    // Performance — per-session metrics (streaming) or swarm stats
     let perf_lines = if app.session_perf.requests > 0 {
         vec![
             Line::from(vec![
@@ -2578,6 +2785,37 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled("Requests: ", muted_style()),
                 Span::styled(app.session_perf.requests.to_string(), text_style()),
+            ]),
+        ]
+    } else if app.swarm_running {
+        // Show swarm stats when no streaming perf data
+        let active = app.swarm_agents.iter()
+            .filter(|a| matches!(a.status, crate::swarm::AgentStatus::Working { .. }))
+            .count();
+        let completed = app.swarm_agents.iter()
+            .filter(|a| matches!(a.status, crate::swarm::AgentStatus::Completed { .. }))
+            .count();
+        let errors = app.swarm_agents.iter()
+            .filter(|a| matches!(a.status, crate::swarm::AgentStatus::Error { .. }))
+            .count();
+        vec![
+            Line::from(vec![
+                Span::styled("Swarm active", accent_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("Working: ", muted_style()),
+                Span::styled(format!("{}", active), text_style()),
+                Span::styled(" | Done: ", muted_style()),
+                Span::styled(format!("{}", completed), text_style()),
+                Span::styled(" | Err: ", muted_style()),
+                Span::styled(format!("{}", errors), if errors > 0 { error_style() } else { text_style() }),
+            ]),
+            Line::from(vec![
+                Span::styled("Cycles: ", muted_style()),
+                Span::styled(
+                    format!("{}", app.swarm_agents.iter().map(|a| a.cycles_completed).sum::<usize>()),
+                    text_style()
+                ),
             ]),
         ]
     } else {
@@ -2666,17 +2904,39 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             ]));
         }
 
-        for content_line in msg.content.lines() {
-            // Welcome logo lines use purple for visibility against dark bg
-            let line_style = if msg.role == "system" && content_line.contains('█') {
-                Style::default().fg(current_theme().border_unfocused).add_modifier(Modifier::BOLD)
-            } else {
-                content_style
-            };
-            lines.push(Line::from(vec![Span::styled(
-                content_line,
-                line_style,
-            )]));
+        // Render content with syntax highlighting for assistant messages
+        if msg.role == "assistant" {
+            let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
+            for (is_code, block_lines) in highlighted {
+                if is_code {
+                    lines.push(Line::from(vec![
+                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
+                    ]));
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
+                    }
+                    lines.push(Line::from(vec![
+                        Span::styled("└─────────────────────────────────────", muted_style()),
+                    ]));
+                } else {
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
+                    }
+                }
+            }
+        } else {
+            for content_line in msg.content.lines() {
+                // Welcome logo lines use purple for visibility against dark bg
+                let line_style = if msg.role == "system" && content_line.contains('█') {
+                    Style::default().fg(current_theme().border_unfocused).add_modifier(Modifier::BOLD)
+                } else {
+                    content_style
+                };
+                lines.push(Line::from(vec![Span::styled(
+                    content_line,
+                    line_style,
+                )]));
+            }
         }
 
         // Multi-model response indicator on assistant messages
@@ -2708,6 +2968,56 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(vec![Span::styled(line, text_style())]));
         }
         lines.push(Line::from(vec![Span::styled("▌", accent_style())]));
+    }
+
+    // ── Swarm Agent Streaming ──────────────────────────────────────────────
+    for (_, state) in app.agent_streams.iter() {
+        if state.is_streaming || !state.content.is_empty() {
+            let role_color = match state.role.as_str() {
+                "Architect" => current_theme().accent,
+                "Implementer" => current_theme().success,
+                "Reviewer" => current_theme().highlight,
+                "Tester" => current_theme().error,
+                "DevOps" => current_theme().accent_secondary,
+                "Security" => current_theme().error,
+                "Documentation" => current_theme().muted,
+                "Project Manager" => current_theme().title,
+                _ => current_theme().accent,
+            };
+            let role_style = Style::default().fg(role_color).add_modifier(Modifier::BOLD);
+
+            lines.push(Line::from(vec![
+                Span::styled("🐝 ", role_style),
+                Span::styled(format!("{} — {}", state.agent_name, state.role), role_style),
+            ]));
+
+            // Use syntax highlighting for code blocks in agent content
+            let highlighted = syntax_highlight::extract_and_highlight(&state.content);
+            for (is_code, block_lines) in highlighted {
+                if is_code {
+                    // Add a subtle code block border
+                    lines.push(Line::from(vec![
+                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
+                    ]));
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
+                    }
+                    lines.push(Line::from(vec![
+                        Span::styled("└─────────────────────────────────────", muted_style()),
+                    ]));
+                } else {
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
+                    }
+                }
+            }
+
+            if state.is_streaming {
+                lines.push(Line::from(vec![Span::styled("▌", role_style)]));
+            }
+
+            lines.push(Line::from(""));
+        }
     }
 
     let paragraph = Paragraph::new(Text::from(lines))
@@ -2758,6 +3068,8 @@ fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
             "Tool suggestion pending. Press 'y' to execute, 'n' to skip."
         } else if app.is_streaming {
             "Streaming response..."
+        } else if app.swarm_running {
+            "🐝 Agents working..."
         } else {
             "Type a message or command..."
         }
@@ -2840,15 +3152,17 @@ fn compute_wrapped_cursor_position(
             // End of word — commit it
             col = word_start_col + word_width;
             in_word = false;
-            word_start_col = col;
-            word_width = ch.width().unwrap_or(1);
-            
-            if col + word_width > wrap_width {
+            let space_width = ch.width().unwrap_or(1);
+            if col + space_width > wrap_width {
+                // Space goes past wrap boundary — wrap to next line
+                // The space itself is consumed by the line break (not shown)
                 row += 1;
-                col = word_width;
-                word_start_col = 0;
-                word_width = word_width;
+                col = 0;
+            } else {
+                col += space_width;
             }
+            word_start_col = col;
+            word_width = 0;
         } else {
             // In a word
             if !in_word {
