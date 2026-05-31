@@ -1476,7 +1476,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
 
         app.mode = AppMode::Agent;
-        app.add_system_message(format!("🎹🦈 Agent Mode: {}", task));
+        app.add_system_message(format!("🦈 Agent Mode: {}", task));
 
         let agent_config = AgentConfig::default();
         match Agent::new(agent_config, &app.config) {
@@ -2306,7 +2306,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Compact header: harness name + version (hardcoded, separate from agent identity)
     let mut header_lines = vec![
         Line::from(vec![
-            Span::styled("🎹🦈 ", shark_style()),
+            Span::styled("🦈 ", shark_style()),
             Span::styled("openshark", highlight_style()),
             Span::styled(format!(" v{}", crate::VERSION), muted_style()),
         ]),
