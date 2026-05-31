@@ -5,9 +5,11 @@
  \___/| .__/ \___|_| |_|____/|_| |_|\__,_|_|  |_|\_\
       |_|
 
-> 🦈 *The harness that learns. The agent that decides. The tool that doesn't argue.*
+> 🦈 *Fast. Precise. Hungry.*
 
-![OpenShark Banner](openshark.png)
+![OpenShark Title Screen](openshark.png)
+
+*Retro DOS title screen aesthetic — pixel art, neon, and shark fins.*
 
 [![Version](https://img.shields.io/badge/version-1.0.0-neonpink)](https://github.com/synthalorian/openshark)
 [![License](https://img.shields.io/badge/license-MIT-neonblue)](LICENSE)
