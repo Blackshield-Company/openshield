@@ -918,7 +918,60 @@ async fn run_app(
             *last_tick = Instant::now();
         }
 
-        // Auto-close tool approval popup after 60 seconds of inactivity
+        // Poll swarm status and inject updates into chat
+        if app.swarm_running {
+            if let Some(ref engine) = app.swarm {
+                let status = engine.status().await;
+                let agents = engine.agent_snapshot().await;
+                
+                // Collect updates to apply after dropping references
+                let mut updates: Vec<String> = Vec::new();
+                
+                // Check for newly completed agents
+                for agent in &agents {
+                    if let Some(prev) = app.swarm_agents.iter().find(|a| a.id == agent.id) {
+                        // Status changed from working to completed
+                        if matches!(prev.status, crate::swarm::AgentStatus::Working { .. })
+                            && matches!(agent.status, crate::swarm::AgentStatus::Completed { .. }) {
+                            if let crate::swarm::AgentStatus::Completed { ref result } = agent.status {
+                                updates.push(format!(
+                                    "🐝 **{}** completed:\n{}",
+                                    agent.name,
+                                    &result[..result.len().min(500)]
+                                ));
+                            }
+                        }
+                        // Agent hit an error
+                        if matches!(agent.status, crate::swarm::AgentStatus::Error { .. })
+                            && !matches!(prev.status, crate::swarm::AgentStatus::Error { .. }) {
+                            if let crate::swarm::AgentStatus::Error { ref message } = agent.status {
+                                updates.push(format!(
+                                    "🐝 **{}** error: {}",
+                                    agent.name, message
+                                ));
+                            }
+                        }
+                    }
+                }
+                
+                // Apply all updates
+                for update in updates {
+                    app.add_system_message(update);
+                }
+                
+                // Update cached state
+                app.swarm_agents = agents;
+                
+                // Swarm finished (all agents idle/completed and not running)
+                if !status.running && status.cycles_completed > 0 {
+                    app.swarm_running = false;
+                    app.add_system_message(format!(
+                        "🐝 Swarm complete. {} cycles, {} consensus entries.",
+                        status.cycles_completed, status.consensus_entries
+                    ));
+                }
+            }
+        }
         if app.mode == AppMode::ToolApproval {
             if let Some(shown_at) = app.tool_approval_shown_at {
                 if shown_at.elapsed() >= Duration::from_secs(60) {
@@ -1321,7 +1374,12 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             "start" => {
                 if let Some(ref engine) = app.swarm {
                     match engine.start().await {
-                        Ok(()) => app.add_system_message("🐝 Swarm loop started.".to_string()),
+                        Ok(()) => {
+                            app.swarm_running = true;
+                            // Initialize swarm_agents so we can detect state changes
+                            app.swarm_agents = engine.agent_snapshot().await;
+                            app.add_system_message("🐝 Swarm loop started. Agents are working...".to_string());
+                        }
                         Err(e) => app.add_system_message(format!("❌ Swarm start failed: {}", e)),
                     }
                 } else {
@@ -2976,7 +3034,7 @@ fn draw_splash_screen(f: &mut Frame) {
         .lines()
         .map(|line| {
             // Colorize different parts of the banner
-            if line.contains('█') && !line.contains('▓') && !line.contains('▒') && !line.contains('░') {
+            if line.contains('▪') {
                 // Wordmark / fin — purple/pink
                 Line::from(vec![Span::styled(
                     line,
@@ -2992,7 +3050,7 @@ fn draw_splash_screen(f: &mut Frame) {
                         .fg(current_theme().accent_secondary)
                         .add_modifier(Modifier::BOLD),
                 )])
-            } else if line.contains('▓') || line.contains('▒') || line.contains('░') || line.contains('▪') || line.contains('▫') {
+            } else if line.contains('≈') {
                 // Waves — cyan/blue tones
                 Line::from(vec![Span::styled(
                     line,
