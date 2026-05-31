@@ -522,39 +522,9 @@ impl App {
         }
 
         // 2. Dynamic models from local provider's /v1/models endpoint
-        // Try to fetch live models from each provider that might have them
-        for (provider_name, provider) in &self.config.providers {
-            if provider_name == "local" || provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost") {
-                let provider_instance = Provider::new(
-                    provider_name.clone(),
-                    provider.base_url.clone(),
-                    provider.api_key.clone(),
-                    provider.kind.clone(),
-                    provider.headers.clone(),
-                );
-                // Try to get dynamic models — use block_on if we're in an async context,
-                // otherwise just show the static ones with a note
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    // We're in an async runtime — try block_on
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        handle.block_on(provider_instance.list_models())
-                    }));
-                    if let Ok(Ok(dynamic_models)) = result {
-                        for dm in dynamic_models {
-                            // Only add if not already in static list
-                            let already_exists = all_models.iter().any(|(d, _, _)| d.starts_with(&dm));
-                            if !already_exists {
-                                all_models.push((
-                                    format!("{} ({})", dm, provider_name),
-                                    provider_name.clone(),
-                                    128000, // default context for dynamic models
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Skip dynamic model fetching in the TUI — it requires async and we're in a sync context.
+        // The static models from config are sufficient for the selector.
+        // Dynamic models can be refreshed via the CLI `openshark models` command.
 
         for (i, (display, _provider_name, _ctx_len)) in all_models.iter().enumerate() {
             let indicator = if self.model == display.split(" (").next().unwrap_or("") {
