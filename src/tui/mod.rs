@@ -1023,7 +1023,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.sidebar_expanded = !app.sidebar_expanded;
         }
-        KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.show_model_selector();
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1213,7 +1213,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • Ctrl+C            — Copy / Quit (double-tap)\n\
             • Ctrl+L            — Clear chat\n\
             • Ctrl+B            — Toggle sidebar\n\
-            • Ctrl+M            — Model selector\n\
+            • Ctrl+P            — Model selector\n\
             • Ctrl+A            — Toggle autonomous mode\n\
             • Ctrl+T            — Cycle theme\n\
             • Ctrl+W            — Toggle swarm mode\n\
@@ -1695,9 +1695,11 @@ async fn stream_model_response_task(
                                 Ok((follow_chunks, _metrics)) => {
                                     let follow_content: String = follow_chunks.join("");
                                     let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                    let _ = tx.send(StreamEvent::Done);
                                 }
                                 Err(e) => {
                                     let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                    let _ = tx.send(StreamEvent::Done);
                                 }
                             }
                         }
@@ -1764,9 +1766,11 @@ async fn stream_model_response_task(
                                         Ok((follow_chunks, _metrics)) => {
                                             let follow_content: String = follow_chunks.join("");
                                             let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                            let _ = tx.send(StreamEvent::Done);
                                         }
                                         Err(e) => {
                                             let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                            let _ = tx.send(StreamEvent::Done);
                                         }
                                     }
                                 }
@@ -2281,7 +2285,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![Span::styled("Ctrl+C×2", accent_style()), Span::styled(" Quit", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+L  ", accent_style()), Span::styled("Clear chat", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+B  ", accent_style()), Span::styled("Toggle sidebar", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+M  ", accent_style()), Span::styled("Model selector", muted_style())]),
+        Line::from(vec![Span::styled("Ctrl+P  ", accent_style()), Span::styled("Model selector", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+A  ", accent_style()), Span::styled("Autonomous mode", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+T  ", accent_style()), Span::styled("Cycle theme", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+S  ", accent_style()), Span::styled("Tools/Skills", muted_style())]),
