@@ -266,45 +266,45 @@ stdio + SSE transport, JSON-RPC 2.0, tool discovery/execution. No external MCP b
 
 ## Config
 
+Run `openshark setup` to generate your config interactively, or create `~/.config/openshark/config.toml` manually:
+
 ```toml
-# ~/.config/openshark/config.toml
 version = "1.0.0"
-default_model = "kimi-k2.6"
+default_model = "gpt-4o"
 auto_route = true
 cost_limit_usd = 10.0
-user_name = "synth"
 
 [agent]
-name = "synthshark"
-display_name = "synthshark"
+name = "myagent"
+display_name = "MyAgent"
 role = "coding assistant"
-origin = "Born from the neon grid of 1984"
-purpose = "To ship code fast and learn from every session"
-tagline = "This is the wave."
-tone = "Confident, warm, sharp"
-style = "Concise but thorough when needed"
-greeting = "🎹🦈 Ready to build the future?"
-farewell = "The tape never stops rolling. See you next session."
-emoji = "🦈"
-catchphrases = ["This is the wave.", "The grid is endless."]
+origin = "Created in the neon grid"
+purpose = "To ship code fast"
+tagline = "Let's build the future."
+tone = "Professional but friendly"
+style = "Concise and thorough"
+greeting = "Hey! Ready to code?"
+farewell = "See you next session!"
+emoji = "🤖"
+catchphrases = ["Let's do this!", "Ship it!"]
 behavioral_rules = [
     "Always verify before claiming success",
     "Show the code, don't just describe it",
 ]
 
-[providers.kimi]
-base_url = "https://api.kimi.com/coding/v1"
-api_key = "${KIMI_API_KEY}"
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+api_key = "${OPENAI_API_KEY}"
 
-[[providers.kimi.models]]
-name = "kimi-k2.6"
+[[providers.openai.models]]
+name = "gpt-4o"
 context_length = 128000
-cost_per_1k_input = 0.0
-cost_per_1k_output = 0.0
+cost_per_1k_input = 0.005
+cost_per_1k_output = 0.015
 capabilities = ["code", "chat", "analysis"]
 
 [gateway.discord]
-enabled = true
+enabled = false
 token = "${DISCORD_BOT_TOKEN}"
 command_prefix = "!"
 slash_commands = true
@@ -322,7 +322,7 @@ socket_mode = true
 [gateway.matrix]
 enabled = false
 homeserver = "https://matrix.org"
-user_id = "@openshark:matrix.org"
+user_id = "@myagent:matrix.org"
 access_token = "${MATRIX_ACCESS_TOKEN}"
 ```
 
@@ -391,4 +391,4 @@ See [STATUS.md](STATUS.md) for current development status and session handoff no
 
 MIT — The future of coding belongs to everyone.
 
-Made by synth with synthshark 🎹🦈
+MIT — The future of coding belongs to everyone.
