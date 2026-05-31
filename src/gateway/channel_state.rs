@@ -81,7 +81,8 @@ impl ChannelState {
             content: format!(
                 "{}\n\nYou are chatting in Discord. Be concise. Use markdown.\n\
                  You have access to tools:\n{}\n\
-                 When you need to use a tool, respond with: TOOL:tool_name args{}",
+                 When you need to use a tool, respond with: TOOL:tool_name args{}\n\
+                 You can analyze images when users attach them.",
                 soul.system_prompt(),
                 crate::tools::get_tools()
                     .iter()
@@ -90,6 +91,7 @@ impl ChannelState {
                     .join("\n"),
                 skills_prompt
             ),
+            images: None,
         };
 
         Self {
@@ -113,7 +115,8 @@ impl ChannelState {
             content: format!(
                 "{}\n\nYou are chatting in Discord. Be concise. Use markdown.\n\
                  You have access to tools:\n{}\n\
-                 When you need to use a tool, respond with: TOOL:tool_name args",
+                 When you need to use a tool, respond with: TOOL:tool_name args\n\
+                 You can analyze images when users attach them.",
                 soul.system_prompt(),
                 crate::tools::get_tools()
                     .iter()
@@ -121,6 +124,7 @@ impl ChannelState {
                     .collect::<Vec<_>>()
                     .join("\n")
             ),
+            images: None,
         };
         self.history = vec![system_msg];
         self.custom_system_prompt = None;
@@ -139,6 +143,7 @@ impl ChannelState {
                     Message {
                         role: "system".to_string(),
                         content: prompt.to_string(),
+                        images: None,
                     },
                 );
             }
@@ -168,6 +173,7 @@ impl ChannelState {
         self.history.push(Message {
             role: "user".to_string(),
             content,
+            images: None,
         });
         self.trim_history();
     }
@@ -177,6 +183,7 @@ impl ChannelState {
         self.history.push(Message {
             role: "assistant".to_string(),
             content,
+            images: None,
         });
         self.trim_history();
     }
@@ -186,6 +193,7 @@ impl ChannelState {
         self.history.push(Message {
             role: "user".to_string(),
             content: format!("Tool '{}' result: {}", tool_name, result),
+            images: None,
         });
         self.trim_history();
     }

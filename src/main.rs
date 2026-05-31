@@ -9,6 +9,7 @@ mod cache;
 mod config;
 mod evolution;
 mod gateway;
+mod image_utils;
 mod lsp;
 mod mcp;
 mod memory;
@@ -576,10 +577,12 @@ async fn main() -> anyhow::Result<()> {
                     providers::Message {
                         role: "system".to_string(),
                         content: "You are a helpful assistant.".to_string(),
+                        images: None,
                     },
                     providers::Message {
                         role: "user".to_string(),
                         content: message.clone(),
+                        images: None,
                     },
                 ];
 

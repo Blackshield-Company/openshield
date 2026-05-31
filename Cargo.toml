@@ -48,6 +48,7 @@ uuid = { version = "1.16", features = ["v4", "serde"] }
 unicode-width = "0.2"
 walkdir = "2.5"
 regex = "1.11"
+base64 = "0.22"
 
 # Logging
 tracing = "0.1"

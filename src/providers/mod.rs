@@ -8,10 +8,53 @@ use std::time::Instant;
 use crate::cache::{compute_cache_key, ResponseCache};
 use crate::config::ProviderKind;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Message {
     pub role: String,
     pub content: String,
+    /// Optional image attachments as base64 data URLs.
+    /// When present, the message is sent as multimodal content.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub images: Option<Vec<String>>,
+}
+
+impl Message {
+    /// Create a simple text message.
+    pub fn text(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: content.into(),
+            images: None,
+        }
+    }
+
+    /// Create a message with text and an image attachment.
+    pub fn with_image(role: impl Into<String>, content: impl Into<String>, image_data_url: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: content.into(),
+            images: Some(vec![image_data_url.into()]),
+        }
+    }
+
+    /// Convert this message to the OpenAI multimodal format.
+    /// Returns a JSON value representing the content array.
+    pub fn to_openai_content(&self) -> serde_json::Value {
+        if let Some(ref images) = self.images {
+            let mut parts = vec![
+                json!({"type": "text", "text": self.content}),
+            ];
+            for img in images {
+                parts.push(json!({
+                    "type": "image_url",
+                    "image_url": {"url": img}
+                }));
+            }
+            json!(parts)
+        } else {
+            json!(self.content)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,9 +184,18 @@ impl Provider {
     fn build_chat_body(&self, request: &ChatRequest) -> serde_json::Value {
         match self.kind {
             ProviderKind::OpenAiCompatible => {
+                let messages: Vec<_> = request.messages.iter()
+                    .map(|m| {
+                        json!({
+                            "role": m.role,
+                            "content": m.to_openai_content(),
+                        })
+                    })
+                    .collect();
+
                 let mut body = json!({
                     "model": request.model,
-                    "messages": request.messages,
+                    "messages": messages,
                     "stream": request.stream,
                 });
                 if let Some(max_tokens) = request.max_tokens {
@@ -161,7 +213,10 @@ impl Provider {
 
                 let messages: Vec<_> = request.messages.iter()
                     .filter(|m| m.role != "system")
-                    .map(|m| json!({"role": m.role, "content": m.content}))
+                    .map(|m| {
+                        // Anthropic uses the same multimodal format as OpenAI
+                        json!({"role": m.role, "content": m.to_openai_content()})
+                    })
                     .collect();
 
                 let mut body = json!({
@@ -181,9 +236,20 @@ impl Provider {
                 let contents: Vec<_> = request.messages.iter()
                     .map(|m| {
                         let role = if m.role == "assistant" { "model" } else { &m.role };
+                        let mut parts = vec![json!({"text": m.content})];
+                        if let Some(ref images) = m.images {
+                            for img in images {
+                                parts.push(json!({
+                                    "inline_data": {
+                                        "mime_type": "image/png",
+                                        "data": img.strip_prefix("data:image/png;base64,").unwrap_or(img)
+                                    }
+                                }));
+                            }
+                        }
                         json!({
                             "role": role,
-                            "parts": [{"text": m.content}]
+                            "parts": parts,
                         })
                     })
                     .collect();
@@ -230,6 +296,7 @@ impl Provider {
                         message: Message {
                             role: "assistant".to_string(),
                             content,
+                            images: None,
                         },
                         finish_reason: raw["choices"][0]["finish_reason"].as_str().map(|s| s.to_string()),
                     }],
@@ -257,6 +324,7 @@ impl Provider {
                         message: Message {
                             role: "assistant".to_string(),
                             content,
+                            images: None,
                         },
                         finish_reason: raw["stop_reason"].as_str().map(|s| s.to_string()),
                     }],
@@ -282,6 +350,7 @@ impl Provider {
                         message: Message {
                             role: "assistant".to_string(),
                             content,
+                            images: None,
                         },
                         finish_reason: Some("stop".to_string()),
                     }],
@@ -495,6 +564,7 @@ mod tests {
         let msg = Message {
             role: "user".to_string(),
             content: "Hello".to_string(),
+            images: None,
         };
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content, "Hello");
@@ -508,10 +578,12 @@ mod tests {
                 Message {
                     role: "system".to_string(),
                     content: "You are a helpful assistant".to_string(),
+                    images: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: "Hello".to_string(),
+                    images: None,
                 },
             ],
             false,
@@ -554,6 +626,7 @@ mod tests {
             message: Message {
                 role: "assistant".to_string(),
                 content: "Test".to_string(),
+                images: None,
             },
             finish_reason: Some("stop".to_string()),
         };
@@ -596,7 +669,7 @@ mod tests {
         );
         let request = ChatRequest::new(
             "gpt-4".to_string(),
-            vec![Message { role: "user".to_string(), content: "hi".to_string() }],
+            vec![Message { role: "user".to_string(), content: "hi".to_string(), images: None }],
             false,
         );
         let body = provider.build_chat_body(&request);
@@ -616,8 +689,8 @@ mod tests {
         let request = ChatRequest::new(
             "claude-sonnet-4".to_string(),
             vec![
-                Message { role: "system".to_string(), content: "Be helpful".to_string() },
-                Message { role: "user".to_string(), content: "hi".to_string() },
+                Message { role: "system".to_string(), content: "Be helpful".to_string(), images: None },
+                Message { role: "user".to_string(), content: "hi".to_string(), images: None },
             ],
             false,
         );

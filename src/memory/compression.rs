@@ -171,6 +171,7 @@ impl ContextCompressor {
                     chunk.len(),
                     summary
                 ),
+                images: None,
             });
             summarized_count += chunk.len();
         }
@@ -258,10 +259,12 @@ impl ContextCompressor {
                 ProviderMessage {
                     role: "system".to_string(),
                     content: "You are a context compression assistant. Summarize conversations into dense, information-rich paragraphs.".to_string(),
+                    images: None,
                 },
                 ProviderMessage {
                     role: "user".to_string(),
                     content: prompt,
+                    images: None,
                 },
             ],
             false, // non-streaming for summary
@@ -372,6 +375,7 @@ mod tests {
         ProviderMessage {
             role: role.to_string(),
             content: content.to_string(),
+            images: None,
         }
     }
 

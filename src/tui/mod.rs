@@ -76,6 +76,8 @@ struct SecondaryResponse {
 struct ChatMessage {
     role: String,
     content: String,
+    /// Optional image attachments as base64 data URLs.
+    images: Option<Vec<String>>,
     #[allow(dead_code)]
     timestamp: chrono::DateTime<Utc>,
     /// Secondary responses from other models (multi-model mode).
@@ -171,6 +173,8 @@ struct App {
     swarm_agents: Vec<crate::swarm::SwarmAgent>,
     /// Cached swarm running state.
     swarm_running: bool,
+    /// Pending image attachment for the next user message.
+    pending_image: Option<String>,
     /// Context compression engine.
     compressor: Option<crate::memory::compression::ContextCompressor>,
 }
@@ -299,10 +303,12 @@ impl App {
                  When you need to use a tool, output it as: TOOL:<tool_name> <args> \
                  Low and Medium risk tools execute automatically. \
                  High risk tools (curl, ssh, redirects, sudo) require user approval. \
+                 You can analyze images when users attach them. \
                  Be concise and direct. Don't overthink.",
                 soul.system_prompt(),
                 fs_capabilities
             ),
+            images: None,
         };
 
         let security_engine = crate::security::SecurityEngine::new(
@@ -366,6 +372,7 @@ impl App {
             swarm_active: false,
             swarm_agents: Vec::new(),
             swarm_running: false,
+            pending_image: None,
             compressor: Some(crate::memory::compression::ContextCompressor::new(
                 config.context_compression.clone(),
             )),
@@ -564,9 +571,12 @@ impl App {
 
     fn add_user_message(&mut self, content: String) {
         let token_count = content.split_whitespace().count() as u64;
+        let images = self.pending_image.take();
+        let has_image = images.is_some();
         let msg = ChatMessage {
             role: "user".to_string(),
             content: content.clone(),
+            images: images.as_ref().map(|img| vec![img.clone()]),
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
         };
@@ -582,10 +592,19 @@ impl App {
         };
         let _ = self.memory.save_message(&memory_msg);
 
-        self.model_messages.push(Message {
-            role: "user".to_string(),
-            content,
-        });
+        if has_image {
+            self.model_messages.push(Message::with_image(
+                "user",
+                content,
+                images.unwrap(),
+            ));
+        } else {
+            self.model_messages.push(Message {
+                role: "user".to_string(),
+                content,
+                images: None,
+            });
+        }
 
         self.tokens_used += token_count;
     }
@@ -595,6 +614,7 @@ impl App {
         let msg = ChatMessage {
             role: "assistant".to_string(),
             content: content.clone(),
+            images: None,
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
         };
@@ -613,6 +633,7 @@ impl App {
         self.model_messages.push(Message {
             role: "assistant".to_string(),
             content,
+            images: None,
         });
 
         self.tokens_used += token_count;
@@ -623,6 +644,7 @@ impl App {
         let msg = ChatMessage {
             role: "system".to_string(),
             content: content.clone(),
+            images: None,
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
         };
@@ -655,7 +677,23 @@ impl App {
                     Some(&format!("tokens={}", metrics.tokens_generated)),
                 );
 
-                if content.starts_with("TOOL:") {
+                // Check for embedded TOOL: lines anywhere in the response
+                let embedded_tools = parse_embedded_tools(&content);
+                if !embedded_tools.is_empty() {
+                    // Display the assistant's message with tool lines stripped
+                    let display_content = strip_tool_lines(&content);
+                    if !display_content.trim().is_empty() {
+                        self.add_assistant_message(display_content);
+                    }
+                    // Store tool invocations in model messages for follow-up context
+                    for (tool_name, args) in &embedded_tools {
+                        self.model_messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!("TOOL:{} {}", tool_name, args),
+                            images: None,
+                        });
+                    }
+                } else if content.starts_with("TOOL:") {
                     let rest = &content[5..];
                     let parts: Vec<&str> = rest.splitn(2, ' ').collect();
                     if !parts.is_empty() {
@@ -666,6 +704,7 @@ impl App {
                         self.model_messages.push(Message {
                             role: "assistant".to_string(),
                             content: format!("TOOL:{} {}", tool_name, args),
+                            images: None,
                         });
                     }
                 } else {
@@ -732,6 +771,7 @@ impl App {
                 self.model_messages.push(Message {
                     role: "user".to_string(),
                     content: format!("Tool result: {}", result),
+                    images: None,
                 });
             }
             StreamEvent::FollowUp(content) => {
@@ -1165,6 +1205,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • /model <name>     — Switch to model\n\
             • /multi            — Toggle multi-model mode\n\
             \n\
+            Image commands:\n\
+            • /image <path>     — Attach an image to your next message\n\
+            \n\
             Branch commands:\n\
             • /branch <name>    — Create new branch\n\
             • /branches         — List branches\n\
@@ -1319,6 +1362,22 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 app.add_system_message("  /swarm start          — Start autonomous loop".to_string());
                 app.add_system_message("  /swarm stop           — Stop swarm".to_string());
                 app.add_system_message("  /swarm status         — Show swarm status".to_string());
+            }
+        }
+        return Ok(());
+    }
+
+    // ── Image Attachment Command ────────────────────────────────────────────
+    if input.starts_with("/image ") {
+        let path_str = input[7..].trim();
+        let path = std::path::Path::new(path_str);
+        match crate::image_utils::encode_image_to_data_url(path) {
+            Ok(data_url) => {
+                app.pending_image = Some(data_url);
+                app.add_system_message(format!("📎 Image attached: {} (will be sent with your next message)", path.display()));
+            }
+            Err(e) => {
+                app.add_system_message(format!("❌ Failed to encode image: {}", e));
             }
         }
         return Ok(());
@@ -1543,6 +1602,138 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     Ok(())
 }
 
+/// Parse all explicit TOOL: invocations from text, anywhere in the response.
+/// Handles both `TOOL:tool_name args` and `TOOL: tool_name args` (with space after colon).
+fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
+    let mut tools = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("TOOL:") {
+            let rest = &trimmed[5..]; // after "TOOL:"
+            let rest = rest.trim_start(); // handle "TOOL: fs cat" → "fs cat"
+            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+            if !parts.is_empty() && !parts[0].is_empty() {
+                let tool_name = parts[0].trim().to_string();
+                let args = parts.get(1).unwrap_or(&"").trim().to_string();
+                tools.push((tool_name, args));
+            }
+        }
+    }
+    tools
+}
+
+/// Strip TOOL: lines from assistant content for display.
+fn strip_tool_lines(text: &str) -> String {
+    let mut result = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("TOOL:") {
+            if !result.is_empty() {
+                result.push('\n');
+            }
+            result.push_str(line);
+        }
+    }
+    result
+}
+
+/// Execute a chain of tools and stream follow-up via the event channel.
+async fn execute_tool_chain(
+    tx: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+    provider: &Provider,
+    model: &str,
+    model_messages: &[Message],
+    security_engine: &crate::security::SecurityEngine,
+    tools: &[(String, String)],
+    original_content: &str,
+) -> Result<()> {
+    if tools.is_empty() {
+        return Ok(());
+    }
+
+    let mut follow_messages = model_messages.to_vec();
+    // Include the assistant's original message (with tool lines stripped for context)
+    follow_messages.push(Message {
+        role: "assistant".to_string(),
+        content: strip_tool_lines(original_content),
+        images: None,
+    });
+
+    let executor = AsyncToolExecutor::new();
+
+    for (tool_name, args) in tools {
+        // SECURITY GATE
+        match security_engine.check_tool_call(tool_name, args) {
+            crate::security::SecurityDecision::Allow => {}
+            crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
+                let _ = tx.send(StreamEvent::Error(format!(
+                    "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
+                    tool_name, reason, risk_level
+                )));
+                let _ = tx.send(StreamEvent::Done);
+                return Ok(());
+            }
+            crate::security::SecurityDecision::Deny { reason } => {
+                let _ = tx.send(StreamEvent::Error(format!(
+                    "🚫 Security: Tool '{}' blocked\n  Reason: {}",
+                    tool_name, reason
+                )));
+                let _ = tx.send(StreamEvent::Done);
+                return Ok(());
+            }
+        }
+
+        match executor
+            .execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000)
+            .await
+        {
+            Ok(result) => {
+                let sanitized = security_engine.sanitize_output(tool_name, &result);
+                let _ = tx.send(StreamEvent::ToolResult {
+                    name: tool_name.clone(),
+                    args: args.clone(),
+                    result: sanitized.clone(),
+                    success: true,
+                });
+                follow_messages.push(Message {
+                    role: "user".to_string(),
+                    content: format!("Tool result ({} {}): {}", tool_name, args, sanitized),
+                    images: None,
+                });
+            }
+            Err(e) => {
+                let _ = tx.send(StreamEvent::ToolResult {
+                    name: tool_name.clone(),
+                    args: args.clone(),
+                    result: e.to_string(),
+                    success: false,
+                });
+                follow_messages.push(Message {
+                    role: "user".to_string(),
+                    content: format!("Tool error ({} {}): {}", tool_name, args, e),
+                    images: None,
+                });
+            }
+        }
+    }
+
+    // Follow-up request with all tool results
+    let follow_up = ChatRequest::new(model.to_string(), follow_messages, true);
+    match provider.chat_stream(follow_up).await {
+        Ok((follow_chunks, _metrics)) => {
+            let follow_content: String = follow_chunks.join("");
+            let _ = tx.send(StreamEvent::FollowUp(follow_content));
+            let _ = tx.send(StreamEvent::Done);
+        }
+        Err(e) => {
+            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+            let _ = tx.send(StreamEvent::Done);
+        }
+    }
+
+    Ok(())
+}
+
 /// Background task: call the model API and send events back to the TUI loop.
 async fn stream_model_response_task(
     tx: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
@@ -1602,88 +1793,12 @@ async fn stream_model_response_task(
             });
 
             // Handle tool invocation + follow-up
-            if full_content.starts_with("TOOL:") {
-                let rest = &full_content[5..];
-                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-                if !parts.is_empty() {
-                    let tool_name = parts[0].trim().to_string();
-                    let args = parts.get(1).unwrap_or(&"").trim().to_string();
-
-                    // SECURITY GATE in background task
-                    match security_engine.check_tool_call(&tool_name, &args) {
-                        crate::security::SecurityDecision::Allow => {}
-                        crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
-                            let _ = tx.send(StreamEvent::Error(format!(
-                                "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
-                                tool_name, reason, risk_level
-                            )));
-                            let _ = tx.send(StreamEvent::Done);
-                            return Ok(());
-                        }
-                        crate::security::SecurityDecision::Deny { reason } => {
-                            let _ = tx.send(StreamEvent::Error(format!(
-                                "🚫 Security: Tool '{}' blocked\n  Reason: {}",
-                                tool_name, reason
-                            )));
-                            let _ = tx.send(StreamEvent::Done);
-                            return Ok(());
-                        }
-                    }
-
-                    let executor = AsyncToolExecutor::new();
-                    match executor
-                        .execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000)
-                        .await
-                    {
-                        Ok(result) => {
-                            let sanitized = security_engine.sanitize_output(&tool_name, &result);
-                            let _ = tx.send(StreamEvent::ToolResult {
-                                name: tool_name.clone(),
-                                args: args.clone(),
-                                result: sanitized.clone(),
-                                success: true,
-                            });
-
-                            // Follow-up request
-                            let mut follow_messages = model_messages.clone();
-                            follow_messages.push(Message {
-                                role: "assistant".to_string(),
-                                content: format!("TOOL:{} {}", tool_name, args),
-                            });
-                            follow_messages.push(Message {
-                                role: "user".to_string(),
-                                content: format!("Tool result: {}", sanitized),
-                            });
-
-                            let follow_up = ChatRequest::new(
-                                model.clone(),
-                                follow_messages,
-                                true,
-                            );
-
-                            match provider.chat_stream(follow_up).await {
-                                Ok((follow_chunks, _metrics)) => {
-                                    let follow_content: String = follow_chunks.join("");
-                                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
-                                    let _ = tx.send(StreamEvent::Done);
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
-                                    let _ = tx.send(StreamEvent::Done);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(StreamEvent::ToolResult {
-                                name: tool_name,
-                                args,
-                                result: e.to_string(),
-                                success: false,
-                            });
-                            let _ = tx.send(StreamEvent::Done);
-                        }
-                    }
-                }
+            // First, check for embedded TOOL: lines anywhere in the response
+            let embedded_tools = parse_embedded_tools(&full_content);
+            if !embedded_tools.is_empty() {
+                let _ = execute_tool_chain(
+                    &tx, &provider, &model, &model_messages, &security_engine, &embedded_tools, &full_content
+                ).await;
             } else {
                 // ── Handle natural-language tool suggestions ─────────────────────
                 // If the model didn't output TOOL:... but its response contains a
@@ -1721,10 +1836,12 @@ async fn stream_model_response_task(
                                     follow_messages.push(Message {
                                         role: "assistant".to_string(),
                                         content: full_content.clone(),
+                                        images: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
+                                        images: None,
                                     });
 
                                     let follow_up = ChatRequest::new(
@@ -1887,6 +2004,7 @@ fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<()> {
             app.model_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool {} returned: {}", tool_name, sanitized),
+                images: None,
             });
         }
         Err(e) => {
@@ -1974,10 +2092,12 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
             app.model_messages.push(Message {
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
+                images: None,
             });
             app.model_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
+                images: None,
             });
 
             let follow_up = ChatRequest::new(
@@ -2043,10 +2163,12 @@ async fn execute_approved_tool_task(
             follow_messages.push(Message {
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
+                images: None,
             });
             follow_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
+                images: None,
             });
 
             let follow_up = ChatRequest::new(
@@ -2466,6 +2588,16 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(prefix, role_style),
             Span::styled(display_role, role_style.add_modifier(Modifier::BOLD)),
         ]));
+
+        // Image attachment indicator
+        if msg.images.is_some() {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "  📎 Image attached".to_string(),
+                    muted_style().add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
 
         for content_line in msg.content.lines() {
             // Welcome logo lines use purple for visibility against dark bg
