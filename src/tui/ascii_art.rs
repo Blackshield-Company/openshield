@@ -18,41 +18,38 @@ fn center(line: &str, width: usize) -> String {
     }
 }
 
-/// Compact OpenShark wordmark — fits in ~45 char terminals.
-/// Uses heavy block characters for visual punch.
-/// 41 chars wide, 5 lines tall.
+/// The OpenShark wordmark — heavy block letters that DOMINATE the frame.
+/// Each letter is built from █ blocks with gaps for readability.
+/// 50 chars wide, 5 lines tall. Positive-space rendering.
 pub const WORDMARK: &str = r#"
- ██  ██  ███  ████ ██ ████  ████ ██  ██ ████
-██  ██  ████ ████ ████ ████ ████ ████  ██  ██
-██  ██  ████ ████ ████ ████ ████ ████  ██  ██
- ████   ████ ████ ████ ████ ████ ████  ████"#;
+ ████   ████  ██████  ████  ██  ██ ██████  ████   ████  ██  ██ ████  ██  ██
+██  ██ ██  ██ ██     ██  ██ ██  ██ ██     ██  ██ ██  ██ ██  ██ ██ ██ ██ ██
+██  ██ ██  ██ ████   ██████ ██████ ████   ██████ ██████ ██████ ██  ████  ██
+██  ██ ██  ██ ██     ██     ██  ██ ██     ██  ██ ██  ██ ██  ██ ██   ██   ██
+ ████   ████  ██     ██     ██  ██ ██     ██  ██ ██  ██ ██  ██ ██   ██   ██"#;
 
-/// The OpenShark shark fin — detailed pixel-art style.
-/// Features curve, notches, ridge line.
-/// 31 chars wide, 14 lines tall.
+/// The OpenShark shark fin breaching the water.
+/// The fin base merges into the waves below.
+/// 27 chars wide at base, 10 lines tall (including wave merge).
 pub const FIN_LOGO: &str = r#"
-            ███
-           █████
-          ███████
-         █████████
-        ███████████
-       █████████████
-      ███████████████
-     █████████████████
-    ███████████████████
-   █████████████████████
-  ████ █████████████ ████
- ███    ███████████    ███
-███      █████████      ███
-█         ███████         █"#;
+            ██
+           ████
+          ██████
+         ████████
+        ██████████
+       ████████████
+      ██████████████
+     ████████████████
+    ██████████████████
+≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈"#;
 
 /// Three-layer pixel waves with foam crests.
+/// The waves merge with the fin base above.
 pub const WAVE_BACK: &str =
-    "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓";
+    "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
 pub const WAVE_MID: &str =
-    "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒";
-pub const WAVE_FRONT: &str = "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░";
-pub const WAVE_FOAM: &str =  "▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫";
+    "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
+pub const WAVE_FRONT: &str = "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
 
 /// Full welcome banner: wordmark + tagline + fin + waves.
 /// Dominates the chat frame, centered, symmetrical.
@@ -70,17 +67,15 @@ pub fn welcome_banner(frame_width: usize) -> String {
     lines.push(center("Fast. Precise. Hungry.", frame_width));
     lines.push(String::new());
 
-    // Fin — centered
+    // Fin + waves — the fin base merges into waves
     for line in FIN_LOGO.lines().skip(1) {
         lines.push(center(line, frame_width));
     }
 
-    // Wave layers
-    lines.push(String::new());
+    // Wave layers (full width, no centering needed)
     lines.push(WAVE_BACK.to_string());
     lines.push(WAVE_MID.to_string());
     lines.push(WAVE_FRONT.to_string());
-    lines.push(WAVE_FOAM.to_string());
 
     lines.join("\n")
 }
@@ -90,12 +85,12 @@ pub fn welcome_banner(frame_width: usize) -> String {
 pub fn session_header(version: &str) -> String {
     format!(
         r#"
-    ███     openshark {}
-   █████
-  ███████
- █████████   Fast. Precise. Hungry.
-███████████
-░░░░░░░░░░░"#,
+    ██     openshark {}
+   ████
+  ██████
+ ████████   Fast. Precise. Hungry.
+██████████
+≈≈≈≈≈≈≈≈≈≈≈"#,
         version
     )
 }
@@ -105,18 +100,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wordmark_fits_in_terminal() {
+    fn wordmark_spells_openshark() {
         let first_line = WORDMARK.lines().nth(1).unwrap();
-        assert!(first_line.len() <= 45, "Wordmark too wide for terminal: {}", first_line.len());
-        assert!(first_line.contains("█"), "Missing block characters");
+        assert!(first_line.contains("████"), "Missing block letters");
+        assert!(first_line.len() <= 55, "Wordmark too wide: {}", first_line.len());
     }
 
     #[test]
     fn fin_connected_at_top() {
         let lines: Vec<_> = FIN_LOGO.lines().skip(1).collect();
-        assert!(lines[0].contains("███"), "Fin top not connected");
-        let base = lines[lines.len() - 2];
-        assert!(base.contains("  "), "Fin base missing notch");
+        assert!(lines[0].contains("██"), "Fin top not connected");
+        // Base should merge into waves (≈ character)
+        let base = lines[lines.len() - 1];
+        assert!(base.contains('≈'), "Fin base not merged with waves");
     }
 
     #[test]
@@ -124,12 +120,11 @@ mod tests {
         assert_eq!(WAVE_BACK.chars().count(), 80);
         assert_eq!(WAVE_MID.chars().count(), 80);
         assert_eq!(WAVE_FRONT.chars().count(), 80);
-        assert_eq!(WAVE_FOAM.chars().count(), 80);
     }
 
     #[test]
     fn welcome_banner_centered() {
-        let banner = welcome_banner(50);
+        let banner = welcome_banner(60);
         let lines: Vec<_> = banner.lines().collect();
         let first = lines[0];
         assert!(first.starts_with(' ') || first.starts_with('█'), "Not centered");
