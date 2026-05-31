@@ -192,6 +192,7 @@ struct SessionBranch {
 
 #[derive(Debug, Clone, PartialEq)]
 enum AppMode {
+    Splash,
     Normal,
     Agent,
     ToolApproval,
@@ -323,7 +324,7 @@ impl App {
             messages: Vec::new(),
             scroll: 0,
             should_exit: false,
-            mode: AppMode::Normal,
+            mode: AppMode::Splash,
             session_id: session_id.clone(),
             model: model.clone(),
             model_context_length,
@@ -869,9 +870,7 @@ pub async fn run(config: Config) -> Result<()> {
         app.init_mcp().await;
     }
 
-    // Inject welcome message using the agent's configured identity
-    let welcome = ascii_art::welcome_banner(80);
-    app.add_system_message(welcome);
+    // Greeting only — no welcome banner in chat (shown on splash screen instead)
     if !config.agent.greeting.is_empty() {
         app.add_system_message(config.agent.greeting.clone());
     }
@@ -944,6 +943,12 @@ async fn run_app(
 }
 
 async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
+    // Splash mode: any key dismisses the splash screen
+    if app.mode == AppMode::Splash {
+        app.mode = AppMode::Normal;
+        return Ok(false); // Don't exit
+    }
+
     // ToolApproval mode: handle y/n immediately, no other input accepted
     if app.mode == AppMode::ToolApproval {
         match key.code {
@@ -2246,6 +2251,11 @@ fn detect_high_confidence_suggestion(content: &str) -> Option<ToolSuggestion> {
 // ---------------------------------------------------------------------------
 
 fn draw_ui(f: &mut Frame, app: &App) {
+    if app.mode == AppMode::Splash {
+        draw_splash_screen(f);
+        return;
+    }
+
     let size = f.area();
 
     let main_layout = if app.sidebar_expanded {
@@ -2949,4 +2959,82 @@ fn draw_comparison_overlay(f: &mut Frame, app: &App) {
 #[allow(dead_code)]
 fn draw_chat_header(_f: &mut Frame, _area: Rect) {
     // Removed — welcome message is now in chat history
+}
+
+/// Full-screen splash screen — DOS title screen aesthetic.
+/// Shows the OpenShark wordmark, fin, waves, and tagline.
+/// Press any key to dismiss and enter the chat TUI.
+fn draw_splash_screen(f: &mut Frame) {
+    let area = f.area();
+
+    // Solid background fill
+    let bg = Block::default().style(bg_style());
+    f.render_widget(bg, area);
+
+    let banner_text = ascii_art::welcome_banner(area.width as usize);
+    let banner_lines: Vec<Line> = banner_text
+        .lines()
+        .map(|line| {
+            // Colorize different parts of the banner
+            if line.contains('█') && !line.contains('▓') && !line.contains('▒') && !line.contains('░') {
+                // Wordmark / fin — purple/pink
+                Line::from(vec![Span::styled(
+                    line,
+                    Style::default()
+                        .fg(current_theme().accent_secondary)
+                        .add_modifier(Modifier::BOLD),
+                )])
+            } else if line.contains("Fast. Precise. Hungry.") {
+                // Tagline — hot pink
+                Line::from(vec![Span::styled(
+                    line,
+                    Style::default()
+                        .fg(current_theme().accent_secondary)
+                        .add_modifier(Modifier::BOLD),
+                )])
+            } else if line.contains('▓') || line.contains('▒') || line.contains('░') || line.contains('▪') || line.contains('▫') {
+                // Waves — cyan/blue tones
+                Line::from(vec![Span::styled(
+                    line,
+                    Style::default().fg(current_theme().accent),
+                )])
+            } else {
+                Line::from(vec![Span::styled(line, text_style())])
+            }
+        })
+        .collect();
+
+    let banner = Paragraph::new(Text::from(banner_lines))
+        .alignment(Alignment::Center)
+        .style(bg_style());
+
+    // Center vertically: calculate offset to place banner in middle of screen
+    let banner_height = banner_text.lines().count() as u16;
+    let vertical_offset = (area.height.saturating_sub(banner_height)) / 2;
+    let banner_area = Rect {
+        x: area.x,
+        y: area.y + vertical_offset,
+        width: area.width,
+        height: banner_height.min(area.height),
+    };
+
+    f.render_widget(banner, banner_area);
+
+    // "Press any key" prompt at bottom
+    let prompt = Paragraph::new(Text::from(vec![Line::from(vec![Span::styled(
+        "Press any key to start",
+        Style::default()
+            .fg(current_theme().muted)
+            .add_modifier(Modifier::ITALIC),
+    )])]))
+        .alignment(Alignment::Center)
+        .style(bg_style());
+
+    let prompt_area = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(3),
+        width: area.width,
+        height: 1,
+    };
+    f.render_widget(prompt, prompt_area);
 }
