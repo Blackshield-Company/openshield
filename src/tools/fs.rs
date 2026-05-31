@@ -105,6 +105,13 @@ fn cmd_write(args: &str) -> Result<String> {
         return Ok("Usage: fs write <path> <content>".to_string());
     }
     let path = expand_path(write_parts[0]);
+    
+    // Auto-create parent directories if needed
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory for {}", path.display()))?;
+    }
+    
     fs::write(&path, write_parts[1])
         .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(format!("Written successfully to {}", path.display()))
