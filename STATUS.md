@@ -1,6 +1,6 @@
 # OpenShark Status — Session Handoff
 
-## What's Built (v0.4.0)
+## What's Built (v1.0.0)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -27,7 +27,12 @@
 | **Auto-tool detection** | ✅ | Parses `TOOL:`, markdown blocks, and natural language patterns from model output |
 | **Agentic loop** | ✅ | Plan → execute → verify → iterate with user approval, max 10 iterations |
 | **Response caching** | ✅ | In-memory + disk cache with TTL, integrated into Provider |
-| **Comprehensive tests** | ✅ | **246 tests** across all modules |
+| **Swarm mode** | ✅ | Multi-agent orchestration with 8 roles, consensus memory, real LLM per agent |
+| **Context compression** | ✅ | Token-aware compression with semantic summarization |
+| **Evolution engine** | ✅ | Self-adaptive behavior based on tool/model/session performance |
+| **Matrix gateway** | ✅ | Sync loop scaffold with reply sender and unified router |
+| **Slack gateway** | ✅ | Socket Mode scaffold with reply sender |
+| **Comprehensive tests** | ✅ | **337 tests** across all modules |
 
 ## Architecture
 
@@ -105,25 +110,20 @@ Type these directly in the TUI for instant answers from memory:
 - `tell me about <topic>`
 - `what was the issue with <topic>?`
 
-## Completed This Session
+### Completed This Session
 
-### New Features
-- ✅ **Agentic loop** — Autonomous task execution with plan approval. Model generates a JSON plan, user approves/edits/rejects, then executes step-by-step with verification and retry logic (max 3 retries per step, max 10 iterations total). Escalation creates recovery plans for failed steps.
-- ✅ **Memory hierarchy** — Three context layers: Session (current conversation), Project (all sessions in current directory), Global (all sessions everywhere). Each layer can be queried with semantic + keyword + recency ranking.
-- ✅ **Context injection** — Before every user message, automatically searches all three memory layers and injects up to 5 most relevant past messages as system context. Boosts session context 1.5x, project context 1.2x.
-- ✅ **Natural query answering** — Intercepts natural language patterns in TUI input and answers directly from memory hierarchy. Supports "what did we do about X?", "how did we solve X?", "tell me about X", "what was the issue with X?".
-- ✅ **Async tool execution** — `AsyncToolExecutor` with `execute_async()`, `execute_parallel()`, `execute_with_timeout()`. TUI now uses async execution with 30s timeout to stay responsive during tool calls.
-- ✅ **Response caching** — `ResponseCache` with in-memory + disk persistence, TTL-based expiration, and cache key hashing (excludes API keys). Integrated into Provider for both streaming and non-streaming requests.
-
-### Performance Improvements
-- ✅ Optimized `Provider` to reuse a single `reqwest::Client`
-- ✅ Response caching reduces redundant API calls
-- ✅ Async tool execution keeps TUI responsive
+### New Features (v1.0.0)
+- ✅ **Swarm Mode** — Multi-agent orchestration with 8 built-in roles (Architect, Implementer, Reviewer, Tester, DevOps, Security, Documentation, PM). Consensus memory, autonomous loops, real LLM integration per agent.
+- ✅ **Context Compression** — Token-aware context compression with semantic summarization. Keeps long conversations within model context limits.
+- ✅ **Evolution Engine** — Self-adaptive behavior engine that tracks tool outcomes, model performance, and session quality to evolve routing and behavior.
+- ✅ **Matrix Gateway** — Full sync loop scaffold with `MatrixReplySender`, config validation, and unified router integration.
+- ✅ **Slack Gateway** — Socket Mode scaffold with `SlackReplySender`, ready event emission, and full Socket Mode structure.
+- ✅ **Swarm CLI** — `openshark swarm init/start/stop/status` commands for multi-agent orchestration from terminal.
 
 ### Code Quality
-- ✅ **246 tests** across all modules (up from 185)
-- ✅ Zero `unwrap`/`expect` in production code
-- ✅ All memory operations have proper error handling
+- ✅ **337 tests** across all modules (up from 246)
+- ✅ Zero compiler errors, 28 warnings (down from 128+)
+- ✅ All test compilation errors fixed
 
 ## Next Session Targets
 

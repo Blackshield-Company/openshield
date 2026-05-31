@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-01
+
+### Added
+
+- **Swarm Mode** — Multi-agent orchestration with 8 built-in roles (Architect, Implementer, Reviewer, Tester, DevOps, Security, Documentation, PM). Consensus memory, autonomous event-driven loops, real LLM integration per agent with isolated context. `openshark swarm init/start/stop/status` CLI commands.
+- **Context Compression** — Token-aware context compression with semantic summarization. Keeps long conversations within model context limits automatically.
+- **Evolution Engine** — Self-adaptive behavior engine that tracks tool outcomes, model performance, and session quality to evolve routing weights and behavior over time.
+- **Matrix Gateway** — Full sync loop scaffold with `MatrixReplySender`, homeserver validation, and unified router integration.
+- **Slack Gateway** — Socket Mode scaffold with `SlackReplySender`, ready event emission, and full Socket Mode connection structure.
+- **Swarm CLI** — Terminal commands for multi-agent orchestration: `init`, `start`, `stop`, `status`.
+
+### Changed
+
+- **Version bump** — 0.4.0 → 1.0.0 (production-ready release).
+- **Test count** — 246 → 337 comprehensive tests across all modules.
+
+### Fixed
+
+- **Test compilation errors** — Added missing `context_compression` field to all test Config struct initializers.
+
 ## [0.4.0] - 2026-05-30
 
 ### Added
