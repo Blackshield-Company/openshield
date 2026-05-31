@@ -6,6 +6,8 @@
 
 > *The harness that learns. The agent that decides. The tool that doesn't argue.*
 
+![OpenShark Banner](openshark.png)
+
 [![Version](https://img.shields.io/badge/version-1.0.0-neonpink)](https://github.com/synthalorian/openshark)
 [![License](https://img.shields.io/badge/license-MIT-neonblue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange)](https://rust-lang.org)
