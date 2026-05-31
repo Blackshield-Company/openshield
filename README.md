@@ -387,6 +387,8 @@ See [STATUS.md](STATUS.md) for current development status and session handoff no
 
 ---
 
+Made by synth with synthshark 🎹🦈
+
 ## License
 
 MIT — The future of coding belongs to everyone.
