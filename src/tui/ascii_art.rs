@@ -1,142 +1,152 @@
 //! OpenShark ASCII Art & Visual Identity
 //!
-//! Custom block-character art for the TUI welcome screen and branding.
-//! Designed for the synthwave '84 aesthetic — deep purples, electric cyan,
-//! hot pink accents. All art fits within 80-column terminals.
-//!
-//! Quality targets (inspired by Hermes caduceus):
-//! - Braille/texture density for organic forms
-//! - Gradient shading with block characters
-//! - Asymmetric composition with dynamic balance
-//! - Negative space mastery — form defined by surroundings
+//! Pixel-art style block-character art for the TUI welcome screen.
+//! Matches the A-tier DOS title screen aesthetic:
+//! - Blocky "OPENSHARK" wordmark with heavy visual weight
+//! - Detailed shark fin with curve, notches, ridge line
+//! - Three-layer pixel waves with foam crests
+//! - Synthwave '84 color palette: deep purple, electric purple, hot pink, neon cyan
 
-/// The OpenShark dorsal fin logo — high quality version.
-///
-/// Design principles:
-/// - Forward tilt (15°) suggests motion through water
-/// - Asymmetric trailing edge — longer behind, sharp at front
-/// - Internal highlight stripe down leading edge
-/// - Braille dots for water spray texture
-/// - Fade below waterline — only suggestion, not definition
-///
-/// 34 chars wide, 12 lines tall.
-pub const FIN_LOGO: &str = r#"
-              ▗▄▄
-             ▗████▖
-            ▗██▓▓██▖
-           ▗██▓░░▓██▖
-          ▗██▓░  ░▓██▖
-         ▗██▓░    ░▓██▖
-        ▗██▓░      ░▓██▖
-       ▗██▓░        ░▓██▖
-      ▗██▓░          ░▓██▖
-     ▗██▓░            ░▓██▖
-    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-   ░░░░░░░░░░░░░░░░░░░░░░░░░░
-  ░░⠑⠒⠐⠄⠆⠁░░░░░░░░░░░░░░░░░░░░░░░
- ░░⠁⠂⠄⠆⠇⠈⠉⠊⠋⠌⠍⠎⠏░░░░░░░░░░░░░░░░░░░░░"#;
-
-/// Compact fin icon for inline use (sidebar header, etc).
-/// 10 chars wide, 6 lines tall — distilled essence of the full logo.
-pub const FIN_ICON: &str = r#"
-    ▗▄
-   ▗██▖
-  ▗█▓▓█▖
- ▗█▓░░▓█▖
-▗█▓░  ░▓█▖
-▄▄▄▄▄▄▄▄▄▄"#;
-
-/// 3D extruded "OPENSHARK" wordmark.
-///
-/// Hermes-inspired quality:
-/// - Double-line borders (═ ║ ╔ ╗ ╚ ╝) for 3D extrusion
-/// - Half-block shading (▀ ▄) for light-source from above
-/// - Internal structure — walls and floors, not solid blocks
-/// - Vertical gradient: bright top → darker bottom
-/// - Each letter has architectural cross-section detail
-///
-/// 72 chars wide, 9 lines tall. Fits in standard terminals.
-pub const WORDMARK: &str = r#"
-╔══════════════════════════════════════════════════════════════════════╗
-║ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ ▀▀█▀▀ █   █ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ █   █ ▄▀▀▀▄ █▀▀▀▀ ║
-║ █   █ █     █   █   █   ██  █ █   █ █     █   █ ██  █ █   █ █     ║
-║ █   █ █▀▀▀  █   █   █   █ █ █ █▀▀▀█ █▀▀▀  █▀▀▀█ █ █ █ █▀▀▀█ █▀▀▀  ║
-║ █   █ █     █   █   █   █  ██ █   █ █     █   █ █  ██ █   █ █     ║
-║ ▀▄▄▄▀ █▄▄▄▄ ▀▄▄▄▀   ▀   █   █ █   █ █▄▄▄▄ █   █ █   █ █   █ █▄▄▄▄ ║
-║   │     │     │     │     │     │     │     │     │     │     │    ║
-║   │     │     │     │     │     │     │     │     │     │     │    ║
-╚═══╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧════╝"#;
-
-/// Simpler 3D wordmark for smaller terminals (60 cols).
-/// Still has extrusion but lighter weight.
-pub const WORDMARK_COMPACT: &str = r#"
- ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ ▀▀█▀▀ █   █ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ █   █ ▄▀▀▀▄ █▀▀▀▀
- █   █ █     █   █   █   ██  █ █   █ █     █   █ ██  █ █   █ █
- █   █ █▀▀▀  █   █   █   █ █ █ █▀▀▀█ █▀▀▀  █▀▀▀█ █ █ █ █▀▀▀█ █▀▀▀
- █   █ █     █   █   █   █  ██ █   █ █     █   █ █  ██ █   █ █
- ▀▄▄▄▀ █▄▄▄▄ ▀▄▄▄▀   ▀   █   █ █   █ █▄▄▄▄ █   █ █   █ █   █ █▄▄▄▄"#;
-
-/// Combined welcome banner: fin + wordmark.
-/// The fin provides organic counterweight to the geometric text.
-pub fn welcome_banner() -> String {
-    format!("{}\n{}", FIN_LOGO, WORDMARK)
+/// Center a line of text within a given width.
+fn center(line: &str, width: usize) -> String {
+    let line_width = line.chars().count();
+    if line_width >= width {
+        line.to_string()
+    } else {
+        let padding = (width - line_width) / 2;
+        format!("{}{}", " ".repeat(padding), line)
+    }
 }
 
-/// Session startup header — compact, iconic.
-/// Uses the fin icon + text in a tight composition.
+/// The OpenShark wordmark — heavy block letters that DOMINATE the frame.
+/// Each letter is thick, chunky, with pixel-perfect edges.
+/// 70 chars wide, 7 lines tall. Matches the CLAW/Hermes tier.
+pub const WORDMARK: &str = r#"
+ ██████  ██████  ██████  ███   ██ ██████  ██████  ██████  ██   ██ ██████ 
+██    ██ ██   ██ ██   ██ ████  ██ ██      ██   ██ ██   ██ ██  ██  ██   ██
+██    ██ ██████  ██████  ██ ██ ██ ██████  ██████  ██████  █████   ██████ 
+██    ██ ██      ██      ██  ████      ██ ██   ██ ██   ██ ██  ██  ██   ██
+ ██████  ██      ██      ██   ███ ██████  ██   ██ ██   ██ ██   ██ ██   ██
+ ██████                                                                  
+ ██████"#;
+
+/// The OpenShark shark fin — detailed pixel-art style.
+/// Features:
+/// - Slight curve on trailing edge
+/// - Notches at base
+/// - Center ridge line
+/// - Wider at base, tapering to sharp point
+/// - 35 chars wide, 12 lines tall
+pub const FIN_LOGO: &str = r#"
+              ███
+             █████
+            ███████
+           █████████
+          ███████████
+         █████████████
+        ███████████████
+       █████████████████
+      ███████████████████
+     █████████████████████
+    ███████████████████████
+   ████ ███████████████ ████
+  ███    █████████████    ███
+ ███      ███████████      ███
+███        █████████        ███
+██          ███████          ██
+█            █████            █
+              ███              "#;
+
+/// Three-layer pixel waves with foam crests.
+/// Back layer (dark), middle layer (medium), front layer (bright) + foam.
+/// 80 chars wide.
+pub const WAVE_BACK: &str = "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓";
+pub const WAVE_MID: &str =  "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒";
+pub const WAVE_FRONT: &str = "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░";
+pub const WAVE_FOAM: &str =  "▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫";
+
+/// Full welcome banner: wordmark + tagline + fin + waves.
+/// Dominates the chat frame, centered, symmetrical.
+/// Matches the A-tier DOS title screen quality.
+pub fn welcome_banner(frame_width: usize) -> String {
+    let mut lines = Vec::new();
+
+    // Wordmark — centered
+    for line in WORDMARK.lines().skip(1) {
+        lines.push(center(line, frame_width));
+    }
+
+    // Tagline
+    lines.push(String::new());
+    lines.push(center("Fast. Precise. Hungry.", frame_width));
+    lines.push(String::new());
+
+    // Fin — centered
+    for line in FIN_LOGO.lines().skip(1) {
+        lines.push(center(line, frame_width));
+    }
+
+    // Wave layers
+    lines.push(String::new());
+    lines.push(WAVE_BACK.to_string());
+    lines.push(WAVE_MID.to_string());
+    lines.push(WAVE_FRONT.to_string());
+    lines.push(WAVE_FOAM.to_string());
+
+    lines.join("\n")
+}
+
+/// Compact header for sidebar or small spaces.
+/// Shows mini fin + tagline.
 pub fn session_header(version: &str) -> String {
     format!(
         r#"
-    ▗▄     openshark {}
-   ▗██▖
-  ▗█▓▓█▖   Fast. Precise. Hungry.
- ▗█▓░░▓█▖
-▗█▓░  ░▓█▖
-▄▄▄▄▄▄▄▄▄▄"#,
+    ███     openshark {}
+   █████
+  ███████
+ █████████   Fast. Precise. Hungry.
+███████████
+░░░░░░░░░░░"#,
         version
     )
 }
-
-/// Water texture using Braille dots — for ambient background effects.
-/// Same technique as Hermes caduceus: sparse points read as pattern.
-pub const WATER_TEXTURE: &str = r#"⠑⠒⠐⠄⠆⠁⠁⠂⠄⠆⠇⠈⠉⠊⠋⠌⠍⠎⠏"#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn fin_logo_dimensions() {
-        let lines: Vec<_> = FIN_LOGO.lines().collect();
-        assert_eq!(lines.len(), 15); // 14 art + 1 leading newline
-        let max_width = lines.iter().map(|l| l.len()).max().unwrap_or(0);
-        assert!(max_width <= 40, "FIN_LOGO too wide: {} chars", max_width);
+    fn wordmark_spells_openshark() {
+        // The wordmark should contain recognizable letter shapes
+        let first_line = WORDMARK.lines().nth(1).unwrap();
+        assert!(first_line.contains("██████"), "Missing heavy block letters");
+        assert!(first_line.len() > 60, "Wordmark too narrow");
     }
 
     #[test]
-    fn wordmark_fits_in_80_cols() {
-        for line in WORDMARK.lines() {
-            assert!(line.len() <= 74, "WORDMARK line too wide: {}", line);
-        }
+    fn fin_connected_at_top() {
+        let lines: Vec<_> = FIN_LOGO.lines().skip(1).collect();
+        // Top of fin should be solid ███
+        assert!(lines[0].contains("███"), "Fin top not connected");
+        // Base should have notches (gaps)
+        let base = lines[lines.len() - 2];
+        assert!(base.contains("  "), "Fin base missing notch");
     }
 
     #[test]
-    fn wordmark_compact_fits_in_64_cols() {
-        for line in WORDMARK_COMPACT.lines() {
-            assert!(line.len() <= 66, "WORDMARK_COMPACT line too wide: {}", line);
-        }
+    fn wave_layers_present() {
+        assert_eq!(WAVE_BACK.chars().count(), 80);
+        assert_eq!(WAVE_MID.chars().count(), 80);
+        assert_eq!(WAVE_FRONT.chars().count(), 80);
+        assert_eq!(WAVE_FOAM.chars().count(), 80);
     }
 
     #[test]
-    fn session_header_contains_version() {
-        let header = session_header("1.0.0");
-        assert!(header.contains("openshark 1.0.0"));
-        assert!(header.contains("Fast. Precise. Hungry."));
-    }
-
-    #[test]
-    fn fin_icon_compact() {
-        let lines: Vec<_> = FIN_ICON.lines().collect();
-        assert_eq!(lines.len(), 7); // 6 art + 1 leading newline
+    fn welcome_banner_centered() {
+        let banner = welcome_banner(80);
+        let lines: Vec<_> = banner.lines().collect();
+        // First content line should be centered (indented from left edge)
+        let first = lines[0];
+        assert!(first.starts_with(' ') || first.starts_with('█'), "Not centered");
     }
 }

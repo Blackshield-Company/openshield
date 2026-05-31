@@ -870,7 +870,7 @@ pub async fn run(config: Config) -> Result<()> {
     }
 
     // Inject welcome message using the agent's configured identity
-    let welcome = ascii_art::session_header(crate::VERSION);
+    let welcome = ascii_art::welcome_banner(80);
     app.add_system_message(welcome);
     if !config.agent.greeting.is_empty() {
         app.add_system_message(config.agent.greeting.clone());
