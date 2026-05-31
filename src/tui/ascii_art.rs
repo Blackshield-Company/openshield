@@ -18,50 +18,39 @@ fn center(line: &str, width: usize) -> String {
     }
 }
 
-/// The OpenShark wordmark — heavy block letters that DOMINATE the frame.
-/// Each letter is thick, chunky, with pixel-perfect edges.
-/// 70 chars wide, 7 lines tall. Matches the CLAW/Hermes tier.
+/// Compact OpenShark wordmark — fits in ~45 char terminals.
+/// Uses heavy block characters for visual punch.
+/// 41 chars wide, 5 lines tall.
 pub const WORDMARK: &str = r#"
- ██████  ██████  ██████  ███   ██ ██████  ██████  ██████  ██   ██ ██████ 
-██    ██ ██   ██ ██   ██ ████  ██ ██      ██   ██ ██   ██ ██  ██  ██   ██
-██    ██ ██████  ██████  ██ ██ ██ ██████  ██████  ██████  █████   ██████ 
-██    ██ ██      ██      ██  ████      ██ ██   ██ ██   ██ ██  ██  ██   ██
- ██████  ██      ██      ██   ███ ██████  ██   ██ ██   ██ ██   ██ ██   ██
- ██████                                                                  
- ██████"#;
+ ██  ██  ███  ████ ██ ████  ████ ██  ██ ████
+██  ██  ████ ████ ████ ████ ████ ████  ██  ██
+██  ██  ████ ████ ████ ████ ████ ████  ██  ██
+ ████   ████ ████ ████ ████ ████ ████  ████"#;
 
 /// The OpenShark shark fin — detailed pixel-art style.
-/// Features:
-/// - Slight curve on trailing edge
-/// - Notches at base
-/// - Center ridge line
-/// - Wider at base, tapering to sharp point
-/// - 35 chars wide, 12 lines tall
+/// Features curve, notches, ridge line.
+/// 31 chars wide, 14 lines tall.
 pub const FIN_LOGO: &str = r#"
-              ███
-             █████
-            ███████
-           █████████
-          ███████████
-         █████████████
-        ███████████████
-       █████████████████
-      ███████████████████
-     █████████████████████
-    ███████████████████████
-   ████ ███████████████ ████
-  ███    █████████████    ███
- ███      ███████████      ███
-███        █████████        ███
-██          ███████          ██
-█            █████            █
-              ███              "#;
+            ███
+           █████
+          ███████
+         █████████
+        ███████████
+       █████████████
+      ███████████████
+     █████████████████
+    ███████████████████
+   █████████████████████
+  ████ █████████████ ████
+ ███    ███████████    ███
+███      █████████      ███
+█         ███████         █"#;
 
 /// Three-layer pixel waves with foam crests.
-/// Back layer (dark), middle layer (medium), front layer (bright) + foam.
-/// 80 chars wide.
-pub const WAVE_BACK: &str = "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓";
-pub const WAVE_MID: &str =  "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒";
+pub const WAVE_BACK: &str =
+    "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓";
+pub const WAVE_MID: &str =
+    "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒";
 pub const WAVE_FRONT: &str = "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░";
 pub const WAVE_FOAM: &str =  "▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫▪▫";
 
@@ -116,19 +105,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wordmark_spells_openshark() {
-        // The wordmark should contain recognizable letter shapes
+    fn wordmark_fits_in_terminal() {
         let first_line = WORDMARK.lines().nth(1).unwrap();
-        assert!(first_line.contains("██████"), "Missing heavy block letters");
-        assert!(first_line.len() > 60, "Wordmark too narrow");
+        assert!(first_line.len() <= 45, "Wordmark too wide for terminal: {}", first_line.len());
+        assert!(first_line.contains("█"), "Missing block characters");
     }
 
     #[test]
     fn fin_connected_at_top() {
         let lines: Vec<_> = FIN_LOGO.lines().skip(1).collect();
-        // Top of fin should be solid ███
         assert!(lines[0].contains("███"), "Fin top not connected");
-        // Base should have notches (gaps)
         let base = lines[lines.len() - 2];
         assert!(base.contains("  "), "Fin base missing notch");
     }
@@ -143,9 +129,8 @@ mod tests {
 
     #[test]
     fn welcome_banner_centered() {
-        let banner = welcome_banner(80);
+        let banner = welcome_banner(50);
         let lines: Vec<_> = banner.lines().collect();
-        // First content line should be centered (indented from left edge)
         let first = lines[0];
         assert!(first.starts_with(' ') || first.starts_with('█'), "Not centered");
     }
