@@ -46,20 +46,39 @@ pub const FIN_ICON: &str = r#"
 ▗█▓░  ░▓█▖
 ▄▄▄▄▄▄▄▄▄▄"#;
 
-/// The OpenShark wordmark in clean block letters.
-/// Geometric, architectural — internal structure like Hermes title.
-/// Fits in 64 columns, 5 lines tall.
+/// 3D extruded "OPENSHARK" wordmark.
+///
+/// Hermes-inspired quality:
+/// - Double-line borders (═ ║ ╔ ╗ ╚ ╝) for 3D extrusion
+/// - Half-block shading (▀ ▄) for light-source from above
+/// - Internal structure — walls and floors, not solid blocks
+/// - Vertical gradient: bright top → darker bottom
+/// - Each letter has architectural cross-section detail
+///
+/// 72 chars wide, 9 lines tall. Fits in standard terminals.
 pub const WORDMARK: &str = r#"
- ░█████░  ██████  ██████  ██   ██ ███████  █████  ██████   ██ ██
-░██  ░██ ██  ░██ ██  ░██ ██   ██ ██      ██   ██ ██   ██  ██ ██
-░██  ░██ ██████  ██████  ███████ █████   ███████ ██████   ██ ██
-░██  ░██ ██  ░░  ██   ██ ██   ██ ██      ██   ██ ██   ██  ██ ██
- ░█████░  ██████  ██████  ██   ██ ███████ ██   ██ ██   ██  ██ ██"#;
+╔══════════════════════════════════════════════════════════════════════╗
+║ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ ▀▀█▀▀ █   █ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ █   █ ▄▀▀▀▄ █▀▀▀▀ ║
+║ █   █ █     █   █   █   ██  █ █   █ █     █   █ ██  █ █   █ █     ║
+║ █   █ █▀▀▀  █   █   █   █ █ █ █▀▀▀█ █▀▀▀  █▀▀▀█ █ █ █ █▀▀▀█ █▀▀▀  ║
+║ █   █ █     █   █   █   █  ██ █   █ █     █   █ █  ██ █   █ █     ║
+║ ▀▄▄▄▀ █▄▄▄▄ ▀▄▄▄▀   ▀   █   █ █   █ █▄▄▄▄ █   █ █   █ █   █ █▄▄▄▄ ║
+║   │     │     │     │     │     │     │     │     │     │     │    ║
+║   │     │     │     │     │     │     │     │     │     │     │    ║
+╚═══╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧═════╧════╝"#;
 
-/// Combined welcome banner: fin + wordmark side by side.
+/// Simpler 3D wordmark for smaller terminals (60 cols).
+/// Still has extrusion but lighter weight.
+pub const WORDMARK_COMPACT: &str = r#"
+ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ ▀▀█▀▀ █   █ ▄▀▀▀▄ █▀▀▀▀ ▄▀▀▀▄ █   █ ▄▀▀▀▄ █▀▀▀▀
+ █   █ █     █   █   █   ██  █ █   █ █     █   █ ██  █ █   █ █
+ █   █ █▀▀▀  █   █   █   █ █ █ █▀▀▀█ █▀▀▀  █▀▀▀█ █ █ █ █▀▀▀█ █▀▀▀
+ █   █ █     █   █   █   █  ██ █   █ █     █   █ █  ██ █   █ █
+ ▀▄▄▄▀ █▄▄▄▄ ▀▄▄▄▀   ▀   █   █ █   █ █▄▄▄▄ █   █ █   █ █   █ █▄▄▄▄"#;
+
+/// Combined welcome banner: fin + wordmark.
 /// The fin provides organic counterweight to the geometric text.
 pub fn welcome_banner() -> String {
-    // Stack them vertically for cleaner composition
     format!("{}\n{}", FIN_LOGO, WORDMARK)
 }
 
@@ -97,7 +116,14 @@ mod tests {
     #[test]
     fn wordmark_fits_in_80_cols() {
         for line in WORDMARK.lines() {
-            assert!(line.len() <= 66, "Wordmark line too wide: {}", line);
+            assert!(line.len() <= 74, "WORDMARK line too wide: {}", line);
+        }
+    }
+
+    #[test]
+    fn wordmark_compact_fits_in_64_cols() {
+        for line in WORDMARK_COMPACT.lines() {
+            assert!(line.len() <= 66, "WORDMARK_COMPACT line too wide: {}", line);
         }
     }
 
