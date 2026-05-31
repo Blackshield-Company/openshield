@@ -20,31 +20,38 @@ fn center(line: &str, width: usize) -> String {
     }
 }
 
-/// The OpenShark wordmark — heavy block letters that DOMINATE the frame.
-/// Each letter is built from █ blocks with gaps for readability.
-/// 61 chars wide, 5 lines tall. Positive-space rendering.
-pub const WORDMARK: &str = r#" ███   ████   █████  ██ ██   ████  ██ ██   ███   ████   ██ ██
-██ ██  ██ ██  ██     ████   ██     ██ ██  ██ ██  ██ ██  ██ ██
-██ ██  ████   ████   █████   ███   █████  █████  ████   ███  
-██ ██  ██     ██     █ ███     ██  ██ ██  ██ ██  ██ ██  ██ ██
- ███   ██     █████  ██ ██  ████   ██ ██  ██ ██  ██ ██  ██ ██"#;
+/// The OpenShark wordmark — 5×7 pixel font rendered with ▪ small squares.
+/// Each letter is 5 chars wide, 7 rows tall, with 1-char spacing.
+/// ▪ has natural gaps in terminal fonts, making pixel art readable.
+/// 9 letters × 5 + 8 spaces = 53 chars wide, 7 rows tall.
+pub const WORDMARK: &str = r#" ▪▪▪  ▪▪▪▪  ▪▪▪▪▪ ▪   ▪  ▪▪▪▪ ▪   ▪  ▪▪▪  ▪▪▪▪  ▪  ▪
+▪   ▪ ▪   ▪ ▪     ▪▪  ▪ ▪     ▪   ▪ ▪   ▪ ▪   ▪ ▪  ▪
+▪   ▪ ▪   ▪ ▪     ▪ ▪ ▪ ▪     ▪   ▪ ▪   ▪ ▪   ▪ ▪ ▪
+▪   ▪ ▪▪▪▪  ▪▪▪▪  ▪  ▪▪  ▪▪▪  ▪▪▪▪▪ ▪▪▪▪▪ ▪▪▪▪  ▪▪
+▪   ▪ ▪     ▪     ▪   ▪     ▪ ▪   ▪ ▪   ▪ ▪ ▪   ▪ ▪
+▪   ▪ ▪     ▪     ▪   ▪     ▪ ▪   ▪ ▪   ▪ ▪  ▪  ▪  ▪
+ ▪▪▪  ▪     ▪▪▪▪▪ ▪   ▪ ▪▪▪▪  ▪   ▪ ▪   ▪ ▪   ▪ ▪  ▪"#;
+
+/// Tagline — plain text styled in the TUI with hot pink color.
+/// The splash screen renderer detects this exact string to apply special styling.
+pub const TAGLINE: &str = "Fast. Precise. Hungry.";
 
 /// The OpenShark shark fin — sits directly on the water.
 /// NO wave merge line — the fin sits directly on the full-width waves below.
 /// 40 chars wide, 8 lines tall (just the fin body).
-pub const FIN_LOGO: &str = r#"              ██
-             ████
-            ██████
-           ████████
-          ██████████
-         ████████████
-        ██████████████
-       ████████████████"#;
+pub const FIN_LOGO: &str = r#"              ▪▪
+             ▪▪▪▪
+            ▪▪▪▪▪▪
+           ▪▪▪▪▪▪▪▪
+          ▪▪▪▪▪▪▪▪▪▪
+         ▪▪▪▪▪▪▪▪▪▪▪▪
+        ▪▪▪▪▪▪▪▪▪▪▪▪▪▪
+       ▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪"#;
 
 /// Three-layer pixel waves.
 /// Same width as fin base (40 chars) for seamless merge.
 pub const WAVE_BACK: &str = "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
-pub const WAVE_MID: &str =  "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
+pub const WAVE_MID: &str = "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
 pub const WAVE_FRONT: &str = "≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈";
 
 /// Generate a wave line that spans the full terminal width.
@@ -87,9 +94,9 @@ pub fn welcome_banner(frame_width: usize) -> String {
         lines.push(center(line, frame_width));
     }
 
-    // Tagline — centered
+    // Tagline — centered (plain text, styled separately in TUI)
     lines.push(String::new());
-    lines.push(center("Fast. Precise. Hungry.", frame_width));
+    lines.push(center(TAGLINE, frame_width));
     lines.push(String::new());
 
     // Fin — centered (includes wave merge line as last row)
