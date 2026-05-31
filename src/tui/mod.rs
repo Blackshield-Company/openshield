@@ -3005,7 +3005,7 @@ fn draw_splash_screen(f: &mut Frame) {
         .collect();
 
     let banner = Paragraph::new(Text::from(banner_lines))
-        .alignment(Alignment::Center)
+        .alignment(Alignment::Left)
         .style(bg_style());
 
     // Center vertically: calculate offset to place banner in middle of screen
