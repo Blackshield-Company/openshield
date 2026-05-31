@@ -163,6 +163,16 @@ struct App {
     session_perf: SessionPerformance,
     /// Skill registry for loaded skills.
     skill_registry: Option<crate::skills::SkillRegistry>,
+    /// Swarm engine for multi-agent mode.
+    swarm: Option<crate::swarm::SwarmEngine>,
+    /// Whether swarm mode is active in the sidebar.
+    swarm_active: bool,
+    /// Cached swarm agent snapshot for sync rendering.
+    swarm_agents: Vec<crate::swarm::SwarmAgent>,
+    /// Cached swarm running state.
+    swarm_running: bool,
+    /// Context compression engine.
+    compressor: Option<crate::memory::compression::ContextCompressor>,
 }
 
 #[derive(Debug, Clone)]
@@ -352,6 +362,13 @@ impl App {
                     .join("skills");
                 SkillRegistry::new(skills_dir).ok()
             },
+            swarm: None,
+            swarm_active: false,
+            swarm_agents: Vec::new(),
+            swarm_running: false,
+            compressor: Some(crate::memory::compression::ContextCompressor::new(
+                config.context_compression.clone(),
+            )),
         })
     }
 
@@ -815,6 +832,13 @@ impl App {
             format!("{}s", secs)
         }
     }
+
+    /// Estimate context used in tokens (rough word-count based).
+    fn context_used(&self) -> usize {
+        self.model_messages.iter()
+            .map(|m| m.content.split_whitespace().count())
+            .sum()
+    }
 }
 
 pub async fn run(config: Config) -> Result<()> {
@@ -1022,6 +1046,27 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.add_system_message(format!("🎨 Theme: {}", next_name));
             }
         }
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.sidebar_tab = (app.sidebar_tab + 1) % 3;
+            app.sidebar_scroll = 0;
+            let tab_name = match app.sidebar_tab {
+                0 => "Tools",
+                1 => "Skills",
+                2 => "Swarm",
+                _ => "Tools",
+            };
+            app.add_system_message(format!("📋 Sidebar: {}", tab_name));
+        }
+        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.swarm_active = !app.swarm_active;
+            if app.swarm_active {
+                app.sidebar_tab = 2;
+                app.add_system_message("🐝 Swarm mode active. Use /swarm init <prompt> to spawn agents.".to_string());
+            } else {
+                app.sidebar_tab = 0;
+                app.add_system_message("🐝 Swarm mode deactivated.".to_string());
+            }
+        }
         KeyCode::Char('v') if key.modifiers == KeyModifiers::CONTROL => {
             match Clipboard::new().and_then(|mut cb| cb.get_text()) {
                 Ok(text) => {
@@ -1077,6 +1122,8 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Up => {
             if app.show_comparison {
                 app.comparison_selected = app.comparison_selected.saturating_sub(1);
+            } else if app.focused_pane == 0 {
+                app.sidebar_scroll = app.sidebar_scroll.saturating_sub(1);
             } else {
                 app.scroll_up(3);
             }
@@ -1092,15 +1139,25 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if max_responses > 0 {
                     app.comparison_selected = (app.comparison_selected + 1).min(max_responses.saturating_sub(1));
                 }
+            } else if app.focused_pane == 0 {
+                app.sidebar_scroll += 1;
             } else {
                 app.scroll_down(3);
             }
         }
         KeyCode::PageUp => {
-            app.scroll_up(10);
+            if app.focused_pane == 0 {
+                app.sidebar_scroll = app.sidebar_scroll.saturating_sub(5);
+            } else {
+                app.scroll_up(10);
+            }
         }
         KeyCode::PageDown => {
-            app.scroll_down(10);
+            if app.focused_pane == 0 {
+                app.sidebar_scroll += 5;
+            } else {
+                app.scroll_down(10);
+            }
         }
         KeyCode::Esc => {
             if app.show_comparison {
@@ -1146,6 +1203,12 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             Evolution commands:\n\
             • /evolution        — Show adaptive state\n\
             \n\
+            Swarm commands:\n\
+            • /swarm init <prompt> — Initialize agent swarm\n\
+            • /swarm start      — Start autonomous loop\n\
+            • /swarm stop       — Stop swarm\n\
+            • /swarm status     — Show swarm status\n\
+            \n\
             Keybindings:\n\
             • Ctrl+C            — Copy / Quit (double-tap)\n\
             • Ctrl+L            — Clear chat\n\
@@ -1153,6 +1216,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • Ctrl+M            — Model selector\n\
             • Ctrl+A            — Toggle autonomous mode\n\
             • Ctrl+T            — Cycle theme\n\
+            • Ctrl+W            — Toggle swarm mode\n\
+            • Ctrl+S            — Cycle sidebar tab\n\
             • ↑ / ↓             — Scroll\n\
             • PgUp / PgDn       — Fast scroll"
                 .to_string(),
@@ -1205,6 +1270,86 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             app.add_system_message(evolution.state_summary());
         } else {
             app.add_system_message("Evolution engine not initialized.".to_string());
+        }
+        return Ok(());
+    }
+
+    if input == "/swarm" || input.starts_with("/swarm ") {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let cmd = parts.get(1).map(|s| *s).unwrap_or("status");
+        let prompt = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
+
+        match cmd {
+            "init" => {
+                if prompt.is_empty() {
+                    app.add_system_message("Usage: /swarm init <seed prompt>".to_string());
+                    app.add_system_message("Example: /swarm init Build a REST API with auth".to_string());
+                } else if !app.config.swarm.enabled {
+                    app.add_system_message("🐝 Swarm mode is disabled in config.".to_string());
+                    app.add_system_message("Set [swarm] enabled = true in ~/.config/openshark/config.toml".to_string());
+                } else {
+                    let engine = crate::swarm::SwarmEngine::new(app.config.swarm.clone());
+                    match engine.init(&prompt, &app.config).await {
+                        Ok(()) => {
+                            let agents = engine.agent_snapshot().await;
+                            app.swarm_agents = agents.clone();
+                            app.swarm_running = false;
+                            app.add_system_message(format!("🐝 Swarm initialized with {} agents", agents.len()));
+                            for agent in agents {
+                                app.add_system_message(format!("  🐝 {} ({}) — {}", agent.name, agent.role.name, agent.status));
+                            }
+                            app.add_system_message("Run /swarm start to begin the autonomous loop.".to_string());
+                            app.swarm = Some(engine);
+                            app.swarm_active = true;
+                            app.sidebar_tab = 2;
+                        }
+                        Err(e) => app.add_system_message(format!("❌ Swarm init failed: {}", e)),
+                    }
+                }
+            }
+            "start" => {
+                if let Some(ref engine) = app.swarm {
+                    match engine.start().await {
+                        Ok(()) => app.add_system_message("🐝 Swarm loop started.".to_string()),
+                        Err(e) => app.add_system_message(format!("❌ Swarm start failed: {}", e)),
+                    }
+                } else {
+                    app.add_system_message("🐝 No swarm initialized. Run /swarm init <prompt> first.".to_string());
+                }
+            }
+            "stop" => {
+                if let Some(ref engine) = app.swarm {
+                    match engine.stop().await {
+                        Ok(()) => {
+                            app.add_system_message("🐝 Swarm stopped.".to_string());
+                            app.swarm = None;
+                            app.swarm_active = false;
+                        }
+                        Err(e) => app.add_system_message(format!("❌ Swarm stop failed: {}", e)),
+                    }
+                } else {
+                    app.add_system_message("🐝 No swarm running.".to_string());
+                }
+            }
+            "status" => {
+                if let Some(ref engine) = app.swarm {
+                    let status = engine.status().await;
+                    app.add_system_message(format!("{}", status));
+                } else {
+                    app.add_system_message("🐝 No swarm active.".to_string());
+                    app.add_system_message(format!("Config: enabled={}, max_agents={}, roles={:?}",
+                        app.config.swarm.enabled,
+                        app.config.swarm.max_agents,
+                        app.config.swarm.roles));
+                }
+            }
+            _ => {
+                app.add_system_message("🐝 Swarm Commands:".to_string());
+                app.add_system_message("  /swarm init <prompt>  — Initialize swarm".to_string());
+                app.add_system_message("  /swarm start          — Start autonomous loop".to_string());
+                app.add_system_message("  /swarm stop           — Stop swarm".to_string());
+                app.add_system_message("  /swarm status         — Show swarm status".to_string());
+            }
         }
         return Ok(());
     }
@@ -1359,6 +1504,38 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     // ── Phase 1: Enrich system prompt with memory + skills ────────────────
     let mut model_messages = app.model_messages.clone();
+
+    // ── Phase 1b: Context compression if threshold exceeded ────────────────
+    let compression_notice = if let Some(ref mut compressor) = app.compressor {
+        let estimated = crate::memory::compression::estimate_tokens(&model_messages
+        );
+        if compressor.should_compress(estimated, app.model_context_length) {
+            match compressor.compress(&mut model_messages, &app.provider) {
+                Ok(true) => {
+                    let stats = compressor.stats();
+                    Some(format!(
+                        "🗜 Context compressed: {} messages → summaries ({} compressions, ~{} tokens saved)",
+                        stats.messages_summarized,
+                        stats.compressions_done,
+                        stats.tokens_saved
+                    ))
+                }
+                Ok(false) => None,
+                Err(e) => Some(format!(
+                    "⚠️ Context compression failed: {}",
+                    e
+                )),
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(notice) = compression_notice {
+        app.add_system_message(notice);
+    }
+
     if let Some(ref evolution) = app.evolution {
         let base_prompt = if let Some(first) = model_messages.first() {
             first.content.clone()
@@ -2021,14 +2198,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let inner = sidebar_block.inner(area);
     f.render_widget(sidebar_block, area);
 
-    // Compact vertical layout: header → session → shortcuts → tools → perf
+    // Compact vertical layout: header → session → shortcuts → tools/skills → perf
     let sidebar_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // Compact logo + tagline
-            Constraint::Length(7),  // Session info (5 lines + padding)
-            Constraint::Length(7),  // Shortcuts (5 lines + padding)
-            Constraint::Length(6),  // Tools (up to 5)
+            Constraint::Length(9),  // Session info (7 lines + padding)
+            Constraint::Length(9),  // Shortcuts (7 lines + padding)
+            Constraint::Length(8),  // Tools/Skills (up to 6 with tab header)
             Constraint::Min(3),     // Performance (flexible)
         ])
         .split(inner);
@@ -2052,6 +2229,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(header, sidebar_layout[0]);
 
     // Session info — no inner border, just styled text with section header
+    let ctx_used = app.context_used();
+    let ctx_pct = if app.model_context_length > 0 {
+        (ctx_used * 100 / app.model_context_length).min(100)
+    } else { 0 };
+    let ctx_color = if ctx_pct > 80 { error_style() } else if ctx_pct > 50 { accent_style() } else { text_style() };
+
     let session_info = vec![
         Line::from(vec![
             Span::styled("Session  ", muted_style()),
@@ -2060,6 +2243,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("Model    ", muted_style()),
             Span::styled(&app.model, accent_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Max Ctx  ", muted_style()),
+            Span::styled(format!("{}", app.model_context_length), text_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctx Used ", muted_style()),
+            Span::styled(format!("{} ({}%)", ctx_used, ctx_pct), ctx_color),
         ]),
         Line::from(vec![
             Span::styled("Duration ", muted_style()),
@@ -2087,12 +2278,13 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
     // Shortcuts — clean two-column layout
     let shortcuts = vec![
-        Line::from(vec![Span::styled("Ctrl+C  ", accent_style()), Span::styled("Copy / Quit", muted_style())]),
+        Line::from(vec![Span::styled("Ctrl+C×2", accent_style()), Span::styled(" Quit", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+L  ", accent_style()), Span::styled("Clear chat", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+B  ", accent_style()), Span::styled("Toggle sidebar", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+M  ", accent_style()), Span::styled("Model selector", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+A  ", accent_style()), Span::styled("Autonomous mode", muted_style())]),
         Line::from(vec![Span::styled("Ctrl+T  ", accent_style()), Span::styled("Cycle theme", muted_style())]),
+        Line::from(vec![Span::styled("Ctrl+S  ", accent_style()), Span::styled("Tools/Skills", muted_style())]),
         Line::from(vec![Span::styled("↑/↓     ", accent_style()), Span::styled("Scroll", muted_style())]),
         Line::from(vec![Span::styled("PgUp/Dn ", accent_style()), Span::styled("Fast scroll", muted_style())]),
     ];
@@ -2107,24 +2299,93 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .style(bg_style());
     f.render_widget(shortcuts_para, sidebar_layout[2]);
 
-    // Tools — just names, descriptions truncated
-    let all_tools = get_tools();
-    let tools: Vec<Line> = all_tools
-        .iter()
-        .take(5)
-        .map(|t| {
-            let desc = t.description();
-            let desc_short = &desc[..desc.len().min(18)];
-            Line::from(vec![
-                Span::styled(format!("{:<8}", t.name()), tool_style()),
-                Span::styled(desc_short.to_string(), muted_style()),
-            ])
-        })
-        .collect();
-    let tools_para = Paragraph::new(Text::from(tools))
+    // Tools / Skills — tabbed view with scrolling
+    let (tab_title, tab_items): (String, Vec<Line>) = if app.sidebar_tab == 0 {
+        let all_tools = get_tools();
+        let tools: Vec<Line> = all_tools
+            .iter()
+            .skip(app.sidebar_scroll)
+            .take(6)
+            .map(|t| {
+                let desc = t.description();
+                let desc_short = &desc[..desc.len().min(22)];
+                Line::from(vec![
+                    Span::styled(format!("{:<10}", t.name()), tool_style()),
+                    Span::styled(desc_short.to_string(), muted_style()),
+                ])
+            })
+            .collect();
+        (format!(" Tools [{}] ", all_tools.len()), tools)
+    } else if app.sidebar_tab == 1 {
+        let skills: Vec<Line> = app.skill_registry.as_ref()
+            .map(|reg| reg.all_skills().iter()
+                .skip(app.sidebar_scroll)
+                .take(6)
+                .map(|skill| {
+                    let desc = &skill.description;
+                    let desc_short = &desc[..desc.len().min(22)];
+                    Line::from(vec![
+                        Span::styled(format!("{:<10}", &skill.name), tool_style()),
+                        Span::styled(desc_short.to_string(), muted_style()),
+                    ])
+                })
+                .collect()
+            )
+            .unwrap_or_else(|| vec![
+                Line::from(vec![Span::styled("No skills loaded", muted_style())]),
+                Line::from(vec![Span::styled("Add .md files to ~/.config/openshark/skills/", muted_style())]),
+            ]);
+        let count = app.skill_registry.as_ref().map(|r| r.all_skills().len()).unwrap_or(0);
+        (format!(" Skills [{}] ", count), skills)
+    } else {
+        // Swarm tab
+        let swarm_lines: Vec<Line> = if !app.swarm_agents.is_empty() {
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("Status: ", muted_style()),
+                    Span::styled(if app.swarm_running { "🟢 Running" } else { "⏹ Idle" }, text_style()),
+                ]),
+                Line::from(vec![
+                    Span::styled("Agents: ", muted_style()),
+                    Span::styled(format!("{}", app.swarm_agents.len()), text_style()),
+                ]),
+                Line::from(vec![]),
+            ];
+            for agent in app.swarm_agents.iter().skip(app.sidebar_scroll).take(6) {
+                let status_icon = match agent.status {
+                    crate::swarm::AgentStatus::Idle => "⏸",
+                    crate::swarm::AgentStatus::Working { .. } => "🟡",
+                    crate::swarm::AgentStatus::Reviewing { .. } => "👁",
+                    crate::swarm::AgentStatus::WaitingForConsensus { .. } => "⏳",
+                    crate::swarm::AgentStatus::Error { .. } => "❌",
+                    crate::swarm::AgentStatus::Completed { .. } => "✅",
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{} ", status_icon), text_style()),
+                    Span::styled(format!("{:<10}", agent.name), tool_style()),
+                    Span::styled(format!("cycles:{}", agent.cycles_completed), muted_style()),
+                ]));
+            }
+            lines
+        } else {
+            vec![
+                Line::from(vec![Span::styled("No swarm active", muted_style())]),
+                Line::from(vec![Span::styled("Ctrl+W to activate", muted_style())]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("Commands:", muted_style())]),
+                Line::from(vec![Span::styled("/swarm init <prompt>", accent_style())]),
+                Line::from(vec![Span::styled("/swarm start", accent_style())]),
+                Line::from(vec![Span::styled("/swarm stop", accent_style())]),
+                Line::from(vec![Span::styled("/swarm status", accent_style())]),
+            ]
+        };
+        (" Swarm ".to_string(), swarm_lines)
+    };
+
+    let tools_para = Paragraph::new(Text::from(tab_items))
         .block(
             Block::default()
-                .title(" Tools ")
+                .title(tab_title)
                 .title_style(title_style())
                 .borders(Borders::TOP)
                 .border_style(border_style()),
@@ -2132,30 +2393,31 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .style(bg_style());
     f.render_widget(tools_para, sidebar_layout[3]);
 
-    // Performance — compact, no border
-    let perf_lines = match app.memory.get_performance_summary() {
-        Ok(summary) if summary.total_requests > 0 => vec![
+    // Performance — per-session metrics
+    let perf_lines = if app.session_perf.requests > 0 {
+        vec![
             Line::from(vec![
                 Span::styled("First token: ", muted_style()),
-                Span::styled(format!("{}ms", summary.avg_first_token_ms), text_style()),
+                Span::styled(format!("{}ms", app.session_perf.avg_first_token()), text_style()),
             ]),
             Line::from(vec![
                 Span::styled("Total latency: ", muted_style()),
-                Span::styled(format!("{}ms", summary.avg_total_latency_ms), text_style()),
+                Span::styled(format!("{}ms", app.session_perf.avg_total_latency()), text_style()),
             ]),
             Line::from(vec![
                 Span::styled("Tool exec: ", muted_style()),
-                Span::styled(format!("{}ms", summary.avg_tool_execution_ms), text_style()),
+                Span::styled(format!("{}ms", app.session_perf.avg_tool_exec()), text_style()),
             ]),
             Line::from(vec![
                 Span::styled("Requests: ", muted_style()),
-                Span::styled(summary.total_requests.to_string(), text_style()),
+                Span::styled(app.session_perf.requests.to_string(), text_style()),
             ]),
-        ],
-        _ => vec![
+        ]
+    } else {
+        vec![
             Line::from(vec![Span::styled("No performance data yet", muted_style())]),
             Line::from(vec![Span::styled("Start chatting to collect metrics", muted_style())]),
-        ],
+        ]
     };
     let perf = Paragraph::new(Text::from(perf_lines))
         .block(

@@ -717,6 +717,8 @@ mod tests {
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
             filesystem: crate::config::FilesystemConfig::default(),
+            swarm: crate::swarm::SwarmConfig::default(),
+            context_compression: crate::memory::compression::ContextCompressionConfig::default(),
         }
     }
 

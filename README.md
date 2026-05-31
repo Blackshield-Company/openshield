@@ -4,7 +4,7 @@
   / ___ \ (__| | | (_| \__ \   <| | | | (_) >  <
  /_/   \_\___|_|  \__,_|___/_|\_\_| |_|\___/_/\_\
 
-> *The harness that learns. The agent that decides. The tool that doesn't argue.*
+> 🦈 *The harness that learns. The agent that decides. The tool that doesn't argue.*
 
 ![OpenShark Banner](openshark.png)
 
@@ -392,7 +392,5 @@ See [STATUS.md](STATUS.md) for current development status and session handoff no
 Made by synth with synthshark 🎹🦈
 
 ## License
-
-MIT — The future of coding belongs to everyone.
 
 MIT — The future of coding belongs to everyone.

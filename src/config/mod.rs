@@ -135,6 +135,10 @@ pub struct Config {
     pub theme: String,
     #[serde(default)]
     pub filesystem: FilesystemConfig,
+    #[serde(default)]
+    pub swarm: crate::swarm::SwarmConfig,
+    #[serde(default)]
+    pub context_compression: crate::memory::compression::ContextCompressionConfig,
 }
 
 fn default_theme() -> String {
@@ -380,7 +384,7 @@ impl Default for Config {
             models: vec![
                 ModelConfig {
                     name: "kimi-k2.6".to_string(),
-                    context_length: 256000,
+                    context_length: 262100,
                     cost_per_1k_input: 0.0,
                     cost_per_1k_output: 0.0,
                     capabilities: vec!["code".to_string(), "chat".to_string(), "analysis".to_string()],
@@ -562,6 +566,8 @@ impl Default for Config {
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
             filesystem: FilesystemConfig::default(),
+            swarm: crate::swarm::SwarmConfig::default(),
+            context_compression: crate::memory::compression::ContextCompressionConfig::default(),
         }
     }
 }
@@ -637,6 +643,8 @@ mod tests {
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
             filesystem: FilesystemConfig::default(),
+            swarm: crate::swarm::SwarmConfig::default(),
+            context_compression: crate::memory::compression::ContextCompressionConfig::default(),
         }
     }
 

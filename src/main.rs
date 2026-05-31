@@ -17,6 +17,7 @@ mod router;
 mod security;
 mod self_improve;
 mod skills;
+mod swarm;
 mod tools;
 mod tui;
 
@@ -76,6 +77,12 @@ enum Commands {
     Mcp {
         #[arg(default_value = "status")]
         cmd: String,
+    },
+    Swarm {
+        #[arg(default_value = "status")]
+        cmd: String,
+        #[arg(default_value = "")]
+        prompt: String,
     },
 }
 
@@ -725,6 +732,82 @@ async fn main() -> anyhow::Result<()> {
                     println!("🔌 MCP Commands");
                     println!("  openshark mcp status - Show MCP configuration");
                     println!("  openshark mcp tools  - Show tool discovery info");
+                }
+            }
+        }
+        Some(Commands::Swarm { cmd, prompt }) => {
+            match cmd.as_str() {
+                "init" => {
+                    if prompt.is_empty() {
+                        println!("🐝 Swarm Mode");
+                        println!("Usage: openshark swarm init 'your seed prompt here'");
+                        println!();
+                        println!("Example:");
+                        println!("  openshark swarm init 'Build a REST API with auth'");
+                    } else {
+                        println!("🐝 Initializing swarm...");
+                        let swarm_config = config.swarm.clone();
+                        if !swarm_config.enabled {
+                            println!("⚠️  Swarm mode is disabled in config.");
+                            println!("  Set [swarm] enabled = true to enable.");
+                            println!();
+                            println!("  Current config:");
+                            println!("    enabled: {}", swarm_config.enabled);
+                            println!("    max_agents: {}", swarm_config.max_agents);
+                            println!("    roles: {:?}", swarm_config.roles);
+                        } else {
+                            let engine = swarm::SwarmEngine::new(swarm_config);
+                            match engine.init(&prompt, &config).await {
+                                Ok(()) => {
+                                    println!("✅ Swarm initialized with {} agents", engine.agent_snapshot().await.len());
+                                    println!();
+                                    for agent in engine.agent_snapshot().await {
+                                        println!("  🐝 {} ({}) - {}", agent.name, agent.role.name, agent.status);
+                                    }
+                                    println!();
+                                    println!("  Run `openshark swarm start` to begin the autonomous loop.");
+                                }
+                                Err(e) => println!("❌ Failed to initialize swarm: {}", e),
+                            }
+                        }
+                    }
+                }
+                "start" => {
+                    println!("🐝 Starting swarm...");
+                    let swarm_config = config.swarm.clone();
+                    let engine = swarm::SwarmEngine::new(swarm_config);
+                    match engine.start().await {
+                        Ok(()) => {
+                            println!("✅ Swarm loop started");
+                            println!("  Run `openshark swarm status` to check progress.");
+                        }
+                        Err(e) => println!("❌ Failed to start swarm: {}", e),
+                    }
+                }
+                "stop" => {
+                    println!("🐝 Stopping swarm...");
+                    let swarm_config = config.swarm.clone();
+                    let engine = swarm::SwarmEngine::new(swarm_config);
+                    match engine.stop().await {
+                        Ok(()) => println!("✅ Swarm stopped"),
+                        Err(e) => println!("❌ Failed to stop swarm: {}", e),
+                    }
+                }
+                "status" => {
+                    let swarm_config = config.swarm.clone();
+                    let engine = swarm::SwarmEngine::new(swarm_config);
+                    let status = engine.status().await;
+                    println!("{}", status);
+                }
+                _ => {
+                    println!("🐝 Swarm Commands");
+                    println!("  openshark swarm init 'prompt'  - Initialize swarm with seed prompt");
+                    println!("  openshark swarm start           - Start autonomous loop");
+                    println!("  openshark swarm stop            - Stop swarm");
+                    println!("  openshark swarm status          - Show swarm status");
+                    println!();
+                    println!("  Config: [swarm] enabled = {}", config.swarm.enabled);
+                    println!("  Roles: {:?}", config.swarm.roles);
                 }
             }
         }
