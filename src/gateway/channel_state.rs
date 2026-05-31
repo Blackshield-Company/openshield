@@ -243,6 +243,7 @@ impl ChannelStateStore {
     }
 
     /// Check if a channel has state.
+    #[allow(dead_code)]
     pub fn has(&self, channel_id: u64) -> bool {
         let states = self.states.lock().unwrap();
         states.contains_key(&channel_id)

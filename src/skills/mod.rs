@@ -136,6 +136,7 @@ impl SkillRegistry {
     }
 
     /// Get skill by name.
+    #[allow(dead_code)]
     pub fn get_by_name(&self, name: &str) -> Option<&Skill> {
         self.skills.iter().find(|s| s.name == name)
     }
@@ -163,6 +164,7 @@ impl SkillRegistry {
     }
 
     /// Reload all skills from disk.
+    #[allow(dead_code)]
     pub fn reload(&mut self) -> Result<()> {
         self.skills.clear();
         self.trigger_index.clear();

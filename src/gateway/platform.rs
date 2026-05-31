@@ -2,11 +2,16 @@
 //!
 //! All gateways (Discord, Telegram, Slack, WhatsApp, Matrix) emit the same
 //! `PlatformEvent` types, which the `MessageRouter` handles uniformly.
+//!
+//! NOTE: These types are the foundation for a future unified gateway architecture.
+//! Currently each gateway has its own event types; this module provides the
+//! shared vocabulary for when we consolidate them.
 
 use tokio::sync::mpsc;
 
 /// A user message received from any platform.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct UserMessage {
     pub platform: Platform,
     pub channel_id: String,
@@ -19,6 +24,7 @@ pub struct UserMessage {
 
 /// A platform-specific command/slash command.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PlatformCommand {
     pub platform: Platform,
     pub command: String,
@@ -30,6 +36,7 @@ pub struct PlatformCommand {
 
 /// Platform lifecycle events.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum PlatformEvent {
     UserMessage(UserMessage),
     Command(PlatformCommand),
@@ -39,6 +46,7 @@ pub enum PlatformEvent {
 
 /// Supported platforms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum Platform {
     Discord,
     Telegram,
@@ -61,6 +69,7 @@ impl std::fmt::Display for Platform {
 
 /// Trait for platform gateways.
 #[async_trait::async_trait]
+#[allow(dead_code)]
 pub trait Gateway: Send + Sync {
     /// Platform identifier.
     fn platform(&self) -> Platform;

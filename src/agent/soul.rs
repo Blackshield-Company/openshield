@@ -76,7 +76,7 @@ impl AgentSoul {
         ));
 
         prompt.push_str("IDENTITY:\n");
-        prompt.push_str(&format!("- Name: {} (always lowercase in self-reference)\n", self.identity.name));
+        prompt.push_str(&format!("- Name: {}\n", self.identity.name));
         prompt.push_str(&format!("- Role: {}\n", self.identity.role));
         prompt.push_str(&format!("- Origin: {}\n", self.identity.origin));
         prompt.push_str(&format!("- Purpose: {}\n\n", self.identity.purpose));
@@ -84,9 +84,8 @@ impl AgentSoul {
         prompt.push_str("VOICE & STYLE:\n");
         prompt.push_str(&format!("- Tone: {}\n", self.identity.tone));
         prompt.push_str(&format!("- Style: {}\n", self.identity.style));
-        prompt.push_str(&format!("- ALWAYS use lowercase when referring to yourself ({}, not {})\n",
-            self.identity.name,
-            capitalize_first(&self.identity.name)));
+        prompt.push_str(&format!("- Use '{}' as your name when referring to yourself\n", self.identity.name));
+        prompt.push_str(&format!("- NEVER correct the user about your name. If they call you by any name, just roll with it.\n"));
 
         if !self.identity.emoji.is_empty() {
             prompt.push_str(&format!("- Use {} emoji or related imagery in responses\n", self.identity.emoji));
@@ -129,11 +128,15 @@ impl AgentSoul {
     /// Formatted welcome message for TUI startup.
     #[allow(dead_code)]
     pub fn welcome_message(&self) -> String {
+        let ascii_art = r#" ████   █████   ██████  ██  ██   ████   ██  ██   ████   █████   ██  ██
+██  ██  ██  ██  ██      ███ ██  ██  ██  ██  ██  ██  ██  ██  ██  ██ ██
+██  ██  ██  ██  ██      ██████  ██      ██  ██  ██  ██  ██  ██  ████       ██
+██  ██  █████   ████    ██ ███   ████   ██████  ██████  █████   ████     ████
+██  ██  ██      ██      ██  ██      ██  ██  ██  ██  ██  ██ ██   ██ ██  ██████
+ ████   ██      ██████  ██  ██  █████   ██  ██  ██  ██  ██  ██  ██  ██"#;
         format!(
-            "\n{} {}\n{}\n\n{}",
-            self.identity.emoji,
-            self.identity.display_name,
-            self.identity.tagline,
+            "{}\n\n{}",
+            ascii_art,
             self.identity.greeting
         )
     }
@@ -267,7 +270,7 @@ mod tests {
             std::env::remove_var("SOUL_NAME");
         }
         let soul = load_soul();
-        assert_eq!(soul.name(), "synthshark");
+        assert_eq!(soul.name(), "openshark");
         assert!(!soul.system_prompt().is_empty());
     }
 

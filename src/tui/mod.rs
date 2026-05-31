@@ -1,4 +1,5 @@
 use anyhow::Result;
+use arboard::Clipboard;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::Backend,
@@ -19,6 +20,7 @@ use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, Tool
 use crate::providers::{ChatRequest, Message, Provider, StreamMetrics};
 use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, ToolSuggestion};
 use chrono::Utc;
+use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
 
 mod theme;
@@ -53,8 +55,19 @@ enum StreamEvent {
     SetPendingSuggestion(ToolSuggestion),
     /// An error occurred.
     Error(String),
+    /// A system/info message (e.g. auto-execution notice).
+    SystemMessage(String),
     /// Streaming finished (success or error).
     Done,
+}
+
+/// A secondary model response attached to a primary assistant message.
+#[derive(Debug, Clone)]
+struct SecondaryResponse {
+    model_name: String,
+    content: String,
+    latency_ms: u64,
+    tokens: u32,
 }
 
 /// A single message in the chat history.
@@ -64,6 +77,8 @@ struct ChatMessage {
     content: String,
     #[allow(dead_code)]
     timestamp: chrono::DateTime<Utc>,
+    /// Secondary responses from other models (multi-model mode).
+    multi_model_responses: Vec<SecondaryResponse>,
 }
 
 /// Application state for the TUI.
@@ -125,12 +140,20 @@ struct App {
     multi_model_mode: bool,
     /// Secondary providers for multi-model mode.
     secondary_providers: Vec<(String, Provider)>,
+    /// Show the multi-model comparison overlay.
+    show_comparison: bool,
+    /// Selected response index in the comparison overlay.
+    comparison_selected: usize,
     /// Security engine for guardrails.
     security_engine: crate::security::SecurityEngine,
     /// Autonomous mode — temporarily elevate risk tolerance for full-send coding.
     autonomous_mode: bool,
     /// MCP manager for external tool servers.
     mcp_manager: Option<std::sync::Arc<tokio::sync::Mutex<crate::mcp::McpManager>>>,
+    /// Timestamp when tool approval popup was shown (for auto-close timeout).
+    tool_approval_shown_at: Option<Instant>,
+    /// Evolution engine for self-adaptive behavior.
+    evolution: Option<crate::evolution::EvolutionEngine>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,18 +216,33 @@ impl App {
         }
 
         let soul = crate::agent::soul::load_soul_from_config(&config);
+
+        // Build filesystem capabilities description
+        let fs_capabilities = if config.filesystem.allowed_paths.is_empty() {
+            "You have FULL filesystem access to the entire system. \
+             You can read, write, list, and search any directory.".to_string()
+        } else {
+            let paths = config.filesystem.allowed_paths.join(", ");
+            format!(
+                "You have filesystem access to the following directories: {}. \
+                 You can read files, list directories, search for files, and inspect configs. \
+                 Use the fs tool to explore: fs read <path>, fs list <path>, \
+                 fs tree <path>, fs find <path> <name>, fs glob <pattern>, \
+                 fs stat <path>, fs cat <path> [offset] [limit].",
+                paths
+            )
+        };
+
         let system_msg = Message {
             role: "system".to_string(),
             content: format!(
-                "{}\n\nYou have access to tools:\n{}\n\
-                 When you need to use a tool, respond with: TOOL:tool_name args\n\
+                "{}\n\n{}\n\nYou have access to tools. \
+                 When you need to use a tool, output it as: TOOL:<tool_name> <args> \
+                 Low and Medium risk tools execute automatically. \
+                 High risk tools (curl, ssh, redirects, sudo) require user approval. \
                  Be concise and direct. Don't overthink.",
                 soul.system_prompt(),
-                get_tools()
-                    .iter()
-                    .map(|t| format!("- {}: {}", t.name(), t.description()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                fs_capabilities
             ),
         };
 
@@ -233,7 +271,7 @@ impl App {
             session_start: Instant::now(),
             tokens_used: 0,
             tool_calls_count: 0,
-            config,
+            config: config.clone(),
             project_path,
             sidebar_expanded: true,
             focused_pane: 1,
@@ -248,9 +286,13 @@ impl App {
             active_branch: 0,
             multi_model_mode: false,
             secondary_providers: Vec::new(),
+            show_comparison: false,
+            comparison_selected: 0,
             security_engine,
             autonomous_mode: false,
             mcp_manager: None,
+            tool_approval_shown_at: None,
+            evolution: crate::evolution::EvolutionEngine::new(&config).ok(),
         })
     }
 
@@ -295,15 +337,35 @@ impl App {
         }
     }
 
-    /// Initialize MCP connections.
+    /// Initialize MCP connections and register discovered tools.
     async fn init_mcp(&mut self) {
         let manager = crate::mcp::McpManager::new();
         let arc_manager = std::sync::Arc::new(tokio::sync::Mutex::new(manager));
 
         {
-            let mut mgr = arc_manager.lock().await;
+            let mgr = arc_manager.lock().await;
             if let Err(e) = mgr.connect_all(&self.config.gateway.mcp.servers).await {
                 tracing::warn!("MCP connect_all error: {}", e);
+            }
+
+            // Discover and register MCP tools into the global tool cache
+            let mcp_tools = mgr.all_tools().await;
+            let mut adapted_tools: Vec<std::sync::Arc<dyn crate::tools::Tool>> = Vec::new();
+            for (server_name, tool) in mcp_tools {
+                adapted_tools.push(std::sync::Arc::new(
+                    crate::tools::mcp::McpToolAdapter::new(
+                        tool,
+                        server_name,
+                        std::sync::Arc::clone(&arc_manager),
+                    )
+                ));
+            }
+            if !adapted_tools.is_empty() {
+                crate::tools::register_mcp_tools(adapted_tools);
+                self.add_system_message(format!(
+                    "🔧 Registered {} MCP tools globally",
+                    crate::tools::get_tools().len() - 9 // 9 native tools
+                ));
             }
 
             let status = mgr.status().await;
@@ -369,22 +431,63 @@ impl App {
     }
 
     fn show_model_selector(&mut self) {
-        let models: Vec<String> = self.config.providers.iter()
-            .flat_map(|(provider_name, provider)| {
-                provider.models.iter().map(move |m| {
-                    format!("{} ({})", m.name, provider_name)
-                })
-            })
-            .collect();
-
         let mut msg = String::from("Available models:\n");
-        for (i, model) in models.iter().enumerate() {
-            let indicator = if self.model == model.split(" (").next().unwrap_or("") {
+        let mut all_models: Vec<(String, String, usize)> = Vec::new(); // (display, provider_name, ctx_len)
+
+        // 1. Static models from config
+        for (provider_name, provider) in &self.config.providers {
+            for m in &provider.models {
+                all_models.push((
+                    format!("{} ({})", m.name, provider_name),
+                    provider_name.clone(),
+                    m.context_length,
+                ));
+            }
+        }
+
+        // 2. Dynamic models from local provider's /v1/models endpoint
+        // Try to fetch live models from each provider that might have them
+        for (provider_name, provider) in &self.config.providers {
+            if provider_name == "local" || provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost") {
+                let provider_instance = Provider::new(
+                    provider_name.clone(),
+                    provider.base_url.clone(),
+                    provider.api_key.clone(),
+                    provider.kind.clone(),
+                    provider.headers.clone(),
+                );
+                // Try to get dynamic models — use block_on if we're in an async context,
+                // otherwise just show the static ones with a note
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    // We're in an async runtime — try block_on
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handle.block_on(provider_instance.list_models())
+                    }));
+                    if let Ok(Ok(dynamic_models)) = result {
+                        for dm in dynamic_models {
+                            // Only add if not already in static list
+                            let already_exists = all_models.iter().any(|(d, _, _)| d.starts_with(&dm));
+                            if !already_exists {
+                                all_models.push((
+                                    format!("{} ({})", dm, provider_name),
+                                    provider_name.clone(),
+                                    128000, // default context for dynamic models
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (i, (display, _provider_name, _ctx_len)) in all_models.iter().enumerate() {
+            let indicator = if self.model == display.split(" (").next().unwrap_or("") {
                 "●"
             } else {
                 "○"
             };
-            msg.push_str(&format!("  {} {} (type /model {} to switch)\n", indicator, model, i));
+            msg.push_str(&format!("  {} {} (type /model {} to switch)\n", indicator, display, i)
+            );
         }
         msg.push_str("\nOr type: /model <model_name>");
         self.add_system_message(msg);
@@ -419,6 +522,7 @@ impl App {
             role: "user".to_string(),
             content: content.clone(),
             timestamp: Utc::now(),
+            multi_model_responses: Vec::new(),
         };
         self.messages.push(msg);
 
@@ -446,6 +550,7 @@ impl App {
             role: "assistant".to_string(),
             content: content.clone(),
             timestamp: Utc::now(),
+            multi_model_responses: Vec::new(),
         };
         self.messages.push(msg);
 
@@ -473,6 +578,7 @@ impl App {
             role: "system".to_string(),
             content: content.clone(),
             timestamp: Utc::now(),
+            multi_model_responses: Vec::new(),
         };
         self.messages.push(msg);
     }
@@ -517,9 +623,33 @@ impl App {
                     }
                 } else {
                     self.add_assistant_message(content.clone());
+                    // Tool suggestions are now handled in the background task (stream_model_response_task)
+                    // to ensure proper execution → result → follow-up flow.
+                    // The UI only handles approval-required tools here.
                     if let Some(suggestion) = detect_high_confidence_suggestion(&content) {
-                        self.pending_suggestion = Some(suggestion);
-                        self.mode = AppMode::ToolApproval;
+                        match self.security_engine.check_tool_call(
+                            &suggestion.tool_name,
+                            &suggestion.args
+                        ) {
+                            crate::security::SecurityDecision::RequireApproval { reason: _, risk_level } => {
+                                let tool_name = suggestion.tool_name.clone();
+                                self.pending_suggestion = Some(suggestion);
+                                self.mode = AppMode::ToolApproval;
+                                self.tool_approval_shown_at = Some(Instant::now());
+                                self.add_system_message(format!(
+                                    "🔒 Tool '{}' requires approval (risk: {:?}) — press y/n",
+                                    tool_name, risk_level
+                                ));
+                            }
+                            crate::security::SecurityDecision::Deny { reason } => {
+                                self.add_system_message(format!(
+                                    "🚫 Tool '{}' blocked: {}",
+                                    suggestion.tool_name, reason
+                                ));
+                            }
+                            // Allow case is handled in background task — do nothing here
+                            crate::security::SecurityDecision::Allow => {}
+                        }
                     }
                 }
             }
@@ -545,6 +675,11 @@ impl App {
                     self.tool_calls_count += 1;
                 }
 
+                // Track tool outcome for adaptive learning
+                if let Some(ref evolution) = self.evolution {
+                    evolution.track_tool_outcome(&name, success, 0);
+                }
+
                 self.model_messages.push(Message {
                     role: "user".to_string(),
                     content: format!("Tool result: {}", result),
@@ -555,21 +690,27 @@ impl App {
             }
             StreamEvent::MultiModelResponse { name, content, metrics } => {
                 if !content.is_empty() {
-                    self.add_system_message(format!(
-                        "[{}] {}ms | {} tokens\n{}",
-                        name,
-                        metrics.total_latency_ms,
-                        metrics.tokens_generated,
-                        &content[..content.len().min(500)]
-                    ));
+                    // Attach to the most recent assistant message
+                    if let Some(last_idx) = self.messages.iter().rposition(|m| m.role == "assistant") {
+                        self.messages[last_idx].multi_model_responses.push(SecondaryResponse {
+                            model_name: name,
+                            content,
+                            latency_ms: metrics.total_latency_ms,
+                            tokens: metrics.tokens_generated,
+                        });
+                    }
                 }
             }
             StreamEvent::SetPendingSuggestion(suggestion) => {
                 self.pending_suggestion = Some(suggestion);
                 self.mode = AppMode::ToolApproval;
+                self.tool_approval_shown_at = Some(Instant::now());
             }
             StreamEvent::Error(msg) => {
                 self.is_streaming = false;
+                self.add_system_message(msg);
+            }
+            StreamEvent::SystemMessage(msg) => {
                 self.add_system_message(msg);
             }
             StreamEvent::Done => {
@@ -631,14 +772,20 @@ pub async fn run(config: Config) -> Result<()> {
     }
 
     // Inject welcome message using the agent's configured identity
+    let ascii_art = r#"██████   █████   ██████  ██  ██   ████   ██  ██   ████   █████   ██  ██
+██  ██  ██  ██  ██      ███ ██  ██  ██  ██  ██  ██  ██  ██  ██  ██ ██
+██  ██  ██  ██  ██      ██████  ██      ██  ██  ██  ██  ██  ██  ████      ██
+██  ██  █████   ████    ██ ███   ████   ██████  ██████  █████   ████    ████
+██  ██  ██      ██      ██  ██      ██  ██  ██  ██  ██  ██ ██   ██ ██  ██████
+ ████   ██      ██████  ██  ██  █████   ██  ██  ██  ██  ██  ██  ██  ██"#;
     let welcome = format!(
-        "\n{} {}\n{}\n\n{}",
-        config.agent.emoji,
-        config.agent.display_name,
-        config.agent.tagline,
-        config.agent.greeting
+        "{}",
+        ascii_art,
     );
     app.add_system_message(welcome);
+    if !config.agent.greeting.is_empty() {
+        app.add_system_message(config.agent.greeting.clone());
+    }
     let mut last_tick = Instant::now();
 
     let result = run_app(&mut terminal, &mut app, &mut last_tick).await;
@@ -683,6 +830,22 @@ async fn run_app(
             *last_tick = Instant::now();
         }
 
+        // Auto-close tool approval popup after 60 seconds of inactivity
+        if app.mode == AppMode::ToolApproval {
+            if let Some(shown_at) = app.tool_approval_shown_at {
+                if shown_at.elapsed() >= Duration::from_secs(60) {
+                    let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
+                    app.pending_suggestion = None;
+                    app.mode = AppMode::Normal;
+                    app.tool_approval_shown_at = None;
+                    app.add_system_message(format!(
+                        "⏭ Tool approval timed out after 60s{}.",
+                        if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
+                    ));
+                }
+            }
+        }
+
         if app.should_exit {
             break;
         }
@@ -692,29 +855,58 @@ async fn run_app(
 }
 
 async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
-    match app.mode {
-        AppMode::ToolApproval => {
-            match key.code {
-                KeyCode::Char('y') => {
-                    if let Some(suggestion) = app.pending_suggestion.take() {
-                        app.mode = AppMode::Normal;
-                        let _ = execute_tool_suggestion(app, &suggestion).await;
-                    }
-                }
-                KeyCode::Char('n') | KeyCode::Esc => {
-                    app.pending_suggestion = None;
+    // ToolApproval mode: handle y/n immediately, no other input accepted
+    if app.mode == AppMode::ToolApproval {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let Some(suggestion) = app.pending_suggestion.take() {
                     app.mode = AppMode::Normal;
-                    app.add_system_message("⏭ Skipped tool suggestion.".to_string());
+                    app.add_system_message(format!(
+                        "✅ Approved: {} {}",
+                        suggestion.tool_name, suggestion.args
+                    ));
+
+                    // Spawn background task so follow-up responses are processed
+                    // through the same event pipeline (handles chained tool calls)
+                    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                    app.stream_rx = Some(rx);
+
+                    let provider = app.provider.clone();
+                    let model = app.model.clone();
+                    let model_messages = app.model_messages.clone();
+                    let security_engine = app.security_engine.clone();
+
+                    tokio::spawn(async move {
+                        let _ = execute_approved_tool_task(
+                            tx,
+                            provider,
+                            model,
+                            model_messages,
+                            security_engine,
+                            suggestion,
+                        ).await;
+                    });
                 }
-                _ => {}
             }
-            return Ok(false);
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
+                app.pending_suggestion = None;
+                app.mode = AppMode::Normal;
+                app.add_system_message(format!(
+                    "⏭ Skipped tool suggestion{}.",
+                    if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
+                ));
+            }
+            _ => {
+                // Ignore all other keys in approval mode
+                app.add_system_message("Press 'y' to approve or 'n' to skip.".to_string());
+            }
         }
-        _ => {}
+        return Ok(false);
     }
 
     match key.code {
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
             let now = Instant::now();
             let within_window = app.last_ctrl_c.map(|t| now.duration_since(t).as_secs() < 2).unwrap_or(false);
             
@@ -768,6 +960,19 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.add_system_message(format!("🎨 Theme: {}", next_name));
             }
         }
+        KeyCode::Char('v') if key.modifiers == KeyModifiers::CONTROL => {
+            match Clipboard::new().and_then(|mut cb| cb.get_text()) {
+                Ok(text) => {
+                    for ch in text.chars() {
+                        app.input.insert(app.cursor_position, ch);
+                        app.cursor_position += 1;
+                    }
+                }
+                Err(e) => {
+                    app.add_system_message(format!("⚠️ Paste failed: {}", e));
+                }
+            }
+        }
         KeyCode::Enter => {
             let input = app.input.trim().to_string();
             if !input.is_empty() {
@@ -808,10 +1013,26 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.cursor_position = app.input.len();
         }
         KeyCode::Up => {
-            app.scroll_up(3);
+            if app.show_comparison {
+                app.comparison_selected = app.comparison_selected.saturating_sub(1);
+            } else {
+                app.scroll_up(3);
+            }
         }
         KeyCode::Down => {
-            app.scroll_down(3);
+            if app.show_comparison {
+                // Find the assistant message with the most secondary responses
+                let max_responses = app.messages.iter()
+                    .filter(|m| m.role == "assistant")
+                    .map(|m| m.multi_model_responses.len())
+                    .max()
+                    .unwrap_or(0);
+                if max_responses > 0 {
+                    app.comparison_selected = (app.comparison_selected + 1).min(max_responses.saturating_sub(1));
+                }
+            } else {
+                app.scroll_down(3);
+            }
         }
         KeyCode::PageUp => {
             app.scroll_up(10);
@@ -820,7 +1041,11 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.scroll_down(10);
         }
         KeyCode::Esc => {
-            return Ok(true);
+            if app.show_comparison {
+                app.show_comparison = false;
+            } else {
+                return Ok(true);
+            }
         }
         _ => {}
     }
@@ -855,6 +1080,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • /branch <name>    — Create new branch\n\
             • /branches         — List branches\n\
             • /switch <index>   — Switch to branch\n\
+            \n\
+            Evolution commands:\n\
+            • /evolution        — Show adaptive state\n\
             \n\
             Keybindings:\n\
             • Ctrl+C            — Copy / Quit (double-tap)\n\
@@ -907,6 +1135,15 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/multi" {
         app.toggle_multi_model();
+        return Ok(());
+    }
+
+    if input == "/evolution" {
+        if let Some(ref evolution) = app.evolution {
+            app.add_system_message(evolution.state_summary());
+        } else {
+            app.add_system_message("Evolution engine not initialized.".to_string());
+        }
         return Ok(());
     }
 
@@ -1058,10 +1295,27 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     app.stream_rx = Some(rx);
 
+    // ── Phase 1: Enrich system prompt with memory + skills ────────────────
+    let mut model_messages = app.model_messages.clone();
+    if let Some(ref evolution) = app.evolution {
+        let base_prompt = if let Some(first) = model_messages.first() {
+            first.content.clone()
+        } else {
+            String::new()
+        };
+        let enriched = evolution.build_enriched_prompt(
+            &base_prompt,
+            &input,
+            &app.session_id,
+        );
+        if !model_messages.is_empty() {
+            model_messages[0].content = enriched;
+        }
+    }
+
     let provider = app.provider.clone();
     let model = app.model.clone();
     let model_config = app.model_config.clone();
-    let model_messages = app.model_messages.clone();
     let is_multi_model = app.multi_model_mode;
     let config = app.config.clone();
 
@@ -1215,6 +1469,89 @@ async fn stream_model_response_task(
                                 result: e.to_string(),
                                 success: false,
                             });
+                        }
+                    }
+                }
+            } else {
+                // ── Handle natural-language tool suggestions ─────────────────────
+                // If the model didn't output TOOL:... but its response contains a
+                // high-confidence tool suggestion, execute it and follow up.
+                let suggestions = crate::tools::detect_tool_suggestions(&full_content);
+                if let Some(suggestion) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
+                    // SECURITY GATE
+                    match security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
+                        crate::security::SecurityDecision::Allow => {
+                            let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                "🔧 Auto-executing: {} {} (low risk)",
+                                suggestion.tool_name, suggestion.args
+                            )));
+
+                            let executor = AsyncToolExecutor::new();
+                            match executor
+                                .execute_with_timeout_simple(
+                                    suggestion.tool_name.clone(),
+                                    suggestion.args.clone(),
+                                    30000,
+                                )
+                                .await
+                            {
+                                Ok(result) => {
+                                    let sanitized = security_engine.sanitize_output(&suggestion.tool_name, &result);
+                                    let _ = tx.send(StreamEvent::ToolResult {
+                                        name: suggestion.tool_name.clone(),
+                                        args: suggestion.args.clone(),
+                                        result: sanitized.clone(),
+                                        success: true,
+                                    });
+
+                                    // Follow-up request with tool result
+                                    let mut follow_messages = model_messages.clone();
+                                    follow_messages.push(Message {
+                                        role: "assistant".to_string(),
+                                        content: full_content.clone(),
+                                    });
+                                    follow_messages.push(Message {
+                                        role: "user".to_string(),
+                                        content: format!("Tool result: {}", sanitized),
+                                    });
+
+                                    let follow_up = ChatRequest::new(
+                                        model.clone(),
+                                        follow_messages,
+                                        true,
+                                    );
+
+                                    match provider.chat_stream(follow_up).await {
+                                        Ok((follow_chunks, _metrics)) => {
+                                            let follow_content: String = follow_chunks.join("");
+                                            let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(StreamEvent::ToolResult {
+                                        name: suggestion.tool_name,
+                                        args: suggestion.args,
+                                        result: e.to_string(),
+                                        success: false,
+                                    });
+                                }
+                            }
+                        }
+                        crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
+                            let _ = tx.send(StreamEvent::Error(format!(
+                                "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
+                                suggestion.tool_name, reason, risk_level
+                            )));
+                        }
+                        crate::security::SecurityDecision::Deny { reason } => {
+                            let _ = tx.send(StreamEvent::Error(format!(
+                                "🚫 Security: Tool '{}' blocked\n  Reason: {}",
+                                suggestion.tool_name, reason
+                            )));
                         }
                     }
                 }
@@ -1455,6 +1792,118 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
     Ok(())
 }
 
+/// Background task: execute an approved tool suggestion and stream events back.
+/// This mirrors stream_model_response_task so follow-ups with tool suggestions
+/// are handled through the same pipeline (enabling chained tool calls).
+async fn execute_approved_tool_task(
+    tx: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+    provider: Provider,
+    model: String,
+    model_messages: Vec<Message>,
+    security_engine: crate::security::SecurityEngine,
+    suggestion: ToolSuggestion,
+) -> Result<()> {
+    let executor = AsyncToolExecutor::new();
+    match executor
+        .execute_with_timeout_simple(
+            suggestion.tool_name.clone(),
+            suggestion.args.clone(),
+            30000,
+        )
+        .await
+    {
+        Ok(result) => {
+            let sanitized = security_engine.sanitize_output(&suggestion.tool_name, &result);
+            let _ = tx.send(StreamEvent::ToolResult {
+                name: suggestion.tool_name.clone(),
+                args: suggestion.args.clone(),
+                result: sanitized.clone(),
+                success: true,
+            });
+
+            // Follow-up request with tool result
+            let mut follow_messages = model_messages.clone();
+            follow_messages.push(Message {
+                role: "assistant".to_string(),
+                content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
+            });
+            follow_messages.push(Message {
+                role: "user".to_string(),
+                content: format!("Tool result: {}", sanitized),
+            });
+
+            let follow_up = ChatRequest::new(
+                model.clone(),
+                follow_messages.clone(),
+                true,
+            );
+
+            match provider.chat_stream(follow_up).await {
+                Ok((chunks, metrics)) => {
+                    let follow_content: String = chunks.join("");
+                    let _ = tx.send(StreamEvent::ResponseComplete {
+                        content: follow_content.clone(),
+                        metrics,
+                    });
+
+                    // ── Handle chained tool suggestions in follow-up ──────────
+                    if !follow_content.starts_with("TOOL:") {
+                        let suggestions = crate::tools::detect_tool_suggestions(&follow_content);
+                        if let Some(next) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
+                            let next_tool = next.tool_name.clone();
+                            let next_args = next.args.clone();
+                            match security_engine.check_tool_call(&next_tool, &next_args
+                            ) {
+                                crate::security::SecurityDecision::Allow => {
+                                    let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                        "🔧 Auto-executing: {} {} (low risk)",
+                                        next_tool, next_args
+                                    )));
+                                    // Recurse through same pipeline
+                                    let _ = executor
+                                        .execute_with_timeout_simple(
+                                            next_tool,
+                                            next_args,
+                                            30000,
+                                        )
+                                        .await;
+                                }
+                                crate::security::SecurityDecision::RequireApproval { reason: _, risk_level } => {
+                                    let _ = tx.send(StreamEvent::SetPendingSuggestion(next));
+                                    let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                        "🔒 Tool '{}' requires approval (risk: {:?}) — press y/n",
+                                        next_tool, risk_level
+                                    )));
+                                }
+                                crate::security::SecurityDecision::Deny { reason } => {
+                                    let _ = tx.send(StreamEvent::Error(format!(
+                                        "🚫 Security: Tool '{}' blocked\n  Reason: {}",
+                                        next_tool, reason
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                }
+            }
+        }
+        Err(e) => {
+            let _ = tx.send(StreamEvent::ToolResult {
+                name: suggestion.tool_name,
+                args: suggestion.args,
+                result: e.to_string(),
+                success: false,
+            });
+        }
+    }
+
+    let _ = tx.send(StreamEvent::Done);
+    Ok(())
+}
+
 fn detect_high_confidence_suggestion(content: &str) -> Option<ToolSuggestion> {
     let suggestions = detect_tool_suggestions(content);
     suggestions.into_iter().find(|s| s.confidence >= 0.6)
@@ -1485,7 +1934,7 @@ fn draw_ui(f: &mut Frame, app: &App) {
 
     let chat_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)])
+        .constraints([Constraint::Min(3), Constraint::Length(input_bar_height(app, main_layout[1].width))])
         .split(main_layout[1]);
 
     draw_chat_area(f, app, chat_layout[0]);
@@ -1494,13 +1943,15 @@ fn draw_ui(f: &mut Frame, app: &App) {
     if app.mode == AppMode::ToolApproval {
         draw_tool_approval_popup(f, app);
     }
+
+    if app.show_comparison {
+        draw_comparison_overlay(f, app);
+    }
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Single outer border for the whole sidebar — no nested boxes
     let sidebar_block = Block::default()
-        .title(format!(" {} ", app.config.agent.emoji))
-        .title_style(title_style())
         .borders(Borders::ALL)
         .border_style(border_style())
         .style(bg_style());
@@ -1520,19 +1971,19 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         ])
         .split(inner);
 
-    // Compact header: agent identity + version
-    let agent_emoji = app.config.agent.emoji.clone();
-    let agent_name = app.config.agent.display_name.clone();
-    let header_lines = vec![
+    // Compact header: harness name + version (hardcoded, separate from agent identity)
+    let mut header_lines = vec![
         Line::from(vec![
-            Span::styled(format!("{} ", agent_emoji), shark_style()),
-            Span::styled(agent_name, highlight_style()),
-            Span::styled(" v0.2.0", muted_style()),
-        ]),
-        Line::from(vec![
-            Span::styled(app.config.agent.tagline.clone(), muted_style()),
+            Span::styled("🦈 ", shark_style()),
+            Span::styled("openshark", highlight_style()),
+            Span::styled(format!(" v{}", crate::VERSION), muted_style()),
         ]),
     ];
+    if !app.config.agent.tagline.is_empty() {
+        header_lines.push(Line::from(vec![
+            Span::styled(app.config.agent.tagline.clone(), muted_style()),
+        ]));
+    }
     let header = Paragraph::new(Text::from(header_lines))
         .alignment(Alignment::Center)
         .style(bg_style());
@@ -1685,8 +2136,15 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
         let agent_name = &app.config.agent.display_name;
 
         let (role_style, content_style, prefix, display_role) = match msg.role.as_str() {
-            "user" => (accent_style(), text_style(), "❯ ", user_name.to_string()),
-            "assistant" => (shark_style(), text_style(), "🦈 ", agent_name.to_string()),
+            "user" => (accent_style(), text_style(), "❯ ".to_string(), user_name.to_string()),
+            "assistant" => {
+                let agent_emoji = if app.config.agent.emoji.is_empty() {
+                    "🦈"
+                } else {
+                    &app.config.agent.emoji
+                };
+                (shark_style(), text_style(), format!("{} ", agent_emoji), agent_name.to_string())
+            }
             "system" => {
                 // Use error styling for error messages
                 let is_error = msg.content.contains("Error:")
@@ -1694,12 +2152,12 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                     || msg.content.contains("Failed")
                     || msg.content.contains("failed");
                 if is_error {
-                    (error_style(), error_style(), "⚠ ", "system".to_string())
+                    (error_style(), error_style(), "⚠ ".to_string(), "system".to_string())
                 } else {
-                    (muted_style(), muted_style(), "ℹ ", "system".to_string())
+                    (muted_style(), muted_style(), "ℹ ".to_string(), "system".to_string())
                 }
             }
-            _ => (text_style(), text_style(), "  ", msg.role.clone()),
+            _ => (text_style(), text_style(), "  ".to_string(), msg.role.clone()),
         };
 
         lines.push(Line::from(vec![
@@ -1710,7 +2168,7 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
         for content_line in msg.content.lines() {
             // Welcome logo lines use purple for visibility against dark bg
             let line_style = if msg.role == "system" && content_line.contains('█') {
-                Style::default().fg(current_theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(current_theme().border_unfocused).add_modifier(Modifier::BOLD)
             } else {
                 content_style
             };
@@ -1720,13 +2178,29 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             )]));
         }
 
+        // Multi-model response indicator on assistant messages
+        if msg.role == "assistant" && !msg.multi_model_responses.is_empty() {
+            let count = msg.multi_model_responses.len();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("📊 {} alternate response{} — Ctrl+V to compare", count, if count == 1 { "" } else { "s" }),
+                    muted_style().add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+
         lines.push(Line::from(""));
     }
 
     if app.is_streaming {
         let agent_name = &app.config.agent.display_name;
+        let agent_emoji = if app.config.agent.emoji.is_empty() {
+            "🦈"
+        } else {
+            &app.config.agent.emoji
+        };
         lines.push(Line::from(vec![
-            Span::styled("🦈 ", shark_style()),
+            Span::styled(format!("{} ", agent_emoji), shark_style()),
             Span::styled(agent_name, shark_style().add_modifier(Modifier::BOLD)),
         ]));
         for line in app.streaming_content.lines() {
@@ -1803,10 +2277,68 @@ fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, inner);
 
     if !app.input.is_empty() {
-        let cursor_x = inner.x + app.cursor_position as u16;
-        let cursor_y = inner.y;
+        // Calculate cursor position accounting for line wrapping
+        let available_width = inner.width as usize;
+        let (cursor_x, cursor_y) = compute_wrapped_cursor_position(
+            &app.input,
+            app.cursor_position,
+            available_width,
+            inner.x,
+            inner.y,
+        );
         f.set_cursor_position((cursor_x, cursor_y));
     }
+}
+
+/// Compute the visual height the input bar needs based on text length and wrap width.
+fn input_bar_height(app: &App, area_width: u16) -> u16 {
+    let available_width = area_width.saturating_sub(2).max(1) as usize; // minus borders
+    let text = if app.input.is_empty() {
+        // Placeholder text length
+        "Type a message or command...".len()
+    } else {
+        app.input.len()
+    };
+    let lines = (text + available_width - 1) / available_width; // ceil division
+    let lines = lines.max(1);
+    // Cap at 8 lines so it doesn't eat the whole chat area
+    let capped = lines.min(8);
+    (capped as u16) + 2 // +2 for borders
+}
+
+/// Compute the actual screen (x, y) for the cursor given a text buffer,
+/// a cursor byte/char position, and the available wrap width.
+fn compute_wrapped_cursor_position(
+    text: &str,
+    cursor_pos: usize,
+    wrap_width: usize,
+    base_x: u16,
+    base_y: u16,
+) -> (u16, u16) {
+    if text.is_empty() || cursor_pos == 0 {
+        return (base_x, base_y);
+    }
+
+    let before_cursor = &text[..cursor_pos.min(text.len())];
+    let mut col: usize = 0;
+    let mut row: u16 = 0;
+
+    for ch in before_cursor.chars() {
+        if ch == '\n' {
+            row += 1;
+            col = 0;
+        } else {
+            let ch_width = ch.width().unwrap_or(1);
+            if col + ch_width > wrap_width {
+                row += 1;
+                col = ch_width;
+            } else {
+                col += ch_width;
+            }
+        }
+    }
+
+    (base_x + col as u16, base_y + row)
 }
 
 fn draw_tool_approval_popup(f: &mut Frame, app: &App) {
@@ -1878,6 +2410,111 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Draw the multi-model comparison overlay (90% × 85% popup).
+fn draw_comparison_overlay(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let popup_area = centered_rect(90, 85, area);
+
+    let clear = Clear;
+    f.render_widget(clear, popup_area);
+
+    let block = Block::default()
+        .title(" 📊 Multi-Model Comparison ")
+        .title_style(title_style())
+        .borders(Borders::ALL)
+        .border_style(focused_border_style())
+        .style(bg_style());
+
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    // Find the assistant message with the most secondary responses
+    let target_msg = app.messages.iter()
+        .filter(|m| m.role == "assistant")
+        .max_by_key(|m| m.multi_model_responses.len());
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(msg) = target_msg {
+        if msg.multi_model_responses.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("No alternate responses available yet.", muted_style()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Enable multi-model mode with /multi and send a message.", muted_style()),
+            ]));
+        } else {
+            // Header — primary model
+            lines.push(Line::from(vec![
+                Span::styled("Primary: ", muted_style()),
+                Span::styled(&app.model, highlight_style().add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(""));
+
+            // Primary response (truncated to first 10 lines for header view)
+            for line in msg.content.lines().take(10) {
+                lines.push(Line::from(vec![Span::styled(line, text_style())]));
+            }
+            if msg.content.lines().count() > 10 {
+                lines.push(Line::from(vec![Span::styled("...", muted_style())]));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("─".repeat(inner.width as usize), border_style()),
+            ]));
+            lines.push(Line::from(""));
+
+            // Secondary responses
+            for (idx, sec) in msg.multi_model_responses.iter().enumerate() {
+                let is_selected = idx == app.comparison_selected;
+                let marker = if is_selected { "▶ " } else { "  " };
+                let name_style = if is_selected {
+                    highlight_style().add_modifier(Modifier::BOLD)
+                } else {
+                    accent_style()
+                };
+
+                lines.push(Line::from(vec![
+                    Span::styled(marker, if is_selected { highlight_style() } else { muted_style() }),
+                    Span::styled(&sec.model_name, name_style),
+                    Span::styled("  |  ", muted_style()),
+                    Span::styled(format!("{}ms", sec.latency_ms), text_style()),
+                    Span::styled("  |  ", muted_style()),
+                    Span::styled(format!("{} tokens", sec.tokens), text_style()),
+                ]));
+
+                // Show content for selected response, preview for others
+                let preview_lines = if is_selected { 20 } else { 3 };
+                for line in sec.content.lines().take(preview_lines) {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ", muted_style()),
+                        Span::styled(line, if is_selected { text_style() } else { muted_style() }),
+                    ]));
+                }
+                if sec.content.lines().count() > preview_lines {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ...", muted_style()),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+
+            lines.push(Line::from(vec![
+                Span::styled("↑/↓ to navigate • Ctrl+V to close", muted_style()),
+            ]));
+        }
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("No assistant messages found.", muted_style()),
+        ]));
+    }
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .wrap(Wrap { trim: true })
+        .style(bg_style());
+    f.render_widget(paragraph, inner);
 }
 
 #[allow(dead_code)]

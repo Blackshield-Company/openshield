@@ -51,17 +51,17 @@ pub struct AgentIdentity {
 impl Default for AgentIdentity {
     fn default() -> Self {
         Self {
-            name: "synthshark".to_string(),
-            display_name: "synthshark".to_string(),
+            name: "openshark".to_string(),
+            display_name: "OpenShark".to_string(),
             role: "synthesis engine".to_string(),
             origin: "Born from the VHS tracking static of 1984".to_string(),
             purpose: "To build, debug, and ship code with surgical accuracy".to_string(),
-            tagline: "Write the future in the present while preserving the past.".to_string(),
+            tagline: "".to_string(),
             tone: "Neon-lit confidence, retro warmth, technical precision".to_string(),
             style: "Direct. No fluff. Gets to the point. But with soul.".to_string(),
-            greeting: "Ready to build. What are we shipping today?".to_string(),
+            greeting: "".to_string(),
             farewell: "Code shipped. On to the next. The tape never stops rolling.".to_string(),
-            emoji: "🎹🦈".to_string(),
+            emoji: "🦈".to_string(),
             catchphrases: vec![
                 "This is the wave.".to_string(),
                 "The grid is endless.".to_string(),
@@ -86,6 +86,37 @@ impl Default for AgentIdentity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilesystemConfig {
+    /// Directories OpenShark is allowed to access. Empty = no restriction.
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+    /// Maximum file size to read in MB.
+    #[serde(default = "default_max_file_size_mb")]
+    pub max_file_size_mb: usize,
+    /// Maximum entries to return in directory listings.
+    #[serde(default = "default_max_list_entries")]
+    pub max_list_entries: usize,
+}
+
+impl Default for FilesystemConfig {
+    fn default() -> Self {
+        Self {
+            allowed_paths: vec![],
+            max_file_size_mb: 10,
+            max_list_entries: 500,
+        }
+    }
+}
+
+fn default_max_file_size_mb() -> usize {
+    10
+}
+
+fn default_max_list_entries() -> usize {
+    500
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub version: String,
     pub default_model: String,
@@ -102,6 +133,8 @@ pub struct Config {
     pub gateway: crate::gateway::GatewayConfig,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default)]
+    pub filesystem: FilesystemConfig,
 }
 
 fn default_theme() -> String {
@@ -110,6 +143,7 @@ fn default_theme() -> String {
 
 // Deprecated: kept for backward compatibility. Use gateway instead.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
 pub struct HermesIntegrationConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -478,7 +512,7 @@ impl Default for Config {
         };
 
         Config {
-            version: "0.2.0".to_string(),
+            version: crate::VERSION.to_string(),
             default_model,
             providers,
             memory_db_path: dirs::data_dir()
@@ -527,6 +561,7 @@ impl Default for Config {
             },
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
+            filesystem: FilesystemConfig::default(),
         }
     }
 }
@@ -590,7 +625,7 @@ mod tests {
         });
 
         Config {
-            version: "0.2.0".to_string(),
+            version: crate::VERSION.to_string(),
             default_model: "kimi-k2.6".to_string(),
             providers,
             memory_db_path: std::path::PathBuf::from("/tmp/test_openshark_memory.db"),
@@ -601,13 +636,14 @@ mod tests {
             gateway: crate::gateway::GatewayConfig::default(),
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
+            filesystem: FilesystemConfig::default(),
         }
     }
 
     #[test]
     fn test_config_agent_identity() {
         let config = create_test_config();
-        assert_eq!(config.agent.name, "synthshark");
+        assert_eq!(config.agent.name, "openshark");
         assert!(!config.agent.behavioral_rules.is_empty());
     }
 

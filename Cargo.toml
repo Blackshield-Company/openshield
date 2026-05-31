@@ -1,6 +1,6 @@
 [package]
 name = "openshark"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["synth <synthalorian@gmail.com>"]
 description = "The harness that learns. The agent that decides."
@@ -13,6 +13,13 @@ rust-version = "1.85"
 [[bin]]
 name = "openshark"
 path = "src/main.rs"
+
+[features]
+default = ["discord", "telegram"]
+discord = []
+telegram = []
+slack = []
+matrix = []
 
 [dependencies]
 # Async runtime
@@ -38,6 +45,7 @@ anyhow = "1.0"
 thiserror = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.16", features = ["v4", "serde"] }
+unicode-width = "0.2"
 walkdir = "2.5"
 regex = "1.11"
 
@@ -48,9 +56,10 @@ shellexpand = "3.1.2"
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"] }
 async-trait = "0.1"
 teloxide = { version = "0.17", features = ["macros"] }
-slack-morphism = "2.22"
-matrix-sdk = "0.17"
+slack-morphism = { version = "2.22", optional = true }
+matrix-sdk = { version = "0.17", optional = true }
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+arboard = "3.6.1"
 
 [dev-dependencies]
 tokio-test = "0.4"

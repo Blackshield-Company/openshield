@@ -15,6 +15,7 @@ pub use detection::{detect_tool_suggestions, ToolSuggestion};
 
 use anyhow::Result;
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 
 /// Tool definition for schema-based tools (e.g., MCP tools).
 #[derive(Debug, Clone)]
@@ -31,21 +32,39 @@ pub trait Tool: Send + Sync {
     fn execute(&self, args: &str) -> Result<String>;
 }
 
-pub fn get_tools() -> Vec<Box<dyn Tool>> {
-    vec![
-        Box::new(edit::EditTool),
-        Box::new(fs::FsTool),
-        Box::new(git::GitTool),
-        Box::new(lsp::LspTool),
-        Box::new(refactor::RefactorTool),
-        Box::new(search::SearchTool),
-        Box::new(search::GrepTool),
-        Box::new(terminal::TerminalTool),
-        Box::new(test_runner::TestTool),
-    ]
+/// Global cache for MCP-discovered tools, populated after MCP initialization.
+static MCP_TOOLS: Mutex<Vec<Arc<dyn Tool>>> = Mutex::new(Vec::new());
+
+/// Register MCP tools into the global cache. Called after MCP discovery.
+pub fn register_mcp_tools(tools: Vec<Arc<dyn Tool>>) {
+    if let Ok(mut guard) = MCP_TOOLS.lock() {
+        guard.clear();
+        guard.extend(tools);
+    }
 }
 
-pub fn find_tool(name: &str) -> Option<Box<dyn Tool>> {
+/// Get all native + MCP tools.
+pub fn get_tools() -> Vec<Arc<dyn Tool>> {
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(edit::EditTool),
+        Arc::new(fs::FsTool),
+        Arc::new(git::GitTool),
+        Arc::new(lsp::LspTool),
+        Arc::new(refactor::RefactorTool),
+        Arc::new(search::SearchTool),
+        Arc::new(search::GrepTool),
+        Arc::new(terminal::TerminalTool),
+        Arc::new(test_runner::TestTool),
+    ];
+    if let Ok(mcp) = MCP_TOOLS.lock() {
+        for tool in mcp.iter() {
+            tools.push(Arc::clone(tool));
+        }
+    }
+    tools
+}
+
+pub fn find_tool(name: &str) -> Option<Arc<dyn Tool>> {
     get_tools()
         .into_iter()
         .find(|tool| tool.name() == name)

@@ -7,18 +7,16 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::model::id::GuildId;
 use serenity::prelude::*;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::gateway::commands::register_commands;
-use crate::gateway::message_router::MessageRouter;
 
-/// Events emitted by the Discord bot for the main application to handle.
-#[derive(Debug)]
+/// Events emitted by the Discord bot.
+#[derive(Debug, Clone)]
 pub enum DiscordEvent {
-    /// A user sent a message that should be processed.
+    /// A user sent a message in a channel.
     UserMessage {
         channel_id: u64,
         user_id: u64,
@@ -34,6 +32,7 @@ pub enum DiscordEvent {
     /// Bot is ready.
     Ready,
     /// Bot disconnected.
+    #[allow(dead_code)]
     Disconnected,
 }
 

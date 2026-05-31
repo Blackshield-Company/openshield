@@ -1,17 +1,18 @@
 //! Telegram gateway using teloxide.
 //!
 //! Receives messages from Telegram Bot API, routes them through the
-//! unified event system.
+//! unified event system, and sends responses back.
 
 use anyhow::{Context, Result};
 use teloxide::prelude::*;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::config::Config;
 
 /// Events emitted by the Telegram bot.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum TelegramEvent {
     UserMessage {
         chat_id: i64,
@@ -21,6 +22,31 @@ pub enum TelegramEvent {
     },
     Ready,
     Disconnected,
+}
+
+/// Shared state for sending replies back to Telegram.
+#[derive(Clone)]
+pub struct TelegramReplySender {
+    pub bot: Bot,
+}
+
+impl TelegramReplySender {
+    pub async fn send_message(&self, chat_id: i64, text: &str) {
+        // Telegram has a 4096 char limit for messages
+        const MAX_LEN: usize = 4096;
+        if text.len() > MAX_LEN {
+            for chunk in text.chars().collect::<Vec<_>>().chunks(MAX_LEN) {
+                let chunk_str: String = chunk.iter().collect();
+                if let Err(e) = self.bot.send_message(ChatId(chat_id), chunk_str).await {
+                    error!("Failed to send Telegram message: {}", e);
+                }
+            }
+        } else {
+            if let Err(e) = self.bot.send_message(ChatId(chat_id), text).await {
+                error!("Failed to send Telegram message: {}", e);
+            }
+        }
+    }
 }
 
 /// Telegram bot adapter.
@@ -116,8 +142,17 @@ async fn handle_message(
 }
 
 /// Spawn the Telegram bot and return an event receiver.
-pub fn spawn_bot(config: Config) -> mpsc::UnboundedReceiver<TelegramEvent> {
+pub fn spawn_bot(config: Config) -> (mpsc::UnboundedReceiver<TelegramEvent>, TelegramReplySender) {
     let (tx, rx) = mpsc::unbounded_channel();
+
+    let token = config
+        .gateway
+        .telegram
+        .bot_token
+        .clone()
+        .unwrap_or_default();
+    let bot = Bot::new(token);
+    let reply_sender = TelegramReplySender { bot };
 
     tokio::spawn(async move {
         let bot = TelegramBot::new(config, tx.clone());
@@ -126,5 +161,5 @@ pub fn spawn_bot(config: Config) -> mpsc::UnboundedReceiver<TelegramEvent> {
         }
     });
 
-    rx
+    (rx, reply_sender)
 }

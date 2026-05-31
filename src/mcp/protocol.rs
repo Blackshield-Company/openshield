@@ -200,6 +200,7 @@ pub struct EmbeddedResource {
 
 impl CallToolResult {
     /// Extract all text content as a single string.
+    #[allow(dead_code)]
     pub fn text(&self) -> String {
         self.content
             .iter()
@@ -263,7 +264,7 @@ mod tests {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
                 name: "openshark".to_string(),
-                version: "0.1.0".to_string(),
+                version: crate::VERSION.to_string(),
             },
         };
         let json = serde_json::to_string(&params).unwrap();

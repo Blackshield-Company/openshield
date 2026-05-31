@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -250,8 +249,8 @@ impl MessageRouter {
     }
 
     /// Fetch relevant memory context for a query.
-    fn fetch_relevant_memory(&self, session_id: &str, query: &str) -> String {
-        let injector = ContextInjector::new(&self.memory);
+    fn fetch_relevant_memory(&self, _session_id: &str, query: &str) -> String {
+        let _injector = ContextInjector::new(&self.memory);
         
         // Try semantic search first
         match self.memory.semantic_search(query, 3) {
@@ -961,7 +960,7 @@ Use `/help` for the full slash command list.
     /// Handle multi-model response: query primary + secondary models, format comparison.
     async fn handle_multi_model_response(
         &self,
-        channel_id: u64,
+        _channel_id: u64,
         state: &ChannelState,
         messages: &[Message],
         reply_tx: &mpsc::UnboundedSender<String>,

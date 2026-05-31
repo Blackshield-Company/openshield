@@ -7,6 +7,7 @@ use regex::Regex;
 use std::collections::HashMap;
 
 /// Detector for PII and sensitive data.
+#[derive(Clone)]
 pub struct PiiDetector {
     patterns: Vec<(Regex, String)>,
 }
