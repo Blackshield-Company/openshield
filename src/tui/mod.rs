@@ -27,6 +27,8 @@ use crate::skills::SkillRegistry;
 mod theme;
 use theme::*;
 
+mod ascii_art;
+
 #[allow(dead_code)]
 const MAX_CONTEXT_MESSAGES: usize = 5;
 const TICK_RATE: Duration = Duration::from_millis(16); // ~60fps for responsive input
@@ -868,16 +870,7 @@ pub async fn run(config: Config) -> Result<()> {
     }
 
     // Inject welcome message using the agent's configured identity
-    let ascii_art = r#"██████   █████   ██████  ██  ██   ████   ██  ██   ████   █████   ██  ██
-██  ██  ██  ██  ██      ███ ██  ██  ██  ██  ██  ██  ██  ██  ██  ██ ██
-██  ██  ██  ██  ██      ██████  ██      ██  ██  ██  ██  ██  ██  ████      ██
-██  ██  █████   ████    ██ ███   ████   ██████  ██████  █████   ████    ████
-██  ██  ██      ██      ██  ██      ██  ██  ██  ██  ██  ██ ██   ██ ██  ██████
- ████   ██      ██████  ██  ██  █████   ██  ██  ██  ██  ██  ██  ██  ██"#;
-    let welcome = format!(
-        "{}",
-        ascii_art,
-    );
+    let welcome = ascii_art::session_header(crate::VERSION);
     app.add_system_message(welcome);
     if !config.agent.greeting.is_empty() {
         app.add_system_message(config.agent.greeting.clone());
@@ -1190,7 +1183,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "help" {
         app.add_system_message(
-            "🦈 OpenShark Commands\n\
+            "OpenShark Commands\n\
             \n\
             Chat commands:\n\
             • help              — Show this help\n\
@@ -1483,7 +1476,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
 
         app.mode = AppMode::Agent;
-        app.add_system_message(format!("🦈 Agent Mode: {}", task));
+        app.add_system_message(format!("Agent Mode: {}", task));
 
         let agent_config = AgentConfig::default();
         match Agent::new(agent_config, &app.config) {
@@ -2313,7 +2306,6 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Compact header: harness name + version (hardcoded, separate from agent identity)
     let mut header_lines = vec![
         Line::from(vec![
-            Span::styled("🦈 ", shark_style()),
             Span::styled("openshark", highlight_style()),
             Span::styled(format!(" v{}", crate::VERSION), muted_style()),
         ]),
