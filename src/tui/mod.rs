@@ -22,6 +22,7 @@ use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecu
 use chrono::Utc;
 use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
+use crate::skills::SkillRegistry;
 
 mod theme;
 use theme::*;
@@ -154,6 +155,14 @@ struct App {
     tool_approval_shown_at: Option<Instant>,
     /// Evolution engine for self-adaptive behavior.
     evolution: Option<crate::evolution::EvolutionEngine>,
+    /// Sidebar tab: 0=Tools, 1=Skills.
+    sidebar_tab: usize,
+    /// Scroll offset for sidebar tool/skill list.
+    sidebar_scroll: usize,
+    /// Per-session performance metrics.
+    session_perf: SessionPerformance,
+    /// Skill registry for loaded skills.
+    skill_registry: Option<crate::skills::SkillRegistry>,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +179,46 @@ enum AppMode {
     Normal,
     Agent,
     ToolApproval,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SessionPerformance {
+    first_token_ms: Vec<u64>,
+    total_latency_ms: Vec<u64>,
+    tool_exec_ms: Vec<u64>,
+    requests: usize,
+    tools: usize,
+}
+
+impl SessionPerformance {
+    fn record_response(&mut self, metrics: &StreamMetrics) {
+        self.first_token_ms.push(metrics.first_token_latency_ms);
+        self.total_latency_ms.push(metrics.total_latency_ms);
+        self.requests += 1;
+    }
+
+    fn record_tool_exec(&mut self, duration_ms: u64) {
+        self.tool_exec_ms.push(duration_ms);
+        self.tools += 1;
+    }
+
+    fn avg_first_token(&self) -> u64 {
+        if self.first_token_ms.is_empty() { 0 } else {
+            self.first_token_ms.iter().sum::<u64>() / self.first_token_ms.len() as u64
+        }
+    }
+
+    fn avg_total_latency(&self) -> u64 {
+        if self.total_latency_ms.is_empty() { 0 } else {
+            self.total_latency_ms.iter().sum::<u64>() / self.total_latency_ms.len() as u64
+        }
+    }
+
+    fn avg_tool_exec(&self) -> u64 {
+        if self.tool_exec_ms.is_empty() { 0 } else {
+            self.tool_exec_ms.iter().sum::<u64>() / self.tool_exec_ms.len() as u64
+        }
+    }
 }
 
 impl App {
@@ -293,6 +342,16 @@ impl App {
             mcp_manager: None,
             tool_approval_shown_at: None,
             evolution: crate::evolution::EvolutionEngine::new(&config).ok(),
+            sidebar_tab: 0,
+            sidebar_scroll: 0,
+            session_perf: SessionPerformance::default(),
+            skill_registry: {
+                let skills_dir = dirs::config_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("openshark")
+                    .join("skills");
+                SkillRegistry::new(skills_dir).ok()
+            },
         })
     }
 
@@ -595,6 +654,7 @@ impl App {
             }
             StreamEvent::ResponseComplete { content, metrics } => {
                 self.is_streaming = false;
+                self.session_perf.record_response(&metrics);
                 let _ = self.memory.save_performance_metric(
                     "first_token",
                     &self.model,
@@ -680,6 +740,8 @@ impl App {
                     evolution.track_tool_outcome(&name, success, 0);
                 }
 
+                // Estimate tool execution time from tool_calls_count change
+                // (We don't have duration here, but we can track it in execute_approved_tool_task)
                 self.model_messages.push(Message {
                     role: "user".to_string(),
                     content: format!("Tool result: {}", result),
