@@ -2808,7 +2808,8 @@ fn input_bar_height(app: &App, area_width: u16) -> u16 {
 }
 
 /// Compute the actual screen (x, y) for the cursor given a text buffer,
-/// a cursor byte/char position, and the available wrap width.
+/// a cursor byte position, and the available wrap width.
+/// This uses word-wrapping logic to match Paragraph::wrap behavior.
 fn compute_wrapped_cursor_position(
     text: &str,
     cursor_pos: usize,
@@ -2823,21 +2824,58 @@ fn compute_wrapped_cursor_position(
     let before_cursor = &text[..cursor_pos.min(text.len())];
     let mut col: usize = 0;
     let mut row: u16 = 0;
+    let mut word_start_col: usize = 0;
+    let mut word_width: usize = 0;
+    let mut in_word = false;
 
+    // Process text character by character, tracking word boundaries
     for ch in before_cursor.chars() {
         if ch == '\n' {
             row += 1;
             col = 0;
-        } else {
-            let ch_width = ch.width().unwrap_or(1);
-            if col + ch_width > wrap_width {
+            word_start_col = 0;
+            word_width = 0;
+            in_word = false;
+        } else if ch.is_whitespace() {
+            // End of word — commit it
+            col = word_start_col + word_width;
+            in_word = false;
+            word_start_col = col;
+            word_width = ch.width().unwrap_or(1);
+            
+            if col + word_width > wrap_width {
                 row += 1;
-                col = ch_width;
-            } else {
-                col += ch_width;
+                col = word_width;
+                word_start_col = 0;
+                word_width = word_width;
+            }
+        } else {
+            // In a word
+            if !in_word {
+                word_start_col = col;
+                word_width = 0;
+                in_word = true;
+            }
+            let ch_width = ch.width().unwrap_or(1);
+            word_width += ch_width;
+            
+            // Check if word needs to wrap
+            if word_start_col + word_width > wrap_width && word_width > wrap_width {
+                // Word is longer than line — force break at char boundary
+                row += 1;
+                word_start_col = 0;
+                word_width = ch_width;
+            } else if word_start_col + word_width > wrap_width {
+                // Word doesn't fit — wrap to next line
+                row += 1;
+                word_start_col = 0;
+                // word_width stays the same
             }
         }
     }
+    
+    // Final position is at the end of the last word
+    col = word_start_col + word_width;
 
     (base_x + col as u16, base_y + row)
 }
