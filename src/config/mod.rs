@@ -61,7 +61,7 @@ impl Default for AgentIdentity {
             style: "Direct. No fluff. Gets to the point. But with soul.".to_string(),
             greeting: "".to_string(),
             farewell: "Code shipped. On to the next. The tape never stops rolling.".to_string(),
-            emoji: "🎹🦈".to_string(),
+            emoji: "🦈".to_string(),
             catchphrases: vec![
                 "This is the wave.".to_string(),
                 "The grid is endless.".to_string(),
