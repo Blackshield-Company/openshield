@@ -8,6 +8,7 @@ use tracing::{debug, error, info, warn};
 pub mod consensus;
 pub mod roles;
 pub mod agent_runner;
+pub mod persona_filter;
 
 use consensus::{ConsensusMemory, ConsensusEntry};
 use roles::{AgentRole, RoleTemplate};
@@ -92,6 +93,37 @@ pub enum SwarmEvent {
         agent_id: AgentId,
         timestamp: u64,
     },
+    /// An agent is actively working on a task (progress update).
+    AgentActivity {
+        agent_id: AgentId,
+        activity: String,
+    },
+    /// An agent is calling a tool.
+    AgentToolCall {
+        agent_id: AgentId,
+        tool_name: String,
+        args: String,
+    },
+    /// An agent received a tool result.
+    AgentToolResult {
+        agent_id: AgentId,
+        tool_name: String,
+        result: String,
+        success: bool,
+    },
+    /// An agent produced an intermediate result/thought.
+    AgentThinking {
+        agent_id: AgentId,
+        thought: String,
+    },
+    /// Real-time streaming chunk from an agent's LLM response.
+    AgentChunk {
+        agent_id: AgentId,
+        agent_name: String,
+        role: String,
+        chunk: String,
+        is_final: bool,
+    },
     /// Shutdown signal.
     Shutdown,
 }
@@ -148,6 +180,8 @@ pub struct SwarmEngine {
     consensus: Arc<Mutex<ConsensusMemory>>,
     event_tx: mpsc::UnboundedSender<SwarmEvent>,
     event_rx: Arc<Mutex<mpsc::UnboundedReceiver<SwarmEvent>>>,
+    /// Broadcast channel for TUI to subscribe to swarm activity
+    broadcast_tx: tokio::sync::broadcast::Sender<SwarmEvent>,
     running: Arc<RwLock<bool>>,
     cycle_count: Arc<RwLock<usize>>,
     seed_prompt: Arc<RwLock<String>>,
@@ -157,6 +191,7 @@ impl SwarmEngine {
     /// Create a new swarm engine with the given configuration.
     pub fn new(config: SwarmConfig) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(256);
         let consensus = ConsensusMemory::new(&config.consensus_mode);
 
         Self {
@@ -166,6 +201,7 @@ impl SwarmEngine {
             consensus: Arc::new(Mutex::new(consensus)),
             event_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
+            broadcast_tx,
             running: Arc::new(RwLock::new(false)),
             cycle_count: Arc::new(RwLock::new(0)),
             seed_prompt: Arc::new(RwLock::new(String::new())),
@@ -250,13 +286,19 @@ impl SwarmEngine {
         let runners = self.runners.read().await.clone();
         let agents = self.agents.clone();
 
-        for (agent_id, runner) in runners.iter() {
+        for (i, (agent_id, runner)) in runners.iter().enumerate() {
             let agent_id = agent_id.clone();
             let runner = runner.clone();
             let seed = seed.clone();
             let agents = agents.clone();
+            let delay_ms = (i * 2000) as u64; // Stagger starts by 2s per agent
 
             tokio::spawn(async move {
+                // Stagger agent starts to avoid overwhelming the provider
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
+
                 // Determine task based on role
                 let task = {
                     let agents_lock = agents.read().await;
@@ -277,16 +319,7 @@ impl SwarmEngine {
                     }
                 };
 
-                let agent_ref = {
-                    let agents_lock = agents.read().await;
-                    if let Some(agent) = agents_lock.get(&agent_id) {
-                        Arc::new(RwLock::new(agent.clone()))
-                    } else {
-                        return;
-                    }
-                };
-
-                match runner.execute_task(&task, &agent_ref).await {
+                match runner.execute_task(&task, &agents, &agent_id).await {
                     Ok(result) => {
                         info!("🐝 Agent {} completed initial task ({} chars)", agent_id, result.len());
                     }
@@ -299,6 +332,7 @@ impl SwarmEngine {
 
         let event_rx = self.event_rx.clone();
         let event_tx = self.event_tx.clone();
+        let broadcast_tx = self.broadcast_tx.clone();
         let agents = self.agents.clone();
         let consensus = self.consensus.clone();
         let running_flag = self.running.clone();
@@ -310,122 +344,138 @@ impl SwarmEngine {
 
             while *running_flag.read().await {
                 match rx.recv().await {
-                    Some(SwarmEvent::WorkCompleted { agent_id, task, result }) => {
-                        debug!("Agent {} completed work on: {}", agent_id, task);
+                    Some(event) => {
+                        // Broadcast to TUI subscribers
+                        let _ = broadcast_tx.send(event.clone());
 
-                        // Update agent status
-                        if let Some(agent) = agents.write().await.get_mut(&agent_id) {
-                            agent.status = AgentStatus::WaitingForConsensus {
-                                started_at: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs(),
-                            };
-                            agent.cycles_completed += 1;
-                            agent.last_activity = Some(format!("Completed: {}", task));
-                        }
+                        match event {
+                            SwarmEvent::WorkCompleted { agent_id, task, result } => {
+                                debug!("Agent {} completed work on: {}", agent_id, task);
 
-                        // Add to consensus memory
-                        let entry = ConsensusEntry {
-                            id: format!("entry-{}", uuid::Uuid::new_v4()),
-                            author: agent_id.clone(),
-                            task: task.clone(),
-                            content: result.clone(),
-                            approvals: vec![agent_id.clone()],
-                            rejections: vec![],
-                            status: consensus::EntryStatus::Pending,
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                        };
+                                // Update agent status
+                                if let Some(agent) = agents.write().await.get_mut(&agent_id) {
+                                    agent.status = AgentStatus::WaitingForConsensus {
+                                        started_at: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    };
+                                    agent.cycles_completed += 1;
+                                    agent.last_activity = Some(format!("Completed: {}", task));
+                                }
 
-                        if let Ok(mut cons) = consensus.try_lock() {
-                            cons.add_entry(entry);
-                        }
+                                // Add to consensus memory
+                                let entry = ConsensusEntry {
+                                    id: format!("entry-{}", uuid::Uuid::new_v4()),
+                                    author: agent_id.clone(),
+                                    task: task.clone(),
+                                    content: result.clone(),
+                                    approvals: vec![agent_id.clone()],
+                                    rejections: vec![],
+                                    status: consensus::EntryStatus::Pending,
+                                    timestamp: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                };
 
-                        // Trigger cross-agent review: find a Reviewer agent and assign review
-                        let reviewer_id = {
-                            let agents_lock = agents.read().await;
-                            agents_lock.iter()
-                                .find(|(_, a)| a.role.name == "Reviewer" && a.id != agent_id)
-                                .map(|(id, _)| id.clone())
-                        };
+                                if let Ok(mut cons) = consensus.try_lock() {
+                                    cons.add_entry(entry);
+                                }
 
-                        if let Some(reviewer_id) = reviewer_id {
-                            info!("🐝 Assigning review of {} to {}", agent_id, reviewer_id);
-                            let _ = event_tx.send(SwarmEvent::ReviewRequested {
-                                from_agent: agent_id.clone(),
-                                to_agent: reviewer_id,
-                                content: result.clone(),
-                            });
-                        }
+                                // Trigger cross-agent review: find a Reviewer agent and assign review
+                                let reviewer_id = {
+                                    let agents_lock = agents.read().await;
+                                    agents_lock.iter()
+                                        .find(|(_, a)| a.role.name == "Reviewer" && a.id != agent_id)
+                                        .map(|(id, _)| id.clone())
+                                };
 
-                        // Increment cycle count
-                        *cycle_count.write().await += 1;
+                                if let Some(reviewer_id) = reviewer_id {
+                                    info!("🐝 Assigning review of {} to {}", agent_id, reviewer_id);
+                                    let _ = event_tx.send(SwarmEvent::ReviewRequested {
+                                        from_agent: agent_id.clone(),
+                                        to_agent: reviewer_id,
+                                        content: result.clone(),
+                                    });
+                                }
 
-                        // Check cycle limit
-                        if *cycle_count.read().await >= config.cycle_limit {
-                            info!("🐝 Swarm cycle limit ({}) reached, stopping", config.cycle_limit);
-                            *running_flag.write().await = false;
-                        }
-                    }
+                                // Increment cycle count
+                                *cycle_count.write().await += 1;
 
-                    Some(SwarmEvent::ReviewRequested { from_agent, to_agent, content }) => {
-                        debug!("Review requested from {} to {}", from_agent, to_agent);
-                        if let Some(agent) = agents.write().await.get_mut(&to_agent) {
-                            agent.status = AgentStatus::Reviewing {
-                                target_agent: from_agent.clone(),
-                                started_at: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs(),
-                            };
-                            agent.last_activity = Some(format!("Reviewing {}'s work", from_agent));
-                        }
-                    }
+                                // Check cycle limit
+                                if *cycle_count.read().await >= config.cycle_limit {
+                                    info!("🐝 Swarm cycle limit ({}) reached, stopping", config.cycle_limit);
+                                    *running_flag.write().await = false;
+                                }
+                            }
 
-                    Some(SwarmEvent::ReviewCompleted { reviewer, target_agent, approval, feedback }) => {
-                        debug!("Review completed by {} for {}: approved={}", reviewer, target_agent, approval);
+                            SwarmEvent::ReviewRequested { from_agent, to_agent, content } => {
+                                debug!("Review requested from {} to {}", from_agent, to_agent);
+                                if let Some(agent) = agents.write().await.get_mut(&to_agent) {
+                                    agent.status = AgentStatus::Reviewing {
+                                        target_agent: from_agent.clone(),
+                                        started_at: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    };
+                                    agent.last_activity = Some(format!("Reviewing {}'s work", from_agent));
+                                }
+                            }
 
-                        if let Some(agent) = agents.write().await.get_mut(&reviewer) {
-                            agent.status = AgentStatus::Idle;
-                            agent.last_activity = Some(format!("Reviewed {}: {}", target_agent,
-                                if approval { "approved" } else { "rejected" }));
-                        }
+                            SwarmEvent::ReviewCompleted { reviewer, target_agent, approval, feedback } => {
+                                debug!("Review completed by {} for {}: approved={}", reviewer, target_agent, approval);
 
-                        // Update consensus entry
-                        if let Ok(mut cons) = consensus.try_lock() {
-                            if approval {
-                                cons.approve_entry(&target_agent, &reviewer);
-                            } else {
-                                cons.reject_entry(&target_agent, &reviewer, &feedback);
+                                if let Some(agent) = agents.write().await.get_mut(&reviewer) {
+                                    agent.status = AgentStatus::Idle;
+                                    agent.last_activity = Some(format!("Reviewed {}: {}", target_agent,
+                                        if approval { "approved" } else { "rejected" }));
+                                }
+
+                                // Update consensus entry
+                                if let Ok(mut cons) = consensus.try_lock() {
+                                    if approval {
+                                        cons.approve_entry(&target_agent, &reviewer);
+                                    } else {
+                                        cons.reject_entry(&target_agent, &reviewer, &feedback);
+                                    }
+                                }
+                            }
+
+                            SwarmEvent::AgentError { agent_id, error } => {
+                                warn!("Agent {} error: {}", agent_id, error);
+                                if let Some(agent) = agents.write().await.get_mut(&agent_id) {
+                                    agent.status = AgentStatus::Error { message: error.clone() };
+                                    agent.errors_count += 1;
+                                    agent.success_rate = agent.cycles_completed as f64
+                                        / (agent.cycles_completed + agent.errors_count).max(1) as f64;
+                                    agent.last_activity = Some(format!("Error: {}", error));
+                                }
+                            }
+
+                            SwarmEvent::Heartbeat { agent_id, timestamp } => {
+                                debug!("Heartbeat from {} at {}", agent_id, timestamp);
+                            }
+
+                            SwarmEvent::ConsensusReached { entry_id, approved_by } => {
+                                debug!("Consensus reached on {} by {:?}", entry_id, approved_by);
+                            }
+
+                            SwarmEvent::Shutdown => {
+                                info!("🐝 Swarm shutdown requested");
+                                *running_flag.write().await = false;
+                            }
+
+                            // New activity events — no internal state change needed, just broadcast
+                            SwarmEvent::AgentActivity { .. }
+                            | SwarmEvent::AgentToolCall { .. }
+                            | SwarmEvent::AgentToolResult { .. }
+                            | SwarmEvent::AgentThinking { .. }
+                            | SwarmEvent::AgentChunk { .. } => {
+                                // Already broadcast above, no additional action needed
                             }
                         }
-                    }
-
-                    Some(SwarmEvent::AgentError { agent_id, error }) => {
-                        warn!("Agent {} error: {}", agent_id, error);
-                        if let Some(agent) = agents.write().await.get_mut(&agent_id) {
-                            agent.status = AgentStatus::Error { message: error.clone() };
-                            agent.errors_count += 1;
-                            agent.success_rate = agent.cycles_completed as f64
-                                / (agent.cycles_completed + agent.errors_count).max(1) as f64;
-                            agent.last_activity = Some(format!("Error: {}", error));
-                        }
-                    }
-
-                    Some(SwarmEvent::Heartbeat { agent_id, timestamp }) => {
-                        debug!("Heartbeat from {} at {}", agent_id, timestamp);
-                    }
-
-                    Some(SwarmEvent::ConsensusReached { entry_id, approved_by }) => {
-                        debug!("Consensus reached on {} by {:?}", entry_id, approved_by);
-                    }
-
-                    Some(SwarmEvent::Shutdown) => {
-                        info!("🐝 Swarm shutdown requested");
-                        *running_flag.write().await = false;
                     }
 
                     None => {
@@ -485,6 +535,11 @@ impl SwarmEngine {
             cycle_limit: self.config.cycle_limit,
             consensus_entries: self.consensus.lock().await.entry_count(),
         }
+    }
+
+    /// Subscribe to swarm activity events for real-time TUI updates.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SwarmEvent> {
+        self.broadcast_tx.subscribe()
     }
 
     /// Send an event into the swarm.

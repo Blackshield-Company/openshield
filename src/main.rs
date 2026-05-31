@@ -6,6 +6,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 mod agent;
 mod cache;
+mod capabilities;
 mod config;
 mod evolution;
 mod gateway;
@@ -84,6 +85,10 @@ enum Commands {
         cmd: String,
         #[arg(default_value = "")]
         prompt: String,
+    },
+    Tools {
+        #[arg(default_value = "list")]
+        cmd: String,
     },
 }
 
@@ -750,28 +755,18 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         println!("🐝 Initializing swarm...");
                         let swarm_config = config.swarm.clone();
-                        if !swarm_config.enabled {
-                            println!("⚠️  Swarm mode is disabled in config.");
-                            println!("  Set [swarm] enabled = true to enable.");
-                            println!();
-                            println!("  Current config:");
-                            println!("    enabled: {}", swarm_config.enabled);
-                            println!("    max_agents: {}", swarm_config.max_agents);
-                            println!("    roles: {:?}", swarm_config.roles);
-                        } else {
-                            let engine = swarm::SwarmEngine::new(swarm_config);
-                            match engine.init(&prompt, &config).await {
-                                Ok(()) => {
-                                    println!("✅ Swarm initialized with {} agents", engine.agent_snapshot().await.len());
-                                    println!();
-                                    for agent in engine.agent_snapshot().await {
-                                        println!("  🐝 {} ({}) - {}", agent.name, agent.role.name, agent.status);
-                                    }
-                                    println!();
-                                    println!("  Run `openshark swarm start` to begin the autonomous loop.");
+                        let engine = swarm::SwarmEngine::new(swarm_config);
+                        match engine.init(&prompt, &config).await {
+                            Ok(()) => {
+                                println!("✅ Swarm initialized with {} agents", engine.agent_snapshot().await.len());
+                                println!();
+                                for agent in engine.agent_snapshot().await {
+                                    println!("  🐝 {} ({}) - {}", agent.name, agent.role.name, agent.status);
                                 }
-                                Err(e) => println!("❌ Failed to initialize swarm: {}", e),
+                                println!();
+                                println!("  Run `openshark swarm start` to begin the autonomous loop.");
                             }
+                            Err(e) => println!("❌ Failed to initialize swarm: {}", e),
                         }
                     }
                 }
@@ -809,8 +804,32 @@ async fn main() -> anyhow::Result<()> {
                     println!("  openshark swarm stop            - Stop swarm");
                     println!("  openshark swarm status          - Show swarm status");
                     println!();
-                    println!("  Config: [swarm] enabled = {}", config.swarm.enabled);
                     println!("  Roles: {:?}", config.swarm.roles);
+                }
+            }
+        }
+        Some(Commands::Tools { cmd }) => {
+            match cmd.as_str() {
+                "list" | "" => {
+                    println!("🦈 OpenShark Tools — {} total\n", crate::tools::get_tools().len());
+
+                    println!("🔧 Native Tools:");
+                    for tool in crate::tools::get_native_tools() {
+                        println!("  {} — {}", tool.name(), tool.description());
+                    }
+
+                    println!("\n⚡ Capability Tools:");
+                    for tool in crate::tools::get_capability_tools() {
+                        println!("  {} — {}", tool.name(), tool.description());
+                    }
+
+                    println!("\n💡 Usage:");
+                    println!("  In agent mode, the model can invoke any tool.");
+                    println!("  In TUI, use TOOL:<tool_name> <args> to execute manually.");
+                }
+                _ => {
+                    println!("🦈 Tools Commands");
+                    println!("  openshark tools list  - Show all available tools");
                 }
             }
         }

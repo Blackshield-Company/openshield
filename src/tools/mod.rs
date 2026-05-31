@@ -43,7 +43,7 @@ pub fn register_mcp_tools(tools: Vec<Arc<dyn Tool>>) {
     }
 }
 
-/// Get all native + MCP tools.
+/// Get all native + capability + MCP tools.
 pub fn get_tools() -> Vec<Arc<dyn Tool>> {
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(edit::EditTool),
@@ -56,12 +56,47 @@ pub fn get_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(terminal::TerminalTool),
         Arc::new(test_runner::TestTool),
     ];
+
+    // Add all capability tools (web, media, memory, productivity, etc.)
+    for cap_tool in crate::capabilities::get_capability_tools() {
+        tools.push(cap_tool);
+    }
+
+    // Add MCP-discovered tools
     if let Ok(mcp) = MCP_TOOLS.lock() {
         for tool in mcp.iter() {
             tools.push(Arc::clone(tool));
         }
     }
     tools
+}
+
+/// Get only native tools (no capabilities, no MCP).
+pub fn get_native_tools() -> Vec<Arc<dyn Tool>> {
+    vec![
+        Arc::new(edit::EditTool),
+        Arc::new(fs::FsTool),
+        Arc::new(git::GitTool),
+        Arc::new(lsp::LspTool),
+        Arc::new(refactor::RefactorTool),
+        Arc::new(search::SearchTool),
+        Arc::new(search::GrepTool),
+        Arc::new(terminal::TerminalTool),
+        Arc::new(test_runner::TestTool),
+    ]
+}
+
+/// Get only capability tools.
+pub fn get_capability_tools() -> Vec<Arc<dyn Tool>> {
+    crate::capabilities::get_capability_tools()
+}
+
+/// Get all tool names and descriptions for system prompts.
+pub fn get_all_tool_descriptions() -> Vec<(String, String)> {
+    get_tools()
+        .iter()
+        .map(|t| (t.name().to_string(), t.description().to_string()))
+        .collect()
 }
 
 pub fn find_tool(name: &str) -> Option<Arc<dyn Tool>> {
