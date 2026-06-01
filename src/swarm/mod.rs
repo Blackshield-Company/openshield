@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 pub mod consensus;
 pub mod roles;
@@ -13,7 +13,6 @@ pub mod persona_filter;
 use consensus::{ConsensusMemory, ConsensusEntry};
 use roles::{AgentRole, RoleTemplate};
 use crate::config::Config;
-use crate::providers::Provider;
 
 /// Unique identifier for an agent in the swarm.
 pub type AgentId = String;
@@ -247,7 +246,7 @@ impl SwarmEngine {
             // Build system prompt from role + seed
             let system_prompt = format!(
                 "{}\n\nYou are part of a multi-agent swarm working on: {}\n\
-                 You have access to tools. When you need to use a tool, output it as: TOOL:<tool_name> <args>\n\
+                 You have access to tools. When you need to use a tool, output it as: TOOL:<tool_name> <args> or TOOL.<tool_name> <args>\n\
                  Be concise and direct. Focus on your specific role.",
                 role.to_agent_role().system_prompt_addendum,
                 seed_prompt
@@ -410,7 +409,7 @@ impl SwarmEngine {
                                 }
                             }
 
-                            SwarmEvent::ReviewRequested { from_agent, to_agent, content } => {
+                            SwarmEvent::ReviewRequested { from_agent, to_agent, content: _ } => {
                                 debug!("Review requested from {} to {}", from_agent, to_agent);
                                 if let Some(agent) = agents.write().await.get_mut(&to_agent) {
                                     agent.status = AgentStatus::Reviewing {

@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 /// Tool definition for schema-based tools (e.g., MCP tools).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct ToolDefinition {
+pub struct ToolDef {
     pub name: String,
     pub description: String,
     pub parameters: Value,
@@ -69,6 +69,185 @@ pub fn get_tools() -> Vec<Arc<dyn Tool>> {
         }
     }
     tools
+}
+
+/// Convert all available tools to OpenAI-compatible tool definitions for function calling.
+pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
+    use crate::providers::{ToolDefinition, ToolFunction};
+    use serde_json::json;
+
+    get_tools()
+        .iter()
+        .map(|tool| {
+            let name = tool.name().to_string();
+            let description = tool.description().to_string();
+            
+            // Build a simple parameter schema based on the tool name
+            let parameters = match name.as_str() {
+                "terminal" => json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute"
+                        }
+                    },
+                    "required": ["command"]
+                }),
+                "fs" => json!({
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["read", "write", "list", "tree", "stat", "glob", "find", "cat"],
+                            "description": "The filesystem operation to perform"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "The file or directory path"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write (for write operation)"
+                        }
+                    },
+                    "required": ["operation", "path"]
+                }),
+                "git" => json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The git subcommand to run (e.g., 'status', 'log', 'diff')"
+                        },
+                        "args": {
+                            "type": "string",
+                            "description": "Additional arguments for the git command"
+                        }
+                    },
+                    "required": ["command"]
+                }),
+                "search" => json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query or pattern"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "The directory to search in"
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                "grep" => json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "The regex pattern to search for"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "The file or directory to search in"
+                        }
+                    },
+                    "required": ["pattern", "path"]
+                }),
+                "test" => json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "The project directory to run tests in"
+                        },
+                        "framework": {
+                            "type": "string",
+                            "enum": ["auto", "cargo", "jest", "pytest", "go"],
+                            "description": "The test framework to use (auto-detect if not specified)"
+                        }
+                    },
+                    "required": ["path"]
+                }),
+                "edit" => json!({
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "The file path to edit"
+                        },
+                        "old_string": {
+                            "type": "string",
+                            "description": "The text to find and replace"
+                        },
+                        "new_string": {
+                            "type": "string",
+                            "description": "The replacement text"
+                        }
+                    },
+                    "required": ["file", "old_string", "new_string"]
+                }),
+                "refactor" => json!({
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "The file path to refactor"
+                        },
+                        "operation": {
+                            "type": "string",
+                            "enum": ["extract_function", "rename", "inline", "reorder"],
+                            "description": "The refactoring operation"
+                        }
+                    },
+                    "required": ["file", "operation"]
+                }),
+                "lsp" => json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "enum": ["goto_definition", "find_references", "hover", "completion", "diagnostics"],
+                            "description": "The LSP command to run"
+                        },
+                        "file": {
+                            "type": "string",
+                            "description": "The file path"
+                        },
+                        "line": {
+                            "type": "integer",
+                            "description": "The line number (1-based)"
+                        },
+                        "column": {
+                            "type": "integer",
+                            "description": "The column number (1-based)"
+                        }
+                    },
+                    "required": ["command", "file", "line", "column"]
+                }),
+                _ => json!({
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "string",
+                            "description": "Arguments for the tool"
+                        }
+                    },
+                    "required": ["args"]
+                }),
+            };
+
+            ToolDefinition {
+                r#type: "function".to_string(),
+                function: ToolFunction {
+                    name,
+                    description,
+                    parameters,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Get only native tools (no capabilities, no MCP).

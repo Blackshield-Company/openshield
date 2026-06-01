@@ -29,11 +29,10 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::config::Config;
-use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage};
-use crate::providers::Message;
+use crate::memory::{ContextInjector, MemoryStore};
 use crate::skills::{format_skills_prompt, Skill, SkillRegistry};
 
 /// Tracks adaptive parameters that evolve based on performance data.
@@ -278,7 +277,7 @@ impl EvolutionEngine {
     }
 
     /// Track a tool execution outcome and update adaptive state.
-    pub fn track_tool_outcome(&self, tool_name: &str, success: bool, latency_ms: u64) {
+    pub fn track_tool_outcome(&self, tool_name: &str, success: bool, _latency_ms: u64) {
         let mut state = match self.adaptive_state.lock() {
             Ok(s) => s,
             Err(_) => return,

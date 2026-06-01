@@ -739,6 +739,13 @@ pub fn muted_style() -> Style {
     Style::default().fg(t.muted).bg(t.background)
 }
 
+/// Style for reasoning/thinking content — same muted color as streaming,
+/// so saved reasoning messages match the live-streaming appearance.
+pub fn reasoning_style() -> Style {
+    let t = current_theme();
+    Style::default().fg(t.muted).bg(t.background)
+}
+
 pub fn highlight_style() -> Style {
     let t = current_theme();
     Style::default()

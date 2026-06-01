@@ -64,7 +64,7 @@ fn wave_line(frame_width: usize) -> String {
     }
     // Repeat the wave pattern to fill the width, then trim to exact size
     let repeats = (frame_width / unit_width) + 2;
-    let mut full = wave_unit.repeat(repeats);
+    let full = wave_unit.repeat(repeats);
     // Trim to exact width by counting chars
     let mut result = String::with_capacity(frame_width);
     let mut current_width = 0;
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn wordmark_spells_openshark() {
         let first_line = WORDMARK.lines().next().unwrap();
-        assert!(first_line.contains("████"), "Missing block letters");
+        assert!(first_line.contains("▪▪▪▪"), "Missing block letters");
         assert!(
             first_line.width() <= 75,
             "Wordmark too wide: {}",
@@ -147,7 +147,7 @@ mod tests {
         let fin_lines: Vec<_> = FIN_LOGO.lines().collect();
         let base = fin_lines[fin_lines.len() - 1];
         assert!(
-            base.contains("██████████████"),
+            base.contains("▪▪▪▪▪▪▪▪▪▪▪▪"),
             "Fin base should be the wide bottom line: {}",
             base
         );
@@ -157,8 +157,8 @@ mod tests {
     fn welcome_banner_centered() {
         let banner = welcome_banner(80);
         let lines: Vec<_> = banner.lines().collect();
-        // First wordmark line should be centered (starts with space or █)
+        // First wordmark line should be centered (starts with space or ▪)
         let first = &lines[0];
-        assert!(first.starts_with(' ') || first.starts_with('█'), "Not centered: {}", first);
+        assert!(first.starts_with(' ') || first.starts_with('▪'), "Not centered: {}", first);
     }
 }

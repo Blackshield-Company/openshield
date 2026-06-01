@@ -64,30 +64,27 @@ impl Tool for McpToolAdapter {
             })
         };
 
-        // We need to block on the async call since Tool::execute is sync
+        // We need to block on the async call since Tool::execute is sync.
+        // SAFETY: Use a dedicated single-threaded runtime to avoid deadlocking
+        // the main tokio runtime. block_in_place on the main runtime can deadlock
+        // when all threads are blocked.
         let manager = self.manager.clone();
         let tool_name = self.tool.name.clone();
 
-        let rt = tokio::runtime::Handle::try_current();
-        let result = match rt {
-            Ok(handle) => {
-                // We're in an async context — block_in_place to avoid deadlocks
-                tokio::task::block_in_place(|| {
-                    handle.block_on(async move {
-                        let manager = manager.lock().await;
-                        manager.call_tool(&tool_name, arguments).await
-                    })
-                })
-            }
-            Err(_) => {
-                // No runtime — create one (shouldn't happen in normal use)
-                let rt = tokio::runtime::Runtime::new()?;
+        let result = std::thread::scope(|s| {
+            s.spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("Failed to build MCP runtime: {}", e))?;
                 rt.block_on(async move {
                     let manager = manager.lock().await;
                     manager.call_tool(&tool_name, arguments).await
                 })
-            }
-        };
+            })
+            .join()
+            .map_err(|e| anyhow::anyhow!("MCP tool thread panicked: {:?}", e))?
+        });
 
         match result {
             Ok(call_result) => Ok(format_call_result(&call_result)),
@@ -128,8 +125,8 @@ fn format_call_result(result: &CallToolResult) -> String {
 
 /// Build OpenShark ToolDefinition schemas from MCP tools for LLM tool calling.
 #[allow(dead_code)]
-pub fn mcp_tool_to_definition(tool: &McpTool) -> super::ToolDefinition {
-    super::ToolDefinition {
+pub fn mcp_tool_to_definition(tool: &McpTool) -> super::ToolDef {
+    super::ToolDef {
         name: tool.name.clone(),
         description: tool.description.clone().unwrap_or_default(),
         parameters: tool.input_schema.clone().unwrap_or_else(|| {

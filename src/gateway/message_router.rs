@@ -1039,32 +1039,35 @@ Use `/help` for the full slash command list.
         let _ = reply_tx.send(output);
     }
 
-    /// Try to execute any TOOL: invocations in the response.
+    /// Try to execute any TOOL: or TOOL. invocations in the response.
     async fn try_execute_tools(&self,
         response: &str,
     ) -> Option<String> {
-        if let Some(tool_start) = response.find("TOOL:") {
-            let tool_line = &response[tool_start..];
-            let tool_line = tool_line.lines().next()?;
-            let rest = &tool_line[5..]; // Strip "TOOL:"
-            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-            if parts.is_empty() {
-                return None;
-            }
+        // Find first occurrence of either TOOL: or TOOL.
+        let tool_start = response.find("TOOL:").or_else(|| response.find("TOOL."))?;
+        let tool_line = &response[tool_start..];
+        let tool_line = tool_line.lines().next()?;
+        // Strip prefix (either "TOOL:" or "TOOL.")
+        let rest = if tool_line.starts_with("TOOL:") {
+            &tool_line[5..]
+        } else {
+            &tool_line[5..]
+        };
+        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+        if parts.is_empty() {
+            return None;
+        }
 
-            let tool_name = parts[0].trim();
-            let args = parts.get(1).unwrap_or(&"").trim();
+        let tool_name = parts[0].trim();
+        let args = parts.get(1).unwrap_or(&"").trim();
 
-            if let Some(tool) = find_tool(tool_name) {
-                match tool.execute(args) {
-                    Ok(result) => Some(result),
-                    Err(e) => Some(format!("Tool error: {}", e)),
-                }
-            } else {
-                Some(format!("Unknown tool: {}", tool_name))
+        if let Some(tool) = find_tool(tool_name) {
+            match tool.execute(args) {
+                Ok(result) => Some(result),
+                Err(e) => Some(format!("Tool error: {}", e)),
             }
         } else {
-            None
+            Some(format!("Unknown tool: {}", tool_name))
         }
     }
 }

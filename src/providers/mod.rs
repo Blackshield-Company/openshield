@@ -8,6 +8,31 @@ use std::time::Instant;
 use crate::cache::{compute_cache_key, ResponseCache};
 use crate::config::ProviderKind;
 
+/// A chunk from a streaming response, tagged as reasoning or content.
+#[derive(Debug, Clone)]
+pub enum StreamChunk {
+    /// Reasoning/thinking content (shown in real-time before response).
+    Reasoning(String),
+    /// Actual response content.
+    Content(String),
+    /// Tool call from the model (OpenAI function calling format).
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+    },
+    /// Streaming is complete with a finish reason.
+    Finish(String),
+}
+
+/// Accumulated tool call state for streaming fragments.
+#[derive(Debug, Clone, Default)]
+pub struct AccumulatedToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Message {
     pub role: String,
@@ -66,6 +91,24 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// Optional tools for function calling (OpenAI-compatible format).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolDefinition>>,
+}
+
+/// OpenAI-compatible tool definition for function calling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub r#type: String,
+    pub function: ToolFunction,
+}
+
+/// Function definition within a tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFunction {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
 }
 
 impl ChatRequest {
@@ -76,6 +119,7 @@ impl ChatRequest {
             stream,
             max_tokens: None,
             temperature: None,
+            tools: None,
         }
     }
 }
@@ -203,6 +247,9 @@ impl Provider {
                 }
                 if let Some(temp) = request.temperature {
                     body["temperature"] = json!(temp);
+                }
+                if let Some(ref tools) = request.tools {
+                    body["tools"] = json!(tools);
                 }
                 body
             }
@@ -455,12 +502,25 @@ impl Provider {
                     if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                         let delta_content = match self.kind {
                             ProviderKind::OpenAiCompatible => {
-                                // Try content first, then reasoning_content (Kimi thinking)
-                                event.get("choices")
+                                // Stream both content and reasoning_content (Kimi thinking)
+                                let content = event.get("choices")
                                     .and_then(|c| c.get(0))
                                     .and_then(|c| c.get("delta"))
                                     .and_then(|d| d.get("content"))
-                                    .and_then(|c| c.as_str())
+                                    .and_then(|c| c.as_str());
+                                let reasoning = event.get("choices")
+                                    .and_then(|c| c.get(0))
+                                    .and_then(|c| c.get("delta"))
+                                    .and_then(|d| d.get("reasoning_content"))
+                                    .and_then(|c| c.as_str());
+                                // If we have reasoning content, emit it as a special marker
+                                if let Some(r) = reasoning {
+                                    if !r.is_empty() {
+                                        // Emit reasoning content wrapped in think tags so the TUI can display it
+                                        chunks.push(format!("<think>{}</think>", r));
+                                    }
+                                }
+                                content
                             }
                             ProviderKind::Anthropic => {
                                 event.get("delta")
@@ -509,6 +569,236 @@ impl Provider {
             first_token_latency_ms: first_token_latency.as_millis() as u64,
             total_latency_ms: total_latency.as_millis() as u64,
             tokens_generated: token_count,
+            cached: false,
+        }))
+    }
+
+    /// Real-time streaming: returns a receiver that yields `StreamChunk` values as they arrive.
+    /// The caller (TUI task) can `recv().await` on the receiver to get chunks in real-time.
+    pub async fn chat_stream_realtime(
+        &self,
+        request: ChatRequest,
+    ) -> Result<(tokio::sync::mpsc::UnboundedReceiver<StreamChunk>, StreamMetrics)> {
+        let _start_time = Instant::now();
+        let messages_json = serde_json::to_string(&request.messages)
+            .with_context(|| "Failed to serialize messages for cache key")?;
+        let cache_key = compute_cache_key(&request.model, &messages_json);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<StreamChunk>();
+
+        // Check cache first — if cached, replay all chunks then return metrics
+        if let Some(ref cache) = self.cache {
+            if let Some(cached) = cache.get(&cache_key) {
+                if let Ok(chunks) = serde_json::from_str::<Vec<String>>(&cached.response) {
+                    for chunk in chunks {
+                        let _ = tx.send(StreamChunk::Content(chunk));
+                    }
+                    return Ok((rx, StreamMetrics {
+                        first_token_latency_ms: 0,
+                        total_latency_ms: 0,
+                        tokens_generated: 0,
+                        cached: true,
+                    }));
+                }
+            }
+        }
+
+        let body = self.build_chat_body(&request);
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let kind = self.kind.clone();
+        let headers = self.headers.clone();
+
+        // Spawn the streaming work in a background task so the caller can start receiving immediately
+        tokio::spawn(async move {
+            let mut request_builder = client
+                .request(reqwest::Method::POST, format!("{}{}", base_url.trim_end_matches('/'), "/chat/completions"))
+                .header("Content-Type", "application/json")
+                .json(&body);
+
+            match kind {
+                ProviderKind::OpenAiCompatible | ProviderKind::Gemini => {
+                    request_builder = request_builder.header("Authorization", format!("Bearer {}", api_key));
+                }
+                ProviderKind::Anthropic => {
+                    request_builder = request_builder.header("x-api-key", &api_key);
+                    request_builder = request_builder.header("anthropic-version", "2023-06-01");
+                }
+            }
+            for (key, val) in &headers {
+                request_builder = request_builder.header(key, val);
+            }
+
+            let response = match request_builder.send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = tx.send(StreamChunk::Content(format!("[stream error: {}]", e)));
+                    return;
+                }
+            };
+
+            let status = response.status();
+            if !status.is_success() {
+                let body_text = response.text().await.unwrap_or_default();
+                let _ = tx.send(StreamChunk::Content(format!("[API error {}: {}]", status, body_text)));
+                return;
+            }
+
+            let mut stream = response.bytes_stream();
+            let mut first_token_time: Option<Instant> = None;
+            let mut buffer = String::new();
+            // Accumulate tool call fragments across SSE chunks, keyed by index
+            let mut pending_tool_calls: HashMap<u32, AccumulatedToolCall> = HashMap::new();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = match chunk_result {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = tx.send(StreamChunk::Content(format!("[stream read error: {}]", e)));
+                        return;
+                    }
+                };
+                let text = String::from_utf8_lossy(&chunk);
+                buffer.push_str(&text);
+
+                // Process complete lines from buffer
+                while let Some(pos) = buffer.find('\n') {
+                    let line = buffer[..pos].trim().to_string();
+                    buffer = buffer[pos + 1..].to_string();
+
+                    if line.starts_with("data:") {
+                        let data = line["data:".len()..].trim_start();
+                        if data == "[DONE]" {
+                            continue;
+                        }
+                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                            match kind {
+                                ProviderKind::OpenAiCompatible => {
+                                    let delta = event.get("choices")
+                                        .and_then(|c| c.get(0))
+                                        .and_then(|c| c.get("delta"));
+                                    let content = delta
+                                        .and_then(|d| d.get("content"))
+                                        .and_then(|c| c.as_str());
+                                    let reasoning = delta
+                                        .and_then(|d| d.get("reasoning_content"))
+                                        .and_then(|c| c.as_str());
+                                    let tool_calls = delta
+                                        .and_then(|d| d.get("tool_calls"))
+                                        .and_then(|t| t.as_array());
+                                    let finish_reason = event.get("choices")
+                                        .and_then(|c| c.get(0))
+                                        .and_then(|c| c.get("finish_reason"))
+                                        .and_then(|f| f.as_str());
+
+                                    // Emit finish reason if present
+                                    if let Some(fr) = finish_reason {
+                                        if fr == "tool_calls" {
+                                            // Flush all accumulated tool calls
+                                            for (idx, mut tc) in pending_tool_calls.drain() {
+                                                let _ = tx.send(StreamChunk::ToolCall {
+                                                    id: tc.id,
+                                                    name: tc.name,
+                                                    arguments: tc.arguments,
+                                                });
+                                            }
+                                            let _ = tx.send(StreamChunk::Finish(fr.to_string()));
+                                        } else if fr == "stop" {
+                                            let _ = tx.send(StreamChunk::Finish(fr.to_string()));
+                                        }
+                                    }
+
+                                    // Accumulate tool call fragments by index
+                                    if let Some(tcs) = tool_calls {
+                                        for tc in tcs {
+                                            let index = tc.get("index")
+                                                .and_then(|i| i.as_u64())
+                                                .unwrap_or(0) as u32;
+                                            let entry = pending_tool_calls.entry(index).or_default();
+
+                                            if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                                if !id.is_empty() {
+                                                    entry.id.push_str(id);
+                                                }
+                                            }
+                                            if let Some(name) = tc.get("function")
+                                                .and_then(|f| f.get("name"))
+                                                .and_then(|n| n.as_str()) {
+                                                if !name.is_empty() {
+                                                    entry.name.push_str(name);
+                                                }
+                                            }
+                                            if let Some(args) = tc.get("function")
+                                                .and_then(|f| f.get("arguments"))
+                                                .and_then(|a| a.as_str()) {
+                                                entry.arguments.push_str(args);
+                                            }
+                                        }
+                                    }
+
+                                    if let Some(r) = reasoning {
+                                        if !r.is_empty() {
+                                            let _ = tx.send(StreamChunk::Reasoning(r.to_string()));
+                                        }
+                                    }
+                                    if let Some(c) = content {
+                                        if !c.is_empty() {
+                                            if first_token_time.is_none() {
+                                                first_token_time = Some(Instant::now());
+                                            }
+                                            let _ = tx.send(StreamChunk::Content(c.to_string()));
+                                        }
+                                    }
+                                }
+                                ProviderKind::Anthropic => {
+                                    let text = event.get("delta")
+                                        .and_then(|d| d.get("text"))
+                                        .and_then(|t| t.as_str())
+                                        .or_else(|| {
+                                            event.get("content_block")
+                                                .and_then(|c| c.get("text"))
+                                                .and_then(|t| t.as_str())
+                                        });
+                                    if let Some(t) = text {
+                                        if !t.is_empty() {
+                                            if first_token_time.is_none() {
+                                                first_token_time = Some(Instant::now());
+                                            }
+                                            let _ = tx.send(StreamChunk::Content(t.to_string()));
+                                        }
+                                    }
+                                }
+                                ProviderKind::Gemini => {
+                                    let text = event.get("candidates")
+                                        .and_then(|c| c.get(0))
+                                        .and_then(|c| c.get("content"))
+                                        .and_then(|c| c.get("parts"))
+                                        .and_then(|p| p.get(0))
+                                        .and_then(|p| p.get("text"))
+                                        .and_then(|t| t.as_str());
+                                    if let Some(t) = text {
+                                        if !t.is_empty() {
+                                            if first_token_time.is_none() {
+                                                first_token_time = Some(Instant::now());
+                                            }
+                                            let _ = tx.send(StreamChunk::Content(t.to_string()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Return the receiver immediately so the caller can start reading chunks
+        // Metrics will be computed when the stream finishes — for now return placeholder
+        Ok((rx, StreamMetrics {
+            first_token_latency_ms: 0,
+            total_latency_ms: 0,
+            tokens_generated: 0,
             cached: false,
         }))
     }

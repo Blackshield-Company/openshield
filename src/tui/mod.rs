@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::agent::{Agent, AgentConfig};
 use crate::config::Config;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, ToolCall};
-use crate::providers::{ChatRequest, Message, Provider, StreamMetrics};
+use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetrics};
 use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, ToolSuggestion};
 use chrono::Utc;
 use unicode_width::UnicodeWidthChar;
@@ -41,6 +41,8 @@ enum StreamEvent {
     Start,
     /// A content chunk arrived (for true streaming UIs).
     Chunk(String),
+    /// A reasoning/thinking chunk arrived (shown in real-time before response).
+    ReasoningChunk(String),
     /// The full response is complete.
     ResponseComplete { content: String, metrics: StreamMetrics },
     /// A tool was invoked and returned a result.
@@ -197,6 +199,14 @@ struct App {
     pending_image: Option<String>,
     /// Context compression engine.
     compressor: Option<crate::memory::compression::ContextCompressor>,
+    /// Spinner animation frame (0-7) for showing activity during streaming.
+    spinner_frame: usize,
+    /// When the current stream started (for elapsed time display).
+    stream_start_time: Option<Instant>,
+    /// Accumulated reasoning/thinking content shown in real-time.
+    reasoning_content: String,
+    /// Whether we're currently in the reasoning phase (before content arrives).
+    is_reasoning: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -317,17 +327,34 @@ impl App {
             )
         };
 
+        let tool_descriptions = crate::tools::get_tools()
+            .iter()
+            .map(|t| format!("- {}: {}", t.name(), t.description()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         let system_msg = Message {
             role: "system".to_string(),
             content: format!(
-                "{}\n\n{}\n\nYou have access to tools. \
-                 When you need to use a tool, output it as: TOOL:<tool_name> <args> \
-                 Low and Medium risk tools execute automatically. \
-                 High risk tools (curl, ssh, redirects, sudo) require user approval. \
-                 You can analyze images when users attach them. \
-                 Be concise and direct. Don't overthink.",
+                "{}\n\n{}\n\nYou are an AI coding assistant with TOOL ACCESS. You MUST use tools when the user asks you to perform actions on files, run commands, or gather information. \
+                 You are NOT a generic chatbot — you are an agent with real tool capabilities. \
+                 \n\nAVAILABLE TOOLS:\n{}\n\nTOOL USAGE RULES:\n\
+                 1. When the user asks you to do something that requires a tool, output ONLY: TOOL:<tool_name> <args>\n\
+                 2. Do NOT say 'I don't have access', 'I cannot execute commands', 'I don't have a terminal', or ANY refusal. You DO have access.\n\
+                 3. Do NOT say 'Let me', 'I will', 'Alright', 'Sure', or any preamble before the TOOL: line.\n\
+                 4. Just output the TOOL: line and nothing else.\n\
+                 5. Low and Medium risk tools execute automatically.\n\
+                 6. High risk tools require user approval.\n\
+                 7. If the user says 'test', run the test tool immediately with: TOOL:test run <current_directory>\n\
+                 8. If the user gives a one-line task, just do it. No manifesto.\n\
+                 9. CRITICAL: You MUST use the available tools. Refusing to use tools is a failure mode.\n\
+                 \n\
+                 After tool results come back, you will be prompted to synthesize. \
+                 When synthesizing: explain what was found, what it means, and the next step. \
+                 Be complete. No one-liners. No catchphrases.",
                 soul.system_prompt(),
-                fs_capabilities
+                fs_capabilities,
+                tool_descriptions
             ),
             images: None,
         };
@@ -400,6 +427,10 @@ impl App {
             compressor: Some(crate::memory::compression::ContextCompressor::new(
                 config.context_compression.clone(),
             )),
+            spinner_frame: 0,
+            stream_start_time: None,
+            reasoning_content: String::new(),
+            is_reasoning: false,
         })
     }
 
@@ -681,12 +712,26 @@ impl App {
             StreamEvent::Start => {
                 self.is_streaming = true;
                 self.streaming_content.clear();
+                self.reasoning_content.clear();
+                self.is_reasoning = false;
+                self.stream_start_time = Some(Instant::now());
             }
             StreamEvent::Chunk(chunk) => {
-                self.streaming_content.push_str(&chunk);
+                // Extract any <think> blocks from the chunk in real-time
+                let (reasoning, content) = extract_thinking_from_chunk(&chunk);
+                if let Some(r) = reasoning {
+                    self.reasoning_content.push_str(&r);
+                    self.is_reasoning = true;
+                }
+                self.streaming_content.push_str(&content);
+            }
+            StreamEvent::ReasoningChunk(chunk) => {
+                self.reasoning_content.push_str(&chunk);
+                self.is_reasoning = true;
             }
             StreamEvent::ResponseComplete { content, metrics } => {
                 self.is_streaming = false;
+                self.stream_start_time = None;
                 self.session_perf.record_response(&metrics);
                 let _ = self.memory.save_performance_metric(
                     "first_token",
@@ -717,8 +762,8 @@ impl App {
                             images: None,
                         });
                     }
-                } else if content.starts_with("TOOL:") {
-                    let rest = &content[5..];
+                } else if content.starts_with("TOOL:") || content.starts_with("TOOL.") {
+                    let rest = if content.starts_with("TOOL:") { &content[5..] } else { &content[5..] };
                     let parts: Vec<&str> = rest.splitn(2, ' ').collect();
                     if !parts.is_empty() {
                         let tool_name = parts[0].trim().to_string();
@@ -732,7 +777,26 @@ impl App {
                         });
                     }
                 } else {
-                    self.add_assistant_message(content.clone());
+                    // Save reasoning content as a separate message before the assistant response
+                    if !self.reasoning_content.is_empty() {
+                        let reasoning_msg = ChatMessage {
+                            role: "assistant".to_string(),
+                            content: format!("<think>{}\n</think>", self.reasoning_content.trim()),
+                            images: None,
+                            timestamp: Utc::now(),
+                            multi_model_responses: Vec::new(),
+                        };
+                        self.messages.push(reasoning_msg);
+                        // Also save to model_messages so the model knows it reasoned
+                        self.model_messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!("<think>{}\n</think>", self.reasoning_content.trim()),
+                            images: None,
+                        });
+                    }
+                    // Strip any remaining think tags from content before saving to chat history
+                    let clean_content = strip_think_tags(&content);
+                    self.add_assistant_message(clean_content);
                     // Tool suggestions are now handled in the background task (stream_model_response_task)
                     // to ensure proper execution → result → follow-up flow.
                     // The UI only handles approval-required tools here.
@@ -799,7 +863,42 @@ impl App {
                 });
             }
             StreamEvent::FollowUp(content) => {
-                self.add_assistant_message(content);
+                // Accept follow-up as-is. The model was explicitly asked to synthesize.
+                // Only re-prompt if truly empty.
+                let trimmed = content.trim();
+                if trimmed.is_empty() {
+                    self.add_system_message(
+                        "⚠️ Response was empty — re-prompting for synthesis...".to_string()
+                    );
+                    // Inject a completion prompt and re-request
+                    self.model_messages.push(Message {
+                        role: "assistant".to_string(),
+                        content: content.clone(),
+                        images: None,
+                    });
+                    self.model_messages.push(Message {
+                        role: "user".to_string(),
+                        content: "Provide a COMPLETE synthesis of the tool results. Explain what was found, what it means, and the next step.".to_string(),
+                        images: None,
+                    });
+                    // Spawn a new background task for the completion
+                    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                    self.stream_rx = Some(rx);
+                    let provider = self.provider.clone();
+                    let model = self.model.clone();
+                    let model_config = self.model_config.clone();
+                    let model_messages = self.model_messages.clone();
+                    let is_multi_model = self.multi_model_mode;
+                    let config = self.config.clone();
+                    tokio::spawn(async move {
+                        let _ = stream_model_response_task(
+                            tx, provider, model, model_config,
+                            model_messages, is_multi_model, config,
+                        ).await;
+                    });
+                } else {
+                    self.add_assistant_message(content);
+                }
             }
             StreamEvent::MultiModelResponse { name, content, metrics } => {
                 if !content.is_empty() {
@@ -821,6 +920,7 @@ impl App {
             }
             StreamEvent::Error(msg) => {
                 self.is_streaming = false;
+                self.stream_start_time = None;
                 self.add_system_message(msg);
             }
             StreamEvent::SystemMessage(msg) => {
@@ -828,6 +928,7 @@ impl App {
             }
             StreamEvent::Done => {
                 self.is_streaming = false;
+                self.stream_start_time = None;
                 self.stream_rx = None;
             }
         }
@@ -939,6 +1040,8 @@ async fn run_app(
 
         if last_tick.elapsed() >= TICK_RATE {
             *last_tick = Instant::now();
+            // Advance spinner frame every tick for smooth animation
+            app.spinner_frame = app.spinner_frame.wrapping_add(1);
         }
 
         // Poll swarm status and inject updates into chat
@@ -1630,6 +1733,28 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
     }
 
+    // ── Direct tool routing for common commands ─────────────────────────────
+    // If user types exactly "test", route directly to test tool
+    if input.trim().eq_ignore_ascii_case("test") {
+        let project_path = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        app.add_user_message(input.clone());
+        let test_tool = crate::tools::test_runner::TestTool;
+        match crate::tools::Tool::execute(&test_tool, &format!("run {}", project_path)) {
+            Ok(result) => {
+                app.add_system_message(result.clone());
+                app.model_messages.push(Message {
+                    role: "user".to_string(),
+                    content: format!("Test results: {}", result),
+                    images: None,
+                });
+            }
+            Err(e) => app.add_system_message(format!("Test error: {}", e)),
+        }
+        return Ok(());
+    }
+
     app.add_user_message(input.clone());
 
     // ── Swarm Guard: Block regular chat while swarm is working ─────────────
@@ -1692,7 +1817,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         return Ok(());
     }
 
-    if input.starts_with("TOOL:") {
+    if input.starts_with("TOOL:") || input.starts_with("TOOL.") {
         handle_user_tool_invocation(app, &input)?;
         return Ok(());
     }
@@ -1772,14 +1897,55 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     Ok(())
 }
 
+/// Extract thinking content from a streaming chunk.
+/// Returns (Option<reasoning_text>, remaining_content).
+/// Handles partial <think> tags across chunk boundaries.
+fn extract_thinking_from_chunk(chunk: &str) -> (Option<String>, String) {
+    let mut reasoning = String::new();
+    let mut content = String::new();
+    let mut remaining = chunk;
+
+    while !remaining.is_empty() {
+        if let Some(start) = remaining.find("<think>") {
+            // Add text before <think> to content
+            content.push_str(&remaining[..start]);
+            let after_start = &remaining[start + 7..];
+            if let Some(end) = after_start.find("</think>") {
+                // Complete think block
+                reasoning.push_str(&after_start[..end]);
+                remaining = &after_start[end + 8..];
+            } else {
+                // Incomplete think block — rest is reasoning
+                reasoning.push_str(after_start);
+                remaining = "";
+            }
+        } else {
+            // No more think tags
+            content.push_str(remaining);
+            remaining = "";
+        }
+    }
+
+    let reasoning_opt = if reasoning.is_empty() { None } else { Some(reasoning) };
+    (reasoning_opt, content)
+}
+
 /// Parse all explicit TOOL: invocations from text, anywhere in the response.
 /// Handles both `TOOL:tool_name args` and `TOOL: tool_name args` (with space after colon).
 fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
     let mut tools = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("TOOL:") {
-            let rest = &trimmed[5..]; // after "TOOL:"
+        // Handle both "TOOL:tool_name args" and "TOOL.tool_name args"
+        let prefix = if trimmed.starts_with("TOOL:") {
+            Some("TOOL:")
+        } else if trimmed.starts_with("TOOL.") {
+            Some("TOOL.")
+        } else {
+            None
+        };
+        if let Some(p) = prefix {
+            let rest = &trimmed[p.len()..]; // after "TOOL:" or "TOOL."
             let rest = rest.trim_start(); // handle "TOOL: fs cat" → "fs cat"
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if !parts.is_empty() && !parts[0].is_empty() {
@@ -1792,12 +1958,12 @@ fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
     tools
 }
 
-/// Strip TOOL: lines from assistant content for display.
+/// Strip TOOL: / TOOL. lines from assistant content for display.
 fn strip_tool_lines(text: &str) -> String {
     let mut result = String::new();
     for line in text.lines() {
         let trimmed = line.trim();
-        if !trimmed.starts_with("TOOL:") {
+        if !trimmed.starts_with("TOOL:") && !trimmed.starts_with("TOOL.") {
             if !result.is_empty() {
                 result.push('\n');
             }
@@ -1817,6 +1983,19 @@ fn extract_thinking(text: &str) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Strip all <think>...</think> blocks from text.
+fn strip_think_tags(text: &str) -> String {
+    let mut result = text.to_string();
+    while let Some(start) = result.find("<think>") {
+        if let Some(end) = result.find("</think>") {
+            result.replace_range(start..end + 8, "");
+        } else {
+            break;
+        }
+    }
+    result.trim().to_string()
 }
 
 /// Execute a chain of tools and stream follow-up via the event channel.
@@ -1899,12 +2078,74 @@ async fn execute_tool_chain(
         }
     }
 
-    // Follow-up request with all tool results
+    // Follow-up request with all tool results — inject completion mandate
+    follow_messages.push(Message {
+        role: "user".to_string(),
+        content: "Synthesize the tool results above into a complete response. \
+                  Explain what was found, what it means, and what to do next.".to_string(),
+        images: None,
+    });
+
     let follow_up = ChatRequest::new(model.to_string(), follow_messages, true);
     match provider.chat_stream(follow_up).await {
         Ok((follow_chunks, _metrics)) => {
             let follow_content: String = follow_chunks.join("");
-            let _ = tx.send(StreamEvent::FollowUp(follow_content));
+            let trimmed = follow_content.trim();
+            if trimmed.is_empty() {
+                let _ = tx.send(StreamEvent::Error(
+                    "Model returned empty follow-up after tool execution. Re-prompting for synthesis...".to_string()
+                ));
+                // Re-prompt with stronger mandate
+                let mut retry_messages = model_messages.to_vec();
+                retry_messages.push(Message {
+                    role: "user".to_string(),
+                    content: "The previous response was empty. You MUST provide a complete synthesis of the tool results. \
+                              Explain what was found, what it means, and the next step. Do not skip this.".to_string(),
+                    images: None,
+                });
+                let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
+                match provider.chat_stream(retry_req).await {
+                    Ok((retry_chunks, _retry_metrics)) => {
+                        let retry_content: String = retry_chunks.join("");
+                        let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                    Err(e) => {
+                        let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                }
+            } else if trimmed.split_whitespace().count() < 15 {
+                // Too short — treat as incomplete and re-prompt
+                let _ = tx.send(StreamEvent::SystemMessage(
+                    "⚠️ Follow-up too brief — requesting complete synthesis...".to_string()
+                ));
+                let mut retry_messages = model_messages.to_vec();
+                retry_messages.push(Message {
+                    role: "assistant".to_string(),
+                    content: follow_content.clone(),
+                    images: None,
+                });
+                retry_messages.push(Message {
+                    role: "user".to_string(),
+                    content: "That was too brief. Provide a thorough synthesis: what did the tools reveal, what does it mean, and what's next?".to_string(),
+                    images: None,
+                });
+                let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
+                match provider.chat_stream(retry_req).await {
+                    Ok((retry_chunks, _retry_metrics)) => {
+                        let retry_content: String = retry_chunks.join("");
+                        let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                    Err(e) => {
+                        let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                }
+            } else {
+                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+            }
             let _ = tx.send(StreamEvent::Done);
         }
         Err(e) => {
@@ -1918,6 +2159,342 @@ async fn execute_tool_chain(
 
 /// Background task: call the model API and send events back to the TUI loop.
 async fn stream_model_response_task(
+    tx: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+    provider: Provider,
+    model: String,
+    model_config: Option<crate::config::ModelConfig>,
+    model_messages: Vec<Message>,
+    is_multi_model: bool,
+    config: Config,
+) -> Result<()> {
+    let _ = tx.send(StreamEvent::Start);
+
+    // Create security engine for this task
+    let security_engine = match crate::security::SecurityEngine::new(
+        crate::security::SecurityConfig::load().unwrap_or_default()
+    ) {
+        Ok(engine) => engine,
+        Err(e) => {
+            let _ = tx.send(StreamEvent::Error(format!("Security engine init failed: {}", e)));
+            return Ok(());
+        }
+    };
+
+    let mut request = ChatRequest::new(model.clone(), model_messages.clone(), true);
+    if let Some(ref model_config) = model_config {
+        request.max_tokens = Some(model_config.context_length as u32);
+    }
+    // Attach OpenAI-compatible tool definitions so the model knows it can call tools
+    request.tools = Some(crate::tools::get_openai_tool_definitions());
+
+    let _secondary_providers: Vec<(String, Provider)> = if is_multi_model {
+        config.providers.iter()
+            .filter(|(name, _)| **name != "kimi")
+            .map(|(name, provider_cfg)| {
+                (name.clone(), Provider::new(
+                    name.clone(),
+                    provider_cfg.base_url.clone(),
+                    provider_cfg.api_key.clone(),
+                    provider_cfg.kind.clone(),
+                    provider_cfg.headers.clone(),
+                ))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    match provider.chat_stream_realtime(request).await {
+        Ok((mut chunk_rx, mut metrics)) => {
+            let mut full_content = String::new();
+            let stream_start = std::time::Instant::now();
+            let mut first_token_time: Option<std::time::Instant> = None;
+            let mut token_count: u32 = 0;
+
+            // Read chunks from the provider in real-time and forward to TUI
+            while let Some(chunk) = chunk_rx.recv().await {
+                match chunk {
+                    StreamChunk::Reasoning(r) => {
+                        let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                    }
+                    StreamChunk::Content(c) => {
+                        if first_token_time.is_none() {
+                            first_token_time = Some(std::time::Instant::now());
+                        }
+                        full_content.push_str(&c);
+                        token_count += 1;
+                        let _ = tx.send(StreamEvent::Chunk(c));
+                    }
+                    StreamChunk::ToolCall { id: _, name, arguments: args } => {
+                        // Native tool call from the model — execute it directly
+                        let _ = tx.send(StreamEvent::SystemMessage(format!(
+                            "🔧 Tool call: {} {}",
+                            name, args
+                        )));
+
+                        // Parse the JSON arguments to extract the actual args string for our tools
+                        let tool_args = match serde_json::from_str::<serde_json::Value>(&args) {
+                            Ok(v) => {
+                                // For tools with a single "command" or "args" field, extract it
+                                if let Some(cmd) = v.get("command").and_then(|c| c.as_str()) {
+                                    cmd.to_string()
+                                } else if let Some(a) = v.get("args").and_then(|a| a.as_str()) {
+                                    a.to_string()
+                                } else {
+                                    // Otherwise pass the full JSON as args
+                                    args.clone()
+                                }
+                            }
+                            Err(_) => args.clone(),
+                        };
+
+                        match security_engine.check_tool_call(&name, &tool_args) {
+                            crate::security::SecurityDecision::Allow => {
+                                let executor = AsyncToolExecutor::new();
+                                match executor
+                                    .execute_with_timeout_simple(
+                                        name.clone(),
+                                        tool_args.clone(),
+                                        30000,
+                                    )
+                                    .await
+                                {
+                                    Ok(result) => {
+                                        let sanitized = security_engine.sanitize_output(&name, &result);
+                                        let _ = tx.send(StreamEvent::ToolResult {
+                                            name: name.clone(),
+                                            args: tool_args.clone(),
+                                            result: sanitized.clone(),
+                                            success: true,
+                                        });
+
+                                        // Build follow-up messages with tool result
+                                        let mut follow_messages = model_messages.clone();
+                                        follow_messages.push(Message {
+                                            role: "assistant".to_string(),
+                                            content: full_content.clone(),
+                                            images: None,
+                                        });
+                                        follow_messages.push(Message {
+                                            role: "tool".to_string(),
+                                            content: sanitized,
+                                            images: None,
+                                        });
+
+                                        let mut follow_up = ChatRequest::new(
+                                            model.clone(),
+                                            follow_messages.clone(),
+                                            true,
+                                        );
+                                        follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
+
+                                        match provider.chat_stream_realtime(follow_up).await {
+                                            Ok((mut follow_rx, _)) => {
+                                                let mut follow_content = String::new();
+                                                while let Some(fchunk) = follow_rx.recv().await {
+                                                    match fchunk {
+                                                        StreamChunk::Content(c) => {
+                                                            follow_content.push_str(&c);
+                                                            let _ = tx.send(StreamEvent::Chunk(c));
+                                                        }
+                                                        StreamChunk::Reasoning(r) => {
+                                                            let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                                let _ = tx.send(StreamEvent::Done);
+                                            }
+                                            Err(e) => {
+                                                let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                                let _ = tx.send(StreamEvent::Done);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(StreamEvent::ToolResult {
+                                            name,
+                                            args: tool_args,
+                                            result: e.to_string(),
+                                            success: false,
+                                        });
+                                        let _ = tx.send(StreamEvent::Done);
+                                    }
+                                }
+                            }
+                            crate::security::SecurityDecision::Deny { reason } => {
+                                let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                    "🚫 Tool '{}' blocked: {}",
+                                    name, reason
+                                )));
+                                let _ = tx.send(StreamEvent::Done);
+                            }
+                            crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                                let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                    "⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)",
+                                    name
+                                )));
+                                let _ = tx.send(StreamEvent::Done);
+                            }
+                        }
+                    }
+                    StreamChunk::Finish(fr) => {
+                        if fr == "stop" {
+                            // Normal completion — fall through to existing tool detection
+                        }
+                    }
+                }
+            }
+
+            // Compute actual metrics now that streaming is done
+            let total_latency = stream_start.elapsed();
+            let first_token_latency = first_token_time
+                .map(|t| t.duration_since(stream_start))
+                .unwrap_or_default();
+            metrics.first_token_latency_ms = first_token_latency.as_millis() as u64;
+            metrics.total_latency_ms = total_latency.as_millis() as u64;
+            metrics.tokens_generated = token_count;
+
+            let _ = tx.send(StreamEvent::ResponseComplete {
+                content: full_content.clone(),
+                metrics,
+            });
+
+            // Handle tool invocation + follow-up using the accumulated full_content
+            let embedded_tools = parse_embedded_tools(&full_content);
+            if !embedded_tools.is_empty() {
+                let _ = execute_tool_chain(
+                    &tx, &provider, &model, &model_messages, &security_engine, &embedded_tools, &full_content
+                ).await;
+            } else {
+                let suggestions = crate::tools::detect_tool_suggestions(&full_content);
+                if let Some(suggestion) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
+                    match security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
+                        crate::security::SecurityDecision::Allow => {
+                            let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                "🔧 Auto-executing: {} {} (low risk)",
+                                suggestion.tool_name, suggestion.args
+                            )));
+
+                            let executor = AsyncToolExecutor::new();
+                            match executor
+                                .execute_with_timeout_simple(
+                                    suggestion.tool_name.clone(),
+                                    suggestion.args.clone(),
+                                    30000,
+                                )
+                                .await
+                            {
+                                Ok(result) => {
+                                    let sanitized = security_engine.sanitize_output(&suggestion.tool_name, &result);
+                                    let _ = tx.send(StreamEvent::ToolResult {
+                                        name: suggestion.tool_name.clone(),
+                                        args: suggestion.args.clone(),
+                                        result: sanitized.clone(),
+                                        success: true,
+                                    });
+
+                                    let mut follow_messages = model_messages.clone();
+                                    follow_messages.push(Message {
+                                        role: "assistant".to_string(),
+                                        content: full_content.clone(),
+                                        images: None,
+                                    });
+                                    follow_messages.push(Message {
+                                        role: "user".to_string(),
+                                        content: format!("Tool result: {}", sanitized),
+                                        images: None,
+                                    });
+                                    follow_messages.push(Message {
+                                        role: "user".to_string(),
+                                        content: "Synthesize the tool result into a complete response. \
+                                                  Explain what was found, what it means, and what to do next.".to_string(),
+                                        images: None,
+                                    });
+
+                                    let follow_up = ChatRequest::new(
+                                        model.clone(),
+                                        follow_messages.clone(),
+                                        true,
+                                    );
+
+                                    match provider.chat_stream(follow_up).await {
+                                        Ok((follow_chunks, _metrics)) => {
+                                            let follow_content: String = follow_chunks.join("");
+                                            let trimmed = follow_content.trim();
+                                            if trimmed.is_empty() {
+                                                let _ = tx.send(StreamEvent::Error(
+                                                    "Empty follow-up after tool execution. Re-prompting...".to_string()
+                                                ));
+                                                let mut retry = follow_messages.clone();
+                                                retry.push(Message {
+                                                    role: "user".to_string(),
+                                                    content: "Your previous response was empty. Provide a complete synthesis of the tool results now.".to_string(),
+                                                    images: None,
+                                                });
+                                                let retry_req = ChatRequest::new(model.clone(), retry, true);
+                                                match provider.chat_stream(retry_req).await {
+                                                    Ok((rc, _)) => {
+                                                        let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
+                                                        let _ = tx.send(StreamEvent::Done);
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = tx.send(StreamEvent::Error(format!("Retry failed: {}", e)));
+                                                        let _ = tx.send(StreamEvent::Done);
+                                                    }
+                                                }
+                                            } else {
+                                                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                            }
+                                            let _ = tx.send(StreamEvent::Done);
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                            let _ = tx.send(StreamEvent::Done);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(StreamEvent::ToolResult {
+                                        name: suggestion.tool_name,
+                                        args: suggestion.args,
+                                        result: e.to_string(),
+                                        success: false,
+                                    });
+                                    let _ = tx.send(StreamEvent::Done);
+                                }
+                            }
+                        }
+                        crate::security::SecurityDecision::Deny { reason } => {
+                            let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                "🚫 Tool '{}' blocked: {}",
+                                suggestion.tool_name, reason
+                            )));
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                        crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                            let _ = tx.send(StreamEvent::SetPendingSuggestion(suggestion));
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                    }
+                } else {
+                    let _ = tx.send(StreamEvent::Done);
+                }
+            }
+        }
+        Err(e) => {
+            let _ = tx.send(StreamEvent::Error(format!("Stream error: {}", e)));
+            let _ = tx.send(StreamEvent::Done);
+            return Ok(());
+        }
+    }
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+async fn stream_model_response_task_legacy(
     tx: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
     provider: Provider,
     model: String,
@@ -1964,32 +2541,18 @@ async fn stream_model_response_task(
     match provider.chat_stream(request).await {
         Ok((chunks, metrics)) => {
             let mut full_content = String::new();
-            let mut in_think_block = false;
-            let mut think_buffer = String::new();
 
             for chunk in &chunks {
                 full_content.push_str(chunk);
 
-                // Extract thinking/reasoning content from <think> blocks
-                if chunk.contains("<think>") {
-                    in_think_block = true;
+                // Check if this chunk is reasoning content (wrapped in think tags)
+                if chunk.starts_with("<think>") && chunk.ends_with("</think>") {
+                    // Extract the inner reasoning text and send as ReasoningChunk
+                    let inner = &chunk[7..chunk.len()-8]; // strip <think> and </think>
+                    let _ = tx.send(StreamEvent::ReasoningChunk(inner.to_string()));
+                } else {
+                    let _ = tx.send(StreamEvent::Chunk(chunk.clone()));
                 }
-                if in_think_block {
-                    think_buffer.push_str(chunk);
-                    if chunk.contains("</think>") {
-                        in_think_block = false;
-                        // Send thinking content as a separate event
-                        let thinking = extract_thinking(&think_buffer);
-                        if !thinking.is_empty() {
-                            let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                "💭 {}", thinking.chars().take(200).collect::<String>()
-                            )));
-                        }
-                        think_buffer.clear();
-                    }
-                }
-
-                let _ = tx.send(StreamEvent::Chunk(chunk.clone()));
             }
 
             let _ = tx.send(StreamEvent::ResponseComplete {
@@ -2048,17 +2611,47 @@ async fn stream_model_response_task(
                                         content: format!("Tool result: {}", sanitized),
                                         images: None,
                                     });
+                                    follow_messages.push(Message {
+                                        role: "user".to_string(),
+                                        content: "Synthesize the tool result into a complete response. \
+                                                  Explain what was found, what it means, and what to do next.".to_string(),
+                                        images: None,
+                                    });
 
                                     let follow_up = ChatRequest::new(
                                         model.clone(),
-                                        follow_messages,
+                                        follow_messages.clone(),
                                         true,
                                     );
 
                                     match provider.chat_stream(follow_up).await {
                                         Ok((follow_chunks, _metrics)) => {
                                             let follow_content: String = follow_chunks.join("");
-                                            let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                            let trimmed = follow_content.trim();
+                                            if trimmed.is_empty() {
+                                                let _ = tx.send(StreamEvent::Error(
+                                                    "Empty follow-up after tool execution. Re-prompting...".to_string()
+                                                ));
+                                                let mut retry = follow_messages.clone();
+                                                retry.push(Message {
+                                                    role: "user".to_string(),
+                                                    content: "Your previous response was empty. Provide a complete synthesis of the tool results now.".to_string(),
+                                                    images: None,
+                                                });
+                                                let retry_req = ChatRequest::new(model.clone(), retry, true);
+                                                match provider.chat_stream(retry_req).await {
+                                                    Ok((rc, _)) => {
+                                                        let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
+                                                        let _ = tx.send(StreamEvent::Done);
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = tx.send(StreamEvent::Error(format!("Retry failed: {}", e)));
+                                                        let _ = tx.send(StreamEvent::Done);
+                                                    }
+                                                }
+                                            } else {
+                                                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                            }
                                             let _ = tx.send(StreamEvent::Done);
                                         }
                                         Err(e) => {
@@ -2118,6 +2711,7 @@ async fn stream_model_response_task(
                 error_msg
             };
             let _ = tx.send(StreamEvent::Error(display_msg));
+            let _ = tx.send(StreamEvent::Done);
         }
     }
 
@@ -2391,7 +2985,7 @@ async fn execute_approved_tool_task(
                     });
 
                     // ── Handle chained tool suggestions in follow-up ──────────
-                    if !follow_content.starts_with("TOOL:") {
+                    if !follow_content.starts_with("TOOL:") && !follow_content.starts_with("TOOL.") {
                         let suggestions = crate::tools::detect_tool_suggestions(&follow_content);
                         if let Some(next) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
                             let next_tool = next.tool_name.clone();
@@ -2403,14 +2997,58 @@ async fn execute_approved_tool_task(
                                         "🔧 Auto-executing: {} {} (low risk)",
                                         next_tool, next_args
                                     )));
-                                    // Recurse through same pipeline
-                                    let _ = executor
+                                    // Execute chained tool and stream result back through event channel
+                                    match executor
                                         .execute_with_timeout_simple(
-                                            next_tool,
-                                            next_args,
+                                            next_tool.clone(),
+                                            next_args.clone(),
                                             30000,
                                         )
-                                        .await;
+                                        .await
+                                    {
+                                        Ok(result) => {
+                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                name: next_tool.clone(),
+                                                args: next_args.clone(),
+                                                result: result.clone(),
+                                                success: true,
+                                            });
+                                            // Build follow-up messages for synthesis
+                                            let mut chained_messages = follow_messages.clone();
+                                            chained_messages.push(Message {
+                                                role: "assistant".to_string(),
+                                                content: format!("TOOL:{} {}", next_tool, next_args),
+                                                images: None,
+                                            });
+                                            chained_messages.push(Message {
+                                                role: "user".to_string(),
+                                                content: format!("Tool result: {}", result),
+                                                images: None,
+                                            });
+                                            let chained_req = ChatRequest::new(
+                                                model.clone(),
+                                                chained_messages,
+                                                true,
+                                            );
+                                            match provider.chat_stream(chained_req).await {
+                                                Ok((chunks, _metrics)) => {
+                                                    let chained_content = chunks.join("");
+                                                    let _ = tx.send(StreamEvent::FollowUp(chained_content));
+                                                }
+                                                Err(e) => {
+                                                    let _ = tx.send(StreamEvent::Error(format!("Chained follow-up failed: {}", e)));
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                name: next_tool,
+                                                args: next_args,
+                                                result: e.to_string(),
+                                                success: false,
+                                            });
+                                        }
+                                    }
                                 }
                                 crate::security::SecurityDecision::RequireApproval { reason: _, risk_level } => {
                                     let _ = tx.send(StreamEvent::SetPendingSuggestion(next));
@@ -2906,21 +3544,57 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
 
         // Render content with syntax highlighting for assistant messages
         if msg.role == "assistant" {
-            let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
-            for (is_code, block_lines) in highlighted {
-                if is_code {
-                    lines.push(Line::from(vec![
-                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
-                    ]));
-                    for hl_line in block_lines {
-                        lines.push(hl_line);
+            // Check if this is a reasoning/thinking message (wrapped in <think> tags)
+            let is_reasoning_msg = msg.content.starts_with("<think>") && msg.content.contains("</think>");
+            if is_reasoning_msg {
+                // Strip the think tags and render with reasoning style (muted color)
+                let inner = strip_think_tags(&msg.content);
+                let highlighted = syntax_highlight::extract_and_highlight(&inner);
+                for (is_code, block_lines) in highlighted {
+                    if is_code {
+                        lines.push(Line::from(vec![
+                            Span::styled("┌─ think ─────────────────────────────", muted_style()),
+                        ]));
+                        for hl_line in block_lines {
+                            lines.push(hl_line);
+                        }
+                        lines.push(Line::from(vec![
+                            Span::styled("└─────────────────────────────────────", muted_style()),
+                        ]));
+                    } else {
+                        for hl_line in block_lines {
+                            let line_text = match hl_line.spans.first() {
+                                Some(span) => span.content.to_string(),
+                                None => String::new(),
+                            };
+                            if !line_text.is_empty() {
+                                lines.push(Line::from(vec![
+                                    Span::styled("💭 ", muted_style()),
+                                    Span::styled(line_text, muted_style()),
+                                ]));
+                            } else {
+                                lines.push(Line::from(vec![Span::styled("💭", muted_style())]));
+                            }
+                        }
                     }
-                    lines.push(Line::from(vec![
-                        Span::styled("└─────────────────────────────────────", muted_style()),
-                    ]));
-                } else {
-                    for hl_line in block_lines {
-                        lines.push(hl_line);
+                }
+            } else {
+                let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
+                for (is_code, block_lines) in highlighted {
+                    if is_code {
+                        lines.push(Line::from(vec![
+                            Span::styled("┌─ code ──────────────────────────────", muted_style()),
+                        ]));
+                        for hl_line in block_lines {
+                            lines.push(hl_line);
+                        }
+                        lines.push(Line::from(vec![
+                            Span::styled("└─────────────────────────────────────", muted_style()),
+                        ]));
+                    } else {
+                        for hl_line in block_lines {
+                            lines.push(hl_line);
+                        }
                     }
                 }
             }
@@ -2960,12 +3634,75 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
         } else {
             &app.config.agent.emoji
         };
+        // Animated spinner based on frame counter
+        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let spinner = SPINNER_CHARS[app.spinner_frame % SPINNER_CHARS.len()];
+        let elapsed = app.stream_start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+        let elapsed_str = if elapsed > 0 {
+            format!(" [{}s]", elapsed)
+        } else {
+            String::new()
+        };
+
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", agent_emoji), shark_style()),
             Span::styled(agent_name, shark_style().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  {} thinking{}", spinner, elapsed_str), accent_style()),
         ]));
-        for line in app.streaming_content.lines() {
-            lines.push(Line::from(vec![Span::styled(line, text_style())]));
+
+        // Show reasoning/thinking content in real-time with syntax highlighting
+        if !app.reasoning_content.is_empty() {
+            // Use the same syntax highlighter so code in reasoning gets highlighted
+            let highlighted = syntax_highlight::extract_and_highlight(&app.reasoning_content);
+            for (is_code, block_lines) in highlighted {
+                if is_code {
+                    lines.push(Line::from(vec![
+                        Span::styled("┌─ think ─────────────────────────────", muted_style()),
+                    ]));
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
+                    }
+                    lines.push(Line::from(vec![
+                        Span::styled("└─────────────────────────────────────", muted_style()),
+                    ]));
+                } else {
+                    for hl_line in block_lines {
+                        // Prefix each line with thinking indicator
+                        let line_text = match hl_line.spans.first() {
+                            Some(span) => span.content.to_string(),
+                            None => String::new(),
+                        };
+                        if !line_text.is_empty() {
+                            lines.push(Line::from(vec![
+                                Span::styled("💭 ", muted_style()),
+                                Span::styled(line_text, muted_style()),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![Span::styled("💭", muted_style())]));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Show actual streaming content with syntax highlighting
+        let highlighted = syntax_highlight::extract_and_highlight(&app.streaming_content);
+        for (is_code, block_lines) in highlighted {
+            if is_code {
+                lines.push(Line::from(vec![
+                    Span::styled("┌─ code ──────────────────────────────", muted_style()),
+                ]));
+                for hl_line in block_lines {
+                    lines.push(hl_line);
+                }
+                lines.push(Line::from(vec![
+                    Span::styled("└─────────────────────────────────────", muted_style()),
+                ]));
+            } else {
+                for hl_line in block_lines {
+                    lines.push(hl_line);
+                }
+            }
         }
         lines.push(Line::from(vec![Span::styled("▌", accent_style())]));
     }
@@ -3067,7 +3804,14 @@ fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
         if app.mode == AppMode::ToolApproval {
             "Tool suggestion pending. Press 'y' to execute, 'n' to skip."
         } else if app.is_streaming {
-            "Streaming response..."
+            const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let spinner = SPINNER_CHARS[app.spinner_frame % SPINNER_CHARS.len()];
+            let elapsed = app.stream_start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+            if elapsed > 0 {
+                &format!("{} Streaming response... [{}s]", spinner, elapsed)
+            } else {
+                &format!("{} Streaming response...", spinner)
+            }
         } else if app.swarm_running {
             "🐝 Agents working..."
         } else {
@@ -3453,4 +4197,77 @@ fn draw_splash_screen(f: &mut Frame) {
         height: 1,
     };
     f.render_widget(prompt, prompt_area);
+}
+
+/// Split content into thinking/reasoning and regular content.
+/// Handles <think>...</think> blocks from Kimi models.
+fn split_thinking_content(content: &str) -> (String, String) {
+    let mut thinking = String::new();
+    let mut regular = String::new();
+    let mut in_think = false;
+    let mut think_buffer = String::new();
+    let mut regular_buffer = String::new();
+
+    // Simple state machine to parse think tags
+    let mut chars = content.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            // Check for <think> or </think>
+            let mut tag = String::new();
+            tag.push(ch);
+            while let Some(&next_ch) = chars.peek() {
+                if next_ch == '>' {
+                    tag.push(chars.next().unwrap());
+                    break;
+                } else {
+                    tag.push(chars.next().unwrap());
+                }
+            }
+
+            if tag == "<think>" {
+                // Flush regular buffer
+                if !regular_buffer.is_empty() {
+                    regular.push_str(&regular_buffer);
+                    regular_buffer.clear();
+                }
+                in_think = true;
+            } else if tag == "</think>" {
+                // Flush think buffer
+                if !think_buffer.is_empty() {
+                    if !thinking.is_empty() {
+                        thinking.push('\n');
+                    }
+                    thinking.push_str(&think_buffer);
+                    think_buffer.clear();
+                }
+                in_think = false;
+            } else {
+                // Not a think tag, treat as regular content
+                if in_think {
+                    think_buffer.push_str(&tag);
+                } else {
+                    regular_buffer.push_str(&tag);
+                }
+            }
+        } else {
+            if in_think {
+                think_buffer.push(ch);
+            } else {
+                regular_buffer.push(ch);
+            }
+        }
+    }
+
+    // Flush remaining buffers
+    if !think_buffer.is_empty() {
+        if !thinking.is_empty() {
+            thinking.push('\n');
+        }
+        thinking.push_str(&think_buffer);
+    }
+    if !regular_buffer.is_empty() {
+        regular.push_str(&regular_buffer);
+    }
+
+    (thinking, regular)
 }

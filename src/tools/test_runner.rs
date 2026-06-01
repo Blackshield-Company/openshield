@@ -94,7 +94,7 @@ fn run_tests(path: &str, framework: &TestFramework) -> Result<String> {
             .current_dir(path)
             .output(),
         TestFramework::Jest => Command::new("npx")
-            .args(["jest", "--verbose"])
+            .args(["jest", "--verbose", "--no-coverage"])
             .current_dir(path)
             .output(),
         TestFramework::Pytest => Command::new("pytest")

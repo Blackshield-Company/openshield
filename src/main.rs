@@ -26,6 +26,32 @@ mod tui;
 use config::Config;
 use crate::tools::Tool;
 
+/// Parse embedded TOOL: lines from CLI chat responses.
+/// Handles both raw args and JSON-like `key="value"` formats.
+fn parse_embedded_tools_cli(text: &str) -> Vec<(String, String)> {
+    let mut tools = Vec::new();
+    // Use regex to find TOOL: or TOOL. anywhere in the text (not just start of line)
+    let re = match regex::Regex::new(r"TOOL[:\.]\s*(\S+)(?:\s+(.*))?$") {
+        Ok(r) => r,
+        Err(_) => return tools,
+    };
+    for cap in re.captures_iter(text) {
+        let tool_name = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+        let args = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+        if tool_name.is_empty() {
+            continue;
+        }
+        // Handle JSON-like `command="value"` format by extracting the value
+        let args = if args.starts_with("command=\"") && args.ends_with("\"") {
+            args[9..args.len()-1].to_string()
+        } else {
+            args
+        };
+        tools.push((tool_name, args));
+    }
+    tools
+}
+
 #[derive(Parser)]
 #[command(name = "openshark")]
 #[command(about = "🦈 The harness that learns. The agent that decides.")]
@@ -578,10 +604,31 @@ async fn main() -> anyhow::Result<()> {
                     provider_config.headers.clone(),
                 );
 
+                // Build a proper system prompt with tool instructions
+                let tool_descriptions = tools::get_tools()
+                    .iter()
+                    .map(|t| format!("- {}: {}", t.name(), t.description()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let system_prompt = format!(
+                    "You are an AI coding assistant with TOOL ACCESS. You MUST use tools when asked to perform actions. \
+                     You are NOT a generic chatbot — you are an agent with real tool capabilities. \
+                     \n\nAVAILABLE TOOLS:\n{}\n\nTOOL USAGE RULES:\n\
+                     1. When asked to do something requiring a tool, output ONLY: TOOL:<tool_name> <args>\n\
+                     2. Do NOT say 'I don't have access' or 'I cannot execute commands'. You DO have access.\n\
+                     3. Do NOT preamble. Just output the TOOL: line.\n\
+                     4. Low and Medium risk tools execute automatically.\n\
+                     5. High risk tools require user approval.\n\
+                     6. If the user says 'test', run the test tool immediately.\n\
+                     7. For one-line tasks, just do it. No manifesto.",
+                    tool_descriptions
+                );
+
                 let messages = vec![
                     providers::Message {
                         role: "system".to_string(),
-                        content: "You are a helpful assistant.".to_string(),
+                        content: system_prompt,
                         images: None,
                     },
                     providers::Message {
@@ -591,11 +638,13 @@ async fn main() -> anyhow::Result<()> {
                     },
                 ];
 
-                let request = providers::ChatRequest::new(
+                let mut request = providers::ChatRequest::new(
                     model_name.to_string(),
                     messages,
                     true,
                 );
+                // Attach tools so the model knows it can call them
+                request.tools = Some(tools::get_openai_tool_definitions());
 
                 match provider.chat_stream(request).await {
                     Ok((chunks, metrics)) => {
@@ -605,6 +654,32 @@ async fn main() -> anyhow::Result<()> {
                             full_response.push_str(&chunk);
                         }
                         println!();
+                        println!();
+
+                        // Parse and execute any embedded TOOL: lines from the response
+                        let embedded_tools = parse_embedded_tools_cli(&full_response
+                        );
+                        if !embedded_tools.is_empty() {
+                            for (tool_name, args) in embedded_tools {
+                                println!("🔧 Executing: {} {}", tool_name, args);
+                                match tools::find_tool(&tool_name) {
+                                    Some(tool) => {
+                                        match tool.execute(&args) {
+                                            Ok(result) => {
+                                                println!("✅ Result:\n{}", result);
+                                            }
+                                            Err(e) => {
+                                                println!("❌ Error: {}", e);
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        println!("❌ Unknown tool: {}", tool_name);
+                                    }
+                                }
+                            }
+                        }
+
                         println!();
                         println!(
                             "⚡ First token: {}ms | Total: {}ms | Tokens: {}",
@@ -825,7 +900,7 @@ async fn main() -> anyhow::Result<()> {
 
                     println!("\n💡 Usage:");
                     println!("  In agent mode, the model can invoke any tool.");
-                    println!("  In TUI, use TOOL:<tool_name> <args> to execute manually.");
+                    println!("  In TUI, use TOOL:<tool_name> <args> or TOOL.<tool_name> <args> to execute manually.");
                 }
                 _ => {
                     println!("🦈 Tools Commands");

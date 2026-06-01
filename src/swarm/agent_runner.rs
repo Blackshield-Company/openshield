@@ -6,7 +6,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
 use crate::providers::{ChatRequest, Message, Provider};
-use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor};
+use crate::tools::{detect_tool_suggestions, AsyncToolExecutor};
 
 use super::{AgentId, AgentStatus, SwarmAgent, SwarmEvent};
 
@@ -236,7 +236,7 @@ impl AgentRunner {
             });
 
             let executor = AsyncToolExecutor::new();
-            let (tool_result, success) = match executor.execute_with_timeout(
+            let (tool_result, _success) = match executor.execute_with_timeout(
                 suggestion.tool_name.clone(),
                 suggestion.args.clone(),
                 30000, // 30s timeout per tool call
