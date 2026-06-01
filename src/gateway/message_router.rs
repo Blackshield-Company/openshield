@@ -146,6 +146,9 @@ impl MessageRouter {
                     relevant_context
                 ),
                 images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             };
             // Insert after the first system message
             if messages.len() > 1 {
@@ -161,6 +164,9 @@ impl MessageRouter {
                 role: "system".to_string(),
                 content: skills_prompt,
                 images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             };
             // Insert after system prompt (and after memory context if present)
             let insert_pos = if messages.len() > 1 && messages[1].role == "system" {
@@ -181,6 +187,9 @@ impl MessageRouter {
             role: "user".to_string(),
             content: format!("{}: {}", username, content),
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         });
 
         // Persist to memory

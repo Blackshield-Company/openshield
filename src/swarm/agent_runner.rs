@@ -24,6 +24,9 @@ impl AgentContext {
                 role: "system".to_string(),
                 content: system_prompt.to_string(),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             }],
             task_history: Vec::new(),
             tool_calls_count: 0,
@@ -35,6 +38,9 @@ impl AgentContext {
             role: "user".to_string(),
             content: content.to_string(),
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         });
     }
 
@@ -43,6 +49,9 @@ impl AgentContext {
             role: "assistant".to_string(),
             content: content.to_string(),
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         });
     }
 
@@ -51,6 +60,9 @@ impl AgentContext {
             role: "user".to_string(),
             content: format!("TOOL_RESULT:{}\n{}", tool_name, result),
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         });
     }
 
