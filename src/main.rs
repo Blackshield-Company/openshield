@@ -630,11 +630,17 @@ async fn main() -> anyhow::Result<()> {
                         role: "system".to_string(),
                         content: system_prompt,
                         images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                     },
                     providers::Message {
                         role: "user".to_string(),
                         content: message.clone(),
                         images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                     },
                 ];
 

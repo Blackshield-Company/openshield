@@ -1,6 +1,6 @@
 //! Media capabilities — vision, image generation, video, TTS.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::tools::Tool;
 
@@ -13,7 +13,7 @@ impl Tool for VisionTool {
         "vision"
     }
     fn description(&self) -> &str {
-        "Image analysis. Args: <image_path_or_url> [--question <question>]"
+        "Image analysis. Args: <image_path> [--question <question>]"
     }
     fn execute(&self, args: &str) -> Result<String> {
         let parts: Vec<&str> = args.split("--question").collect();
@@ -21,22 +21,38 @@ impl Tool for VisionTool {
         let question = parts.get(1).map(|s| s.trim()).unwrap_or("Describe this image.");
 
         if image_path.is_empty() {
-            return Ok("Usage: vision <image_path_or_url> [--question <question>]".to_string());
+            return Ok("Usage: vision <image_path> [--question <question>]\nSupports: PNG, JPG, GIF, WebP. Use after browser --snapshot for page analysis.".to_string());
         }
 
-        // Check if file exists locally
+        // Read and encode the image as base64 data URL for vision models
         let path = std::path::Path::new(image_path);
         if path.exists() {
-            let metadata = std::fs::metadata(path)?;
+            let data = std::fs::read(path)
+                .with_context(|| format!("Failed to read image: {}", image_path))?;
+
+            // Detect MIME type from extension
+            let ext = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png")
+                .to_lowercase();
+            let mime = match ext.as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                _ => "image/png",
+            };
+
+            use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+            let b64 = BASE64.encode(&data);
+            let data_url = format!("data:{};base64,{}", mime, b64);
+
             Ok(format!(
-                "Vision analysis requested for: {}\nSize: {} bytes\nQuestion: {}\n\nNote: Full vision analysis requires a vision-capable model. Pass the image to the model with your question.",
-                image_path,
-                metadata.len(),
-                question
+                "Image loaded: {} ({} bytes, {})Question: {}\n--- VISION DATA (base64 data URL) ---\n{}\nUse this data URL as an image attachment in your next message to analyze it with a vision-capable model.",
+                image_path, data.len(), mime, question, data_url
             ))
         } else {
             Ok(format!(
-                "Vision analysis requested for URL: {}\nQuestion: {}\n\nNote: Download and analyze the image using a vision-capable model.",
+                "Image not found: {}\nQuestion: {}\n\nTip: Use browser --snapshot <url> to capture a page screenshot first, then vision /tmp/openshark_snapshot.png.",
                 image_path, question
             ))
         }
