@@ -41,6 +41,31 @@ pub struct Message {
     /// When present, the message is sent as multimodal content.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub images: Option<Vec<String>>,
+    /// Required for role="tool" messages — matches the id from the assistant's tool_calls.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool_call_id: Option<String>,
+    /// Required for role="assistant" messages that initiate tool calls.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool_calls: Option<Vec<ToolCallRequest>>,
+    /// Reasoning/thinking content (Kimi thinking, DeepSeek V4).
+    /// Must be echoed back in history for models that require reasoning_content.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reasoning_content: Option<String>,
+}
+
+/// A tool call initiated by the assistant (OpenAI function calling format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallRequest {
+    pub id: String,
+    pub r#type: String,
+    pub function: ToolCallFunction,
+}
+
+/// Function details within a tool call request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
 }
 
 impl Message {
@@ -50,6 +75,9 @@ impl Message {
             role: role.into(),
             content: content.into(),
             images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         }
     }
 
@@ -59,6 +87,9 @@ impl Message {
             role: role.into(),
             content: content.into(),
             images: Some(vec![image_data_url.into()]),
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         }
     }
 
@@ -229,11 +260,38 @@ impl Provider {
         match self.kind {
             ProviderKind::OpenAiCompatible => {
                 let messages: Vec<_> = request.messages.iter()
+                    .filter(|m| {
+                        // Filter out empty assistant/tool messages — they violate API requirements.
+                        // Messages with tool_calls but empty content are fine (content becomes null).
+                        if (m.role == "assistant" || m.role == "tool") && m.content.trim().is_empty() && m.tool_calls.is_none() {
+                            return false;
+                        }
+                        true
+                    })
                     .map(|m| {
-                        json!({
+                        // For assistant messages with tool_calls but no content,
+                        // the API requires content to be null (not empty string)
+                        let content = if m.role == "assistant" && m.content.is_empty() && m.tool_calls.is_some() {
+                            serde_json::Value::Null
+                        } else {
+                            m.to_openai_content()
+                        };
+                        let mut msg = json!({
                             "role": m.role,
-                            "content": m.to_openai_content(),
-                        })
+                            "content": content,
+                        });
+                        if let Some(ref tool_call_id) = m.tool_call_id {
+                            msg["tool_call_id"] = json!(tool_call_id);
+                        }
+                        if let Some(ref tool_calls) = m.tool_calls {
+                            msg["tool_calls"] = json!(tool_calls);
+                        }
+                        if let Some(ref reasoning) = m.reasoning_content {
+                            if !reasoning.is_empty() {
+                                msg["reasoning_content"] = json!(reasoning);
+                            }
+                        }
+                        msg
                     })
                     .collect();
 
@@ -260,6 +318,12 @@ impl Provider {
 
                 let messages: Vec<_> = request.messages.iter()
                     .filter(|m| m.role != "system")
+                    .filter(|m| {
+                        if (m.role == "assistant" || m.role == "tool") && m.content.trim().is_empty() && m.tool_calls.is_none() {
+                            return false;
+                        }
+                        true
+                    })
                     .map(|m| {
                         // Anthropic uses the same multimodal format as OpenAI
                         json!({"role": m.role, "content": m.to_openai_content()})
@@ -281,6 +345,12 @@ impl Provider {
             }
             ProviderKind::Gemini => {
                 let contents: Vec<_> = request.messages.iter()
+                    .filter(|m| {
+                        if (m.role == "assistant" || m.role == "tool") && m.content.trim().is_empty() && m.tool_calls.is_none() {
+                            return false;
+                        }
+                        true
+                    })
                     .map(|m| {
                         let role = if m.role == "assistant" { "model" } else { &m.role };
                         let mut parts = vec![json!({"text": m.content})];
@@ -344,6 +414,9 @@ impl Provider {
                             role: "assistant".to_string(),
                             content,
                             images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
                         },
                         finish_reason: raw["choices"][0]["finish_reason"].as_str().map(|s| s.to_string()),
                     }],
@@ -372,6 +445,9 @@ impl Provider {
                             role: "assistant".to_string(),
                             content,
                             images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
                         },
                         finish_reason: raw["stop_reason"].as_str().map(|s| s.to_string()),
                     }],
@@ -398,6 +474,9 @@ impl Provider {
                             role: "assistant".to_string(),
                             content,
                             images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
                         },
                         finish_reason: Some("stop".to_string()),
                     }],
@@ -651,12 +730,24 @@ impl Provider {
             // Accumulate tool call fragments across SSE chunks, keyed by index
             let mut pending_tool_calls: HashMap<u32, AccumulatedToolCall> = HashMap::new();
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let _ = tx.send(StreamChunk::Content(format!("[stream read error: {}]", e)));
-                        return;
+            let stream_timeout = std::time::Duration::from_secs(120);
+            loop {
+                let chunk = tokio::select! {
+                    chunk_result = stream.next() => {
+                        match chunk_result {
+                            Some(Ok(c)) => c,
+                            Some(Err(e)) => {
+                                let _ = tx.send(StreamChunk::Content(format!("[stream read error: {}]", e)));
+                                return;
+                            }
+                            None => break, // stream ended normally
+                        }
+                    }
+                    _ = tokio::time::sleep(stream_timeout) => {
+                        let _ = tx.send(StreamChunk::Content(
+                            "[⏱ Stream timed out after 120s of inactivity]".to_string()
+                        ));
+                        break;
                     }
                 };
                 let text = String::from_utf8_lossy(&chunk);
@@ -855,6 +946,9 @@ mod tests {
             role: "user".to_string(),
             content: "Hello".to_string(),
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         };
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content, "Hello");
@@ -869,11 +963,17 @@ mod tests {
                     role: "system".to_string(),
                     content: "You are a helpful assistant".to_string(),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: "Hello".to_string(),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 },
             ],
             false,
@@ -917,6 +1017,9 @@ mod tests {
                 role: "assistant".to_string(),
                 content: "Test".to_string(),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             },
             finish_reason: Some("stop".to_string()),
         };
@@ -959,7 +1062,7 @@ mod tests {
         );
         let request = ChatRequest::new(
             "gpt-4".to_string(),
-            vec![Message { role: "user".to_string(), content: "hi".to_string(), images: None }],
+            vec![Message { role: "user".to_string(), content: "hi".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None }],
             false,
         );
         let body = provider.build_chat_body(&request);
@@ -979,8 +1082,8 @@ mod tests {
         let request = ChatRequest::new(
             "claude-sonnet-4".to_string(),
             vec![
-                Message { role: "system".to_string(), content: "Be helpful".to_string(), images: None },
-                Message { role: "user".to_string(), content: "hi".to_string(), images: None },
+                Message { role: "system".to_string(), content: "Be helpful".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
+                Message { role: "user".to_string(), content: "hi".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
             ],
             false,
         );

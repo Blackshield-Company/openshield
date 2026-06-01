@@ -172,6 +172,9 @@ impl ContextCompressor {
                     summary
                 ),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
             summarized_count += chunk.len();
         }
@@ -260,11 +263,17 @@ impl ContextCompressor {
                     role: "system".to_string(),
                     content: "You are a context compression assistant. Summarize conversations into dense, information-rich paragraphs.".to_string(),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 },
                 ProviderMessage {
                     role: "user".to_string(),
                     content: prompt,
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 },
             ],
             false, // non-streaming for summary
@@ -376,6 +385,9 @@ mod tests {
             role: role.to_string(),
             content: content.to_string(),
             images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         }
     }
 

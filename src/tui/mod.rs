@@ -1,5 +1,4 @@
 use anyhow::Result;
-use arboard::Clipboard;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::Backend,
@@ -12,6 +11,7 @@ use ratatui::{
     },
     Frame, Terminal,
 };
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::agent::{Agent, AgentConfig};
@@ -65,6 +65,19 @@ enum StreamEvent {
     SystemMessage(String),
     /// Streaming finished (success or error).
     Done,
+    /// Batched tool results from multi-tool execution (collapsed display).
+    ToolResultsBatch {
+        results: Vec<ToolResultEntry>,
+    },
+}
+
+/// A single tool result for batched display.
+#[derive(Debug, Clone)]
+struct ToolResultEntry {
+    name: String,
+    args: String,
+    result: String,
+    success: bool,
 }
 
 /// A secondary model response attached to a primary assistant message.
@@ -207,6 +220,8 @@ struct App {
     reasoning_content: String,
     /// Whether we're currently in the reasoning phase (before content arrives).
     is_reasoning: bool,
+    /// Index of the last progress message in self.messages (for in-place updates).
+    last_progress_msg_idx: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -357,6 +372,9 @@ impl App {
                 tool_descriptions
             ),
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         };
 
         let security_engine = crate::security::SecurityEngine::new(
@@ -431,6 +449,7 @@ impl App {
             stream_start_time: None,
             reasoning_content: String::new(),
             is_reasoning: false,
+            last_progress_msg_idx: None,
         })
     }
 
@@ -658,6 +677,9 @@ impl App {
                 role: "user".to_string(),
                 content,
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
         }
 
@@ -689,6 +711,9 @@ impl App {
             role: "assistant".to_string(),
             content,
             images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
         });
 
         self.tokens_used += token_count;
@@ -717,17 +742,13 @@ impl App {
                 self.stream_start_time = Some(Instant::now());
             }
             StreamEvent::Chunk(chunk) => {
-                // Extract any <think> blocks from the chunk in real-time
-                let (reasoning, content) = extract_thinking_from_chunk(&chunk);
-                if let Some(r) = reasoning {
-                    self.reasoning_content.push_str(&r);
-                    self.is_reasoning = true;
-                }
-                self.streaming_content.push_str(&content);
+                // Strip <think> tags (model may wrap output in them) and TOOL: lines
+                let cleaned = strip_think_tags(&chunk);
+                self.streaming_content.push_str(&strip_tool_lines(&cleaned));
             }
             StreamEvent::ReasoningChunk(chunk) => {
-                self.reasoning_content.push_str(&chunk);
-                self.is_reasoning = true;
+                // Merge reasoning into normal streaming content — no separate thinking display
+                self.streaming_content.push_str(&chunk);
             }
             StreamEvent::ResponseComplete { content, metrics } => {
                 self.is_streaming = false;
@@ -746,11 +767,16 @@ impl App {
                     Some(&format!("tokens={}", metrics.tokens_generated)),
                 );
 
+                // Persist reasoning content as a chat message BEFORE the response
+                if !self.reasoning_content.is_empty() {
+                    self.add_assistant_message(self.reasoning_content.trim().to_string());
+                }
+
                 // Check for embedded TOOL: lines anywhere in the response
                 let embedded_tools = parse_embedded_tools(&content);
                 if !embedded_tools.is_empty() {
-                    // Display the assistant's message with tool lines stripped
-                    let display_content = strip_tool_lines(&content);
+                    // Display the assistant's message with tool lines and think tags stripped
+                    let display_content = strip_think_tags(&strip_tool_lines(&content));
                     if !display_content.trim().is_empty() {
                         self.add_assistant_message(display_content);
                     }
@@ -760,6 +786,9 @@ impl App {
                             role: "assistant".to_string(),
                             content: format!("TOOL:{} {}", tool_name, args),
                             images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
                         });
                     }
                 } else if content.starts_with("TOOL:") || content.starts_with("TOOL.") {
@@ -774,14 +803,19 @@ impl App {
                             role: "assistant".to_string(),
                             content: format!("TOOL:{} {}", tool_name, args),
                             images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
                         });
                     }
                 } else {
-                    // Save reasoning content as a separate message before the assistant response
-                    if !self.reasoning_content.is_empty() {
+                    // Save reasoning content as a separate message before the assistant response.
+                    // Skip if streaming_content is empty — the model wrapped its entire response
+                    // in <think> tags (Kimi behavior) and there's no separate response to show.
+                    if !self.reasoning_content.is_empty() && !self.streaming_content.trim().is_empty() {
                         let reasoning_msg = ChatMessage {
                             role: "assistant".to_string(),
-                            content: format!("<think>{}\n</think>", self.reasoning_content.trim()),
+                            content: self.reasoning_content.trim().to_string(),
                             images: None,
                             timestamp: Utc::now(),
                             multi_model_responses: Vec::new(),
@@ -790,8 +824,11 @@ impl App {
                         // Also save to model_messages so the model knows it reasoned
                         self.model_messages.push(Message {
                             role: "assistant".to_string(),
-                            content: format!("<think>{}\n</think>", self.reasoning_content.trim()),
+                            content: self.reasoning_content.trim().to_string(),
                             images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
                         });
                     }
                     // Strip any remaining think tags from content before saving to chat history
@@ -827,6 +864,61 @@ impl App {
                     }
                 }
             }
+            StreamEvent::ToolResultsBatch { results } => {
+                // Collapsed display: group results by tool name
+                let mut groups: HashMap<String, (usize, usize)> = HashMap::new();
+                for r in &results {
+                    let entry = groups.entry(r.name.clone()).or_insert((0, 0));
+                    if r.success { entry.0 += 1; } else { entry.1 += 1; }
+                }
+                let total = results.len();
+                let mut summary = String::from(format!("📊 Tool results ({} total):
+", total));
+                let mut names: Vec<&String> = groups.keys().collect();
+                names.sort();
+                for name in names {
+                    let (ok, err) = groups[name];
+                    if ok > 0 && err == 0 {
+                        summary.push_str(&format!("  ✅ {} × {}
+", name, ok));
+                    } else if ok > 0 && err > 0 {
+                        summary.push_str(&format!("  ⚠️ {}: {} ok, {} failed
+", name, ok, err));
+                    } else {
+                        summary.push_str(&format!("  ❌ {}: {} failed
+", name, err));
+                    }
+                }
+                self.add_system_message(summary);
+
+                // Push results to model_messages and track in memory
+                for r in &results {
+                    let tool_call = ToolCall {
+                        id: Uuid::new_v4().to_string(),
+                        session_id: self.session_id.clone(),
+                        tool_name: r.name.clone(),
+                        args: r.args.clone(),
+                        result: r.result.clone(),
+                        success: r.success,
+                        created_at: Utc::now(),
+                    };
+                    let _ = self.memory.save_tool_call(&tool_call);
+                    if r.success {
+                        self.tool_calls_count += 1;
+                    }
+                    if let Some(ref evolution) = self.evolution {
+                        evolution.track_tool_outcome(&r.name, r.success, 0);
+                    }
+                    self.model_messages.push(Message {
+                        role: "user".to_string(),
+                        content: format!("Tool result: {}", r.result),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
+                }
+            }
             StreamEvent::ToolResult { name, args, result, success } => {
                 let display = if success {
                     format!("Result: {}", &result[..result.len().min(200)])
@@ -860,9 +952,56 @@ impl App {
                     role: "user".to_string(),
                     content: format!("Tool result: {}", result),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
             }
             StreamEvent::FollowUp(content) => {
+                // Detect embedded TOOL: lines in the follow-up and execute them.
+                // The model may respond to a tool result with more tool calls in text format.
+                let embedded_tools = parse_embedded_tools(&content);
+                if !embedded_tools.is_empty() {
+                    self.add_system_message(format!(
+                        "🔧 Executing {} follow-up tool(s)...",
+                        embedded_tools.len()
+                    ));
+                    // Display only non-TOOL text — strip_tool_lines removes the
+                    // command lines and strip_think_tags cleans model thinking tags.
+                    let display_content = strip_think_tags(&strip_tool_lines(&content));
+                    if !display_content.trim().is_empty() {
+                        self.add_assistant_message(display_content);
+                    }
+                    // Store tool invocations in model_messages
+                    for (tool_name, args) in &embedded_tools {
+                        self.model_messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!("TOOL:{} {}", tool_name, args),
+                            images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
+                        });
+                    }
+                    // Spawn tool chain in background
+                    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                    self.stream_rx = Some(rx);
+                    self.is_streaming = true;
+                    self.stream_start_time = Some(Instant::now());
+                    let provider = self.provider.clone();
+                    let model = self.model.clone();
+                    let model_messages = self.model_messages.clone();
+                    let security_engine = self.security_engine.clone();
+                    let tools = embedded_tools;
+                    tokio::spawn(async move {
+                        let _ = execute_tool_chain(
+                            &tx, &provider, &model, &model_messages,
+                            &security_engine, &tools, &content,
+                        ).await;
+                    });
+                    return;
+                }
+
                 // Accept follow-up as-is. The model was explicitly asked to synthesize.
                 // Only re-prompt if truly empty.
                 let trimmed = content.trim();
@@ -875,11 +1014,17 @@ impl App {
                         role: "assistant".to_string(),
                         content: content.clone(),
                         images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                     });
                     self.model_messages.push(Message {
                         role: "user".to_string(),
                         content: "Provide a COMPLETE synthesis of the tool results. Explain what was found, what it means, and the next step.".to_string(),
                         images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                     });
                     // Spawn a new background task for the completion
                     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -897,7 +1042,7 @@ impl App {
                         ).await;
                     });
                 } else {
-                    self.add_assistant_message(content);
+                    self.add_assistant_message(strip_think_tags(&content));
                 }
             }
             StreamEvent::MultiModelResponse { name, content, metrics } => {
@@ -924,12 +1069,30 @@ impl App {
                 self.add_system_message(msg);
             }
             StreamEvent::SystemMessage(msg) => {
-                self.add_system_message(msg);
+                // In-place progress updates: replace the previous progress
+                // message instead of accumulating new ones.
+                if msg.starts_with("🔧 Tool") {
+                    if let Some(idx) = self.last_progress_msg_idx {
+                        if idx < self.messages.len() {
+                            self.messages[idx].content = msg;
+                            return;
+                        }
+                    }
+                    // First progress message — store its index
+                    self.add_system_message(msg);
+                    self.last_progress_msg_idx = Some(self.messages.len() - 1);
+                } else {
+                    // Non-progress message — clear the progress index
+                    self.last_progress_msg_idx = None;
+                    self.add_system_message(msg);
+                }
             }
             StreamEvent::Done => {
                 self.is_streaming = false;
                 self.stream_start_time = None;
-                self.stream_rx = None;
+                // Don't clear stream_rx — multi-tool-call sequences send
+                // multiple Done events, and subsequent ones would be lost.
+                // stream_rx is cleared when a new user request starts.
             }
         }
     }
@@ -1023,7 +1186,11 @@ async fn run_app(
             while let Ok(event) = rx.try_recv() {
                 app.apply_stream_event(event);
             }
-            app.stream_rx = Some(rx);
+            // Only keep the receiver if the channel is still open.
+            // Drop it when the background task finishes (sender dropped).
+            if !rx.is_closed() {
+                app.stream_rx = Some(rx);
+            }
         }
 
         let timeout = TICK_RATE
@@ -1064,7 +1231,7 @@ async fn run_app(
                         }
                         crate::swarm::SwarmEvent::AgentThinking { agent_id, thought } => {
                             swarm_updates.push(format!(
-                                "🐝 **{}** 💭 {}",
+                                "🐝 **{}** {}",
                                 agent_id,
                                 &thought[..thought.len().min(300)]
                             ));
@@ -1315,16 +1482,30 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char('v') if key.modifiers == KeyModifiers::CONTROL => {
-            match Clipboard::new().and_then(|mut cb| cb.get_text()) {
-                Ok(text) => {
-                    for ch in text.chars() {
-                        app.input.insert(app.cursor_position, ch);
-                        app.cursor_position += 1;
-                    }
-                }
-                Err(e) => {
-                    app.add_system_message(format!("⚠️ Paste failed: {}", e));
-                }
+            // Clipboard paste via arboard is unavailable on this system.
+            // Silently ignore — use terminal-native paste: Ctrl+Shift+V or right-click.
+        }
+        KeyCode::Char('y') if key.modifiers == KeyModifiers::CONTROL => {
+            // Copy last assistant message to clipboard via OSC 52 escape sequence.
+            // OSC 52 works through the terminal itself — no display server needed.
+            if let Some(last) = app.messages.iter().rev().find(|m| m.role == "assistant") {
+                let text = if last.content.starts_with("<think>") {
+                    // Strip think tags for cleaner clipboard content
+                    strip_think_tags(&last.content)
+                } else {
+                    last.content.clone()
+                };
+                let text_len = text.len();
+                // OSC 52: ]52;c;<base64>
+                use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+                let b64 = BASE64.encode(text.as_bytes());
+                print!("]52;c;{}", b64);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                app.add_system_message(format!(
+                    "📋 Copied ({} chars)", text_len
+                ));
+            } else {
+                app.add_system_message("📋 No assistant message to copy".to_string());
             }
         }
         KeyCode::Enter => {
@@ -1748,6 +1929,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     role: "user".to_string(),
                     content: format!("Test results: {}", result),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
             }
             Err(e) => app.add_system_message(format!("Test error: {}", e)),
@@ -1947,15 +2131,57 @@ fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
         if let Some(p) = prefix {
             let rest = &trimmed[p.len()..]; // after "TOOL:" or "TOOL."
             let rest = rest.trim_start(); // handle "TOOL: fs cat" → "fs cat"
-            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-            if !parts.is_empty() && !parts[0].is_empty() {
-                let tool_name = parts[0].trim().to_string();
-                let args = parts.get(1).unwrap_or(&"").trim().to_string();
-                tools.push((tool_name, args));
+            // Try JSON format first: tool_name:0>{"args":"query"}
+            if let Some((name, args)) = parse_json_tool_format(rest) {
+                tools.push((name, args));
+            } else {
+                // Original space-split format: tool_name args
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                if !parts.is_empty() && !parts[0].is_empty() {
+                    let tool_name = parts[0].trim().to_string();
+                    let args = parts.get(1).unwrap_or(&"").trim().to_string();
+                    tools.push((tool_name, args));
+                }
             }
         }
     }
     tools
+}
+
+/// Parse JSON tool format: tool_name:0>{"args":"value"} or tool_name:0>{"query":"value"}
+fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
+    // Find the first ':' followed by a digit and '>'
+    let colon_pos = rest.find(':')?;
+    let after_colon = &rest[colon_pos + 1..];
+    if after_colon.is_empty() || !after_colon.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    // Find the '>'
+    let gt_pos = after_colon.find('>')?;
+    if !after_colon[gt_pos..].starts_with(">{") {
+        return None;
+    }
+
+    let tool_name = rest[..colon_pos].trim().to_string();
+    let json_str = &after_colon[gt_pos + 1..]; // after '>'
+
+    // Parse JSON to extract "args" or "query" value
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+        if let Some(args) = v.get("args").and_then(|a| a.as_str()) {
+            return Some((tool_name, args.to_string()));
+        }
+        if let Some(args) = v.get("query").and_then(|a| a.as_str()) {
+            return Some((tool_name, args.to_string()));
+        }
+        // Fallback: collect all string values from the JSON object
+        if let Some(obj) = v.as_object() {
+            let parts: Vec<&str> = obj.values().filter_map(|v| v.as_str()).collect();
+            if !parts.is_empty() {
+                return Some((tool_name, parts.join(" ")));
+            }
+        }
+    }
+    None
 }
 
 /// Strip TOOL: / TOOL. lines from assistant content for display.
@@ -2018,11 +2244,25 @@ async fn execute_tool_chain(
         role: "assistant".to_string(),
         content: strip_tool_lines(original_content),
         images: None,
+    tool_call_id: None,
+    tool_calls: None,
+    reasoning_content: None,
     });
 
     let executor = AsyncToolExecutor::new();
 
-    for (tool_name, args) in tools {
+        let total = tools.len();
+    let mut batch_results: Vec<ToolResultEntry> = Vec::with_capacity(total);
+
+for (idx, (tool_name, args)) in tools.iter().enumerate() {
+        // Show progress indicator (throttled — every 5th tool + first + last)
+        if idx == 0 || idx % 5 == 0 || idx == total - 1 {
+            let _ = tx.send(StreamEvent::SystemMessage(format!(
+                "🔧 Tool {}/{}: {} …",
+                idx + 1, total, tool_name
+            )));
+        }
+
         // SECURITY GATE
         match security_engine.check_tool_call(tool_name, args) {
             crate::security::SecurityDecision::Allow => {}
@@ -2050,7 +2290,8 @@ async fn execute_tool_chain(
         {
             Ok(result) => {
                 let sanitized = security_engine.sanitize_output(tool_name, &result);
-                let _ = tx.send(StreamEvent::ToolResult {
+                // Collect for batched display
+                batch_results.push(ToolResultEntry {
                     name: tool_name.clone(),
                     args: args.clone(),
                     result: sanitized.clone(),
@@ -2060,10 +2301,13 @@ async fn execute_tool_chain(
                     role: "user".to_string(),
                     content: format!("Tool result ({} {}): {}", tool_name, args, sanitized),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
             }
             Err(e) => {
-                let _ = tx.send(StreamEvent::ToolResult {
+                batch_results.push(ToolResultEntry {
                     name: tool_name.clone(),
                     args: args.clone(),
                     result: e.to_string(),
@@ -2073,17 +2317,26 @@ async fn execute_tool_chain(
                     role: "user".to_string(),
                     content: format!("Tool error ({} {}): {}", tool_name, args, e),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
             }
         }
     }
-
+    // Send batched results for collapsed display
+    let _ = tx.send(StreamEvent::ToolResultsBatch {
+        results: batch_results,
+    });
     // Follow-up request with all tool results — inject completion mandate
     follow_messages.push(Message {
         role: "user".to_string(),
         content: "Synthesize the tool results above into a complete response. \
                   Explain what was found, what it means, and what to do next.".to_string(),
         images: None,
+    tool_call_id: None,
+    tool_calls: None,
+    reasoning_content: None,
     });
 
     let follow_up = ChatRequest::new(model.to_string(), follow_messages, true);
@@ -2102,6 +2355,9 @@ async fn execute_tool_chain(
                     content: "The previous response was empty. You MUST provide a complete synthesis of the tool results. \
                               Explain what was found, what it means, and the next step. Do not skip this.".to_string(),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
                 let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
                 match provider.chat_stream(retry_req).await {
@@ -2125,11 +2381,17 @@ async fn execute_tool_chain(
                     role: "assistant".to_string(),
                     content: follow_content.clone(),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
                 retry_messages.push(Message {
                     role: "user".to_string(),
                     content: "That was too brief. Provide a thorough synthesis: what did the tools reveal, what does it mean, and what's next?".to_string(),
                     images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
                 });
                 let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
                 match provider.chat_stream(retry_req).await {
@@ -2207,6 +2469,7 @@ async fn stream_model_response_task(
     match provider.chat_stream_realtime(request).await {
         Ok((mut chunk_rx, mut metrics)) => {
             let mut full_content = String::new();
+            let mut accumulated_reasoning = String::new();
             let stream_start = std::time::Instant::now();
             let mut first_token_time: Option<std::time::Instant> = None;
             let mut token_count: u32 = 0;
@@ -2215,6 +2478,7 @@ async fn stream_model_response_task(
             while let Some(chunk) = chunk_rx.recv().await {
                 match chunk {
                     StreamChunk::Reasoning(r) => {
+                        accumulated_reasoning.push_str(&r);
                         let _ = tx.send(StreamEvent::ReasoningChunk(r));
                     }
                     StreamChunk::Content(c) => {
@@ -2225,7 +2489,7 @@ async fn stream_model_response_task(
                         token_count += 1;
                         let _ = tx.send(StreamEvent::Chunk(c));
                     }
-                    StreamChunk::ToolCall { id: _, name, arguments: args } => {
+                    StreamChunk::ToolCall { id, name, arguments: args } => {
                         // Native tool call from the model — execute it directly
                         let _ = tx.send(StreamEvent::SystemMessage(format!(
                             "🔧 Tool call: {} {}",
@@ -2270,15 +2534,39 @@ async fn stream_model_response_task(
 
                                         // Build follow-up messages with tool result
                                         let mut follow_messages = model_messages.clone();
+                                        // Ensure we have a valid tool_call_id — Kimi streams may omit it
+                                        let call_id = if id.is_empty() {
+                                            Uuid::new_v4().to_string()
+                                        } else {
+                                            id.clone()
+                                        };
+                                        // Assistant message MUST include tool_calls array with the id
+                                        // AND reasoning_content for models that require thinking history
                                         follow_messages.push(Message {
                                             role: "assistant".to_string(),
                                             content: full_content.clone(),
                                             images: None,
+                                            tool_call_id: None,
+                                            tool_calls: Some(vec![
+                                                crate::providers::ToolCallRequest {
+                                                    id: call_id.clone(),
+                                                    r#type: "function".to_string(),
+                                                    function: crate::providers::ToolCallFunction {
+                                                        name: name.clone(),
+                                                        arguments: args.clone(),
+                                                    },
+                                                },
+                                            ]),
+                                            reasoning_content: if accumulated_reasoning.is_empty() { None } else { Some(accumulated_reasoning.clone()) },
                                         });
+                                        // Tool result message MUST include tool_call_id matching the assistant's tool_calls
                                         follow_messages.push(Message {
                                             role: "tool".to_string(),
                                             content: sanitized,
                                             images: None,
+                                            tool_call_id: Some(call_id.clone()),
+                                            tool_calls: None,
+                                            reasoning_content: None,
                                         });
 
                                         let mut follow_up = ChatRequest::new(
@@ -2400,17 +2688,26 @@ async fn stream_model_response_task(
                                         role: "assistant".to_string(),
                                         content: full_content.clone(),
                                         images: None,
+                                    tool_call_id: None,
+                                    tool_calls: None,
+                                    reasoning_content: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
                                         images: None,
+                                    tool_call_id: None,
+                                    tool_calls: None,
+                                    reasoning_content: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: "Synthesize the tool result into a complete response. \
                                                   Explain what was found, what it means, and what to do next.".to_string(),
                                         images: None,
+                                    tool_call_id: None,
+                                    tool_calls: None,
+                                    reasoning_content: None,
                                     });
 
                                     let follow_up = ChatRequest::new(
@@ -2432,6 +2729,9 @@ async fn stream_model_response_task(
                                                     role: "user".to_string(),
                                                     content: "Your previous response was empty. Provide a complete synthesis of the tool results now.".to_string(),
                                                     images: None,
+                                                tool_call_id: None,
+                                                tool_calls: None,
+                                                reasoning_content: None,
                                                 });
                                                 let retry_req = ChatRequest::new(model.clone(), retry, true);
                                                 match provider.chat_stream(retry_req).await {
@@ -2605,17 +2905,26 @@ async fn stream_model_response_task_legacy(
                                         role: "assistant".to_string(),
                                         content: full_content.clone(),
                                         images: None,
+                                    tool_call_id: None,
+                                    tool_calls: None,
+                                    reasoning_content: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
                                         images: None,
+                                    tool_call_id: None,
+                                    tool_calls: None,
+                                    reasoning_content: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: "Synthesize the tool result into a complete response. \
                                                   Explain what was found, what it means, and what to do next.".to_string(),
                                         images: None,
+                                    tool_call_id: None,
+                                    tool_calls: None,
+                                    reasoning_content: None,
                                     });
 
                                     let follow_up = ChatRequest::new(
@@ -2637,6 +2946,9 @@ async fn stream_model_response_task_legacy(
                                                     role: "user".to_string(),
                                                     content: "Your previous response was empty. Provide a complete synthesis of the tool results now.".to_string(),
                                                     images: None,
+                                                tool_call_id: None,
+                                                tool_calls: None,
+                                                reasoning_content: None,
                                                 });
                                                 let retry_req = ChatRequest::new(model.clone(), retry, true);
                                                 match provider.chat_stream(retry_req).await {
@@ -2804,6 +3116,9 @@ fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<()> {
                 role: "user".to_string(),
                 content: format!("Tool {} returned: {}", tool_name, sanitized),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
         }
         Err(e) => {
@@ -2892,11 +3207,17 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
             app.model_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
 
             let follow_up = ChatRequest::new(
@@ -2963,11 +3284,17 @@ async fn execute_approved_tool_task(
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
             follow_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
                 images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
             });
 
             let follow_up = ChatRequest::new(
@@ -3019,11 +3346,17 @@ async fn execute_approved_tool_task(
                                                 role: "assistant".to_string(),
                                                 content: format!("TOOL:{} {}", next_tool, next_args),
                                                 images: None,
+                                            tool_call_id: None,
+                                            tool_calls: None,
+                                            reasoning_content: None,
                                             });
                                             chained_messages.push(Message {
                                                 role: "user".to_string(),
                                                 content: format!("Tool result: {}", result),
                                                 images: None,
+                                            tool_call_id: None,
+                                            tool_calls: None,
+                                            reasoning_content: None,
                                             });
                                             let chained_req = ChatRequest::new(
                                                 model.clone(),
@@ -3544,41 +3877,7 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
 
         // Render content with syntax highlighting for assistant messages
         if msg.role == "assistant" {
-            // Check if this is a reasoning/thinking message (wrapped in <think> tags)
-            let is_reasoning_msg = msg.content.starts_with("<think>") && msg.content.contains("</think>");
-            if is_reasoning_msg {
-                // Strip the think tags and render with reasoning style (muted color)
-                let inner = strip_think_tags(&msg.content);
-                let highlighted = syntax_highlight::extract_and_highlight(&inner);
-                for (is_code, block_lines) in highlighted {
-                    if is_code {
-                        lines.push(Line::from(vec![
-                            Span::styled("┌─ think ─────────────────────────────", muted_style()),
-                        ]));
-                        for hl_line in block_lines {
-                            lines.push(hl_line);
-                        }
-                        lines.push(Line::from(vec![
-                            Span::styled("└─────────────────────────────────────", muted_style()),
-                        ]));
-                    } else {
-                        for hl_line in block_lines {
-                            let line_text = match hl_line.spans.first() {
-                                Some(span) => span.content.to_string(),
-                                None => String::new(),
-                            };
-                            if !line_text.is_empty() {
-                                lines.push(Line::from(vec![
-                                    Span::styled("💭 ", muted_style()),
-                                    Span::styled(line_text, muted_style()),
-                                ]));
-                            } else {
-                                lines.push(Line::from(vec![Span::styled("💭", muted_style())]));
-                            }
-                        }
-                    }
-                }
-            } else {
+            // Render assistant messages with syntax highlighting
                 let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
                 for (is_code, block_lines) in highlighted {
                     if is_code {
@@ -3597,7 +3896,7 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                         }
                     }
                 }
-            }
+
         } else {
             for content_line in msg.content.lines() {
                 // Welcome logo lines use purple for visibility against dark bg
@@ -3657,7 +3956,7 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             for (is_code, block_lines) in highlighted {
                 if is_code {
                     lines.push(Line::from(vec![
-                        Span::styled("┌─ think ─────────────────────────────", muted_style()),
+                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
                     ]));
                     for hl_line in block_lines {
                         lines.push(hl_line);
@@ -3667,19 +3966,7 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                     ]));
                 } else {
                     for hl_line in block_lines {
-                        // Prefix each line with thinking indicator
-                        let line_text = match hl_line.spans.first() {
-                            Some(span) => span.content.to_string(),
-                            None => String::new(),
-                        };
-                        if !line_text.is_empty() {
-                            lines.push(Line::from(vec![
-                                Span::styled("💭 ", muted_style()),
-                                Span::styled(line_text, muted_style()),
-                            ]));
-                        } else {
-                            lines.push(Line::from(vec![Span::styled("💭", muted_style())]));
-                        }
+                        lines.push(hl_line);
                     }
                 }
             }
@@ -3877,7 +4164,10 @@ fn compute_wrapped_cursor_position(
         return (base_x, base_y);
     }
 
-    let before_cursor = &text[..cursor_pos.min(text.len())];
+    let pos = cursor_pos.min(text.len());
+    // Ensure we don't slice inside a multi-byte UTF-8 character
+    let safe_pos = text.ceil_char_boundary(pos);
+    let before_cursor = &text[..safe_pos];
     let mut col: usize = 0;
     let mut row: u16 = 0;
     let mut word_start_col: usize = 0;
