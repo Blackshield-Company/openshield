@@ -21,7 +21,7 @@
 //! preserve_recent = 4      # Keep N most recent exchanges uncompressed
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::providers::{ChatRequest, Message as ProviderMessage, Provider};
@@ -253,7 +253,7 @@ impl ContextCompressor {
             conversation
         );
 
-        let request = ChatRequest::new(
+        let _request = ChatRequest::new(
             self.config.summary_model.clone(),
             vec![
                 ProviderMessage {

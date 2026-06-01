@@ -1,7 +1,6 @@
 //! Productivity capabilities — todo lists, cron jobs, skill management.
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 

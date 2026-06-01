@@ -4,6 +4,7 @@
 //! and encode them as base64 data URLs suitable for OpenAI-compatible APIs.
 
 use anyhow::{Context, Result};
+use base64::engine::{Engine as _, general_purpose::STANDARD};
 use std::path::Path;
 
 /// Detect MIME type from file extension.
@@ -34,7 +35,7 @@ pub fn encode_image_to_data_url(path: &Path) -> Result<String> {
         .with_context(|| format!("Failed to read image file: {}", path.display()))?;
 
     let mime_type = detect_mime_type(path);
-    let base64 = base64::encode(&bytes);
+    let base64 = STANDARD.encode(&bytes);
 
     Ok(format!("data:{};base64,{}", mime_type, base64))
 }
@@ -48,7 +49,7 @@ pub fn encode_image_to_data_url(path: &Path) -> Result<String> {
 /// # Returns
 /// A string in the format `data:image/png;base64,...`.
 pub fn encode_image_bytes_to_data_url(bytes: &[u8], mime_type: &str) -> String {
-    let base64 = base64::encode(bytes);
+    let base64 = STANDARD.encode(bytes);
     format!("data:{};base64,{}", mime_type, base64)
 }
 

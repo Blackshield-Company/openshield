@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// A role that an agent can have in the swarm.
 #[derive(Debug, Clone, Serialize, Deserialize)]

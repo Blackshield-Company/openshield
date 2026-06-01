@@ -2,7 +2,7 @@
 /// Agents often emit "I am the X, my role is to..." self-convincing text
 /// that clutters the output. This removes it.
 pub fn strip_persona_preamble(content: &str) -> String {
-    let lower = content.to_lowercase();
+    let _lower = content.to_lowercase();
     
     // Common persona-preamble patterns
     let patterns = [

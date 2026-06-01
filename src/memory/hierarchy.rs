@@ -282,7 +282,7 @@ mod tests {
     use super::*;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use crate::memory::store::Session;
+    
 
     fn create_test_store() -> MemoryStore {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

@@ -81,7 +81,7 @@ impl ChannelState {
             content: format!(
                 "{}\n\nYou are chatting in Discord. Be concise. Use markdown.\n\
                  You have access to tools:\n{}\n\
-                 When you need to use a tool, respond with: TOOL:tool_name args{}\n\
+                 When you need to use a tool, respond with: TOOL:tool_name args or TOOL.tool_name args{}\n\
                  You can analyze images when users attach them.",
                 soul.system_prompt(),
                 crate::tools::get_tools()
@@ -115,7 +115,7 @@ impl ChannelState {
             content: format!(
                 "{}\n\nYou are chatting in Discord. Be concise. Use markdown.\n\
                  You have access to tools:\n{}\n\
-                 When you need to use a tool, respond with: TOOL:tool_name args\n\
+                 When you need to use a tool, respond with: TOOL:tool_name args or TOOL.tool_name args\n\
                  You can analyze images when users attach them.",
                 soul.system_prompt(),
                 crate::tools::get_tools()

@@ -247,8 +247,10 @@ impl Agent {
 
         let soul = crate::agent::soul::load_soul_from_config(&self.infer_config());
         let system_prompt = format!(
-            "{}\n\nYou are an autonomous planning agent. Break down tasks into concrete steps. \
+            "{}\n\nYou are an autonomous planning agent. Break down tasks into concrete, actionable steps. \
              Each step must use one of these tools:\n{}\n\
+             CRITICAL: Every plan step must have a clear expected_result and verification_criteria. \
+             Vague or one-line plans are unacceptable. Be thorough and specific. \
              Respond ONLY with a JSON object in this exact format:\n\
              {{\"description\": \"brief plan description\", \"steps\": [\n\
              {{\"tool_name\": \"tool_name\", \"args\": \"arguments\", \"expected_result\": \"what should happen\", \"verification_criteria\": \"how to verify success\"}}\n\
