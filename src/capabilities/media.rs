@@ -1,7 +1,6 @@
 //! Media capabilities — vision, image generation, video, TTS.
 
 use anyhow::Result;
-use std::sync::OnceLock;
 
 use crate::tools::Tool;
 
