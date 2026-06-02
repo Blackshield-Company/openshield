@@ -31,6 +31,7 @@ mod theme;
 mod clipboard_image;
 mod command_palette;
 mod bookmarks;
+mod image_display;
 use theme::*;
 
 mod ascii_art;
@@ -4643,14 +4644,23 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(display_role, role_style.add_modifier(Modifier::BOLD)),
         ]));
 
-        // Image attachment indicator
-        if msg.images.is_some() {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "  📎 Image attached".to_string(),
-                    muted_style().add_modifier(Modifier::ITALIC),
-                ),
-            ]));
+        // Image attachment indicator with rich metadata
+        if let Some(ref images) = msg.images {
+            for img in images {
+                let info = image_display::extract_image_info(img);
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {}", info.format_indicator()),
+                        muted_style().add_modifier(Modifier::ITALIC),
+                    ),
+                ]));
+                // Show ASCII placeholder for the image
+                for placeholder_line in info.ascii_placeholder() {
+                    lines.push(Line::from(vec![
+                        Span::styled(placeholder_line, muted_style()),
+                    ]));
+                }
+            }
         }
 
         // Render content with syntax highlighting for assistant messages
