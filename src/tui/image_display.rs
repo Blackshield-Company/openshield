@@ -7,17 +7,15 @@
 pub fn extract_image_info(data_url: &str) -> ImageInfo {
     let mut info = ImageInfo::default();
 
-    // Parse MIME type from data URL prefix
-    if let Some(semi) = data_url.find(';') {
-        info.mime_type = data_url[5..semi].to_string(); // skip "data:"
+    // Parse MIME type from data URL prefix (data:image/png;base64,...)
+    if data_url.starts_with("data:") {
+        if let Some(semi) = data_url.strip_prefix("data:").unwrap_or(data_url).find(';') {
+            info.mime_type = data_url.strip_prefix("data:").unwrap_or(data_url)[..semi].to_string();
+        }
     }
 
-    // Extract base64 payload
-    let payload = if let Some(comma) = data_url.find(',') {
-        &data_url[comma + 1..]
-    } else {
-        data_url
-    };
+    // Extract base64 payload after the comma
+    let payload = data_url.find(',').map(|i| &data_url[i + 1..]).unwrap_or(data_url);
 
     // Decode base64 to get raw bytes for analysis
     if let Ok(bytes) = base64_decode(payload) {

@@ -61,7 +61,7 @@ impl ConsensusMemory {
             let approved = match self.mode.as_str() {
                 "unanimous" => entry.rejections.is_empty(),
                 "majority" => entry.approvals.len() > entry.rejections.len(),
-                "leader_decides" => entry.approvals.len() >= 1,
+                "leader_decides" => !entry.approvals.is_empty(),
                 _ => entry.approvals.len() > entry.rejections.len(),
             };
 
@@ -95,7 +95,7 @@ impl ConsensusMemory {
         match self.mode.as_str() {
             "unanimous" => entry.rejections.is_empty(),
             "majority" => entry.approvals.len() > entry.rejections.len(),
-            "leader_decides" => entry.approvals.len() >= 1, // Simplified: first approval wins
+            "leader_decides" => !entry.approvals.is_empty(), // Simplified: first approval wins
             _ => entry.approvals.len() > entry.rejections.len(),
         }
     }

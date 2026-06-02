@@ -52,7 +52,7 @@ impl<'a> MemoryHierarchy<'a> {
         }
 
         // Sort by creation time for coherent narrative
-        all_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        all_messages.sort_by_key(|m| m.created_at);
         Ok(all_messages)
     }
 
@@ -73,7 +73,7 @@ impl<'a> MemoryHierarchy<'a> {
         }
 
         // Sort by creation time
-        all_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        all_messages.sort_by_key(|m| m.created_at);
         Ok(all_messages)
     }
 
