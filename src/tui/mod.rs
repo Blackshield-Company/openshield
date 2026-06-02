@@ -1756,8 +1756,12 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • Ctrl+T            — Cycle theme\n\
             • Ctrl+W            — Toggle swarm mode\n\
             • Ctrl+S            — Cycle sidebar tab\n\
-            • ↑ / ↓             — Scroll\n\
-            • PgUp / PgDn       — Fast scroll"
+            • ↑ / ↓             — Scroll / Input history\n\
+            • Shift+Enter       — New line in input\n\
+            • PgUp / PgDn       — Fast scroll\n\
+            \n\
+            Tool commands:\n\
+            • /undo             — Undo last file edit"
                 .to_string(),
         );
         return Ok(());
@@ -1800,6 +1804,14 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/multi" {
         app.toggle_multi_model();
+        return Ok(());
+    }
+
+    if input == "/undo" {
+        match crate::tools::edit::undo_last_edit() {
+            Ok(msg) => app.add_system_message(msg),
+            Err(e) => app.add_system_message(format!("Undo failed: {}", e)),
+        }
         return Ok(());
     }
 
