@@ -17,7 +17,7 @@ impl Tool for MessagingTool {
     }
     fn execute(&self, args: &str) -> Result<String> {
         let trimmed = args.trim();
-        
+
         // Parse --send and --target
         let mut message = None;
         let mut target = None;
@@ -39,7 +39,10 @@ impl Tool for MessagingTool {
         let target = target.unwrap_or("");
 
         if message.is_empty() || target.is_empty() {
-            return Ok("Usage: messaging --send <message> --target <platform:channel> [--media <path>]".to_string());
+            return Ok(
+                "Usage: messaging --send <message> --target <platform:channel> [--media <path>]"
+                    .to_string(),
+            );
         }
 
         let mut result = format!(

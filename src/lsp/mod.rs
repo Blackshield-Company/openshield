@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -182,7 +182,12 @@ impl LspClient {
         )
     }
 
-    pub fn goto_definition(&self, file_path: &str, line: u32, character: u32) -> Result<Vec<Symbol>> {
+    pub fn goto_definition(
+        &self,
+        file_path: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<Symbol>> {
         let uri = format!("file://{}", std::fs::canonicalize(file_path)?.display());
 
         let result = self.send_request(
@@ -197,10 +202,9 @@ impl LspClient {
 
         if let Some(arr) = result.as_array() {
             for item in arr {
-                if let (Some(uri), Some(range)) = (
-                    item.get("uri").and_then(|u| u.as_str()),
-                    item.get("range"),
-                ) {
+                if let (Some(uri), Some(range)) =
+                    (item.get("uri").and_then(|u| u.as_str()), item.get("range"))
+                {
                     let file = uri.strip_prefix("file://").unwrap_or(uri).to_string();
                     let start = range.get("start").unwrap_or(&Value::Null);
                     symbols.push(Symbol {
@@ -208,7 +212,8 @@ impl LspClient {
                         kind: "definition".to_string(),
                         file,
                         line: start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as u32,
-                        character: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as u32,
+                        character: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0)
+                            as u32,
                         detail: None,
                     });
                 }
@@ -259,10 +264,7 @@ impl LspClient {
                     item.get("kind").and_then(|k| k.as_u64()),
                 ) {
                     let location = item.get("location").unwrap_or(&Value::Null);
-                    let uri = location
-                        .get("uri")
-                        .and_then(|u| u.as_str())
-                        .unwrap_or("");
+                    let uri = location.get("uri").and_then(|u| u.as_str()).unwrap_or("");
                     let range = location.get("range").unwrap_or(&Value::Null);
                     let start = range.get("start").unwrap_or(&Value::Null);
 
@@ -271,8 +273,12 @@ impl LspClient {
                         kind: symbol_kind_name(kind as u32),
                         file: uri.strip_prefix("file://").unwrap_or(uri).to_string(),
                         line: start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as u32,
-                        character: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as u32,
-                        detail: item.get("detail").and_then(|d| d.as_str()).map(|s| s.to_string()),
+                        character: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0)
+                            as u32,
+                        detail: item
+                            .get("detail")
+                            .and_then(|d| d.as_str())
+                            .map(|s| s.to_string()),
                     });
                 }
             }

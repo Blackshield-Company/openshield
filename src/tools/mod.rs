@@ -11,7 +11,8 @@ pub mod terminal;
 pub mod test_runner;
 
 pub use r#async::AsyncToolExecutor;
-pub use detection::{detect_tool_suggestions, ToolSuggestion};
+pub use detection::{ToolSuggestion, detect_tool_suggestions};
+pub use git::GitTool;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -279,7 +280,5 @@ pub fn get_all_tool_descriptions() -> Vec<(String, String)> {
 }
 
 pub fn find_tool(name: &str) -> Option<Arc<dyn Tool>> {
-    get_tools()
-        .into_iter()
-        .find(|tool| tool.name() == name)
+    get_tools().into_iter().find(|tool| tool.name() == name)
 }

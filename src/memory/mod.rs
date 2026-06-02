@@ -1,9 +1,11 @@
 pub mod compression;
 
-pub use self::store::{MemoryStore, Message, Session, ToolCall, SessionQualityMetrics, ModelTrendData};
 pub use self::context::ContextInjector;
+pub use self::store::{
+    MemoryStore, Message, ModelTrendData, Session, SessionQualityMetrics, ToolCall,
+};
 
-mod embeddings;
-mod store;
-mod hierarchy;
 mod context;
+mod embeddings;
+mod hierarchy;
+mod store;

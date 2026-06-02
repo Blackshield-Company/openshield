@@ -7,7 +7,7 @@ use crate::gateway::channel_state::{ChannelState, ChannelStateStore};
 use crate::gateway::discord::DiscordEvent;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage};
 use crate::providers::{ChatRequest, Message, Provider};
-use crate::skills::{format_skills_prompt, SkillRegistry};
+use crate::skills::{SkillRegistry, format_skills_prompt};
 use crate::tools::{find_tool, get_tools};
 
 /// Routes incoming Discord messages and slash commands to the OpenShark engine.
@@ -53,7 +53,10 @@ impl MessageRouter {
                     error!("Failed to handle user message: {}", e);
                 }
             }
-            DiscordEvent::SlashCommand { interaction, reply_tx } => {
+            DiscordEvent::SlashCommand {
+                interaction,
+                reply_tx,
+            } => {
                 if let Err(e) = self.handle_slash_command(interaction, reply_tx).await {
                     error!("Failed to handle slash command: {}", e);
                 }
@@ -187,9 +190,9 @@ impl MessageRouter {
             role: "user".to_string(),
             content: format!("{}: {}", username, content),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
 
         // Persist to memory
@@ -208,12 +211,8 @@ impl MessageRouter {
 
         // ── Multi-Model Mode (Optional) ────────────────────────────────────
         if state.multi_model_enabled && !state.multi_model_secondary.is_empty() {
-            self.handle_multi_model_response(
-                channel_id,
-                &state,
-                &messages,
-                &reply_tx,
-            ).await;
+            self.handle_multi_model_response(channel_id, &state, &messages, &reply_tx)
+                .await;
         } else {
             // Standard single-model response
             let tool_result = match provider.chat_stream(req).await {
@@ -263,7 +262,7 @@ impl MessageRouter {
     /// Fetch relevant memory context for a query.
     fn fetch_relevant_memory(&self, _session_id: &str, query: &str) -> String {
         let _injector = ContextInjector::new(&self.memory);
-        
+
         // Try semantic search first
         match self.memory.semantic_search(query, 3) {
             Ok(results) if !results.is_empty() => {
@@ -283,20 +282,18 @@ impl MessageRouter {
             _ => {
                 // Fallback: keyword search
                 match self.memory.search_messages(query, 3) {
-                    Ok(messages) if !messages.is_empty() => {
-                        messages
-                            .iter()
-                            .map(|msg| {
-                                format!(
-                                    "[{}] {}: {}",
-                                    msg.created_at.format("%Y-%m-%d"),
-                                    msg.role,
-                                    &msg.content[..msg.content.len().min(150)]
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }
+                    Ok(messages) if !messages.is_empty() => messages
+                        .iter()
+                        .map(|msg| {
+                            format!(
+                                "[{}] {}: {}",
+                                msg.created_at.format("%Y-%m-%d"),
+                                msg.role,
+                                &msg.content[..msg.content.len().min(150)]
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                     _ => String::new(),
                 }
             }
@@ -403,7 +400,11 @@ Use `/help` for the full slash command list.
                 if arg.is_empty() {
                     // Toggle multi-model mode
                     state.multi_model_enabled = !state.multi_model_enabled;
-                    let status = if state.multi_model_enabled { "✅ ON" } else { "❌ OFF" };
+                    let status = if state.multi_model_enabled {
+                        "✅ ON"
+                    } else {
+                        "❌ OFF"
+                    };
                     let _ = reply_tx.send(format!(
                         "🤖 Multi-model mode: {}\n\nSecondary models: {}",
                         status,
@@ -421,7 +422,8 @@ Use `/help` for the full slash command list.
                     let _ = reply_tx.send("🤖 Multi-model mode: ❌ OFF".to_string());
                 } else {
                     // Set secondary models
-                    let models: Vec<String> = arg.split(',').map(|s| s.trim().to_string()).collect();
+                    let models: Vec<String> =
+                        arg.split(',').map(|s| s.trim().to_string()).collect();
                     state.multi_model_secondary = models.clone();
                     let _ = reply_tx.send(format!(
                         "🤖 Secondary models set to: {}\nUse `!multi on` to enable.",
@@ -448,8 +450,8 @@ Use `/help` for the full slash command list.
             match name.as_str() {
                 // ─── Core Chat ───
                 "chat" => {
-                    let content = get_string_option(&cmd.data.options, "message")
-                        .unwrap_or("Hello!");
+                    let content =
+                        get_string_option(&cmd.data.options, "message").unwrap_or("Hello!");
                     let user_id = cmd.user.id.get();
                     let username = cmd.user.name.clone();
 
@@ -465,9 +467,8 @@ Use `/help` for the full slash command list.
 
                 "new" => {
                     self.channel_states.remove(channel_id);
-                    let _ = reply_tx.send(
-                        "🆕 Fresh conversation started. History cleared.".to_string(),
-                    );
+                    let _ = reply_tx
+                        .send("🆕 Fresh conversation started. History cleared.".to_string());
                 }
 
                 "system" => {
@@ -475,9 +476,8 @@ Use `/help` for the full slash command list.
                         let mut state = self.channel_states.get_or_create(channel_id);
                         state.set_system_prompt(prompt);
                         self.channel_states.update(channel_id, state);
-                        let _ = reply_tx.send(
-                            "📝 System prompt updated for this channel.".to_string(),
-                        );
+                        let _ =
+                            reply_tx.send("📝 System prompt updated for this channel.".to_string());
                     } else {
                         let _ = reply_tx.send(
                             "❌ Please provide a prompt. Usage: `/system prompt:your prompt here`"
@@ -504,10 +504,8 @@ Use `/help` for the full slash command list.
                         match state.switch_model(model_name, &self.config) {
                             Ok(()) => {
                                 self.channel_states.update(channel_id, state);
-                                let _ = reply_tx.send(format!(
-                                    "🤖 Model switched to: **{}**",
-                                    model_name
-                                ));
+                                let _ = reply_tx
+                                    .send(format!("🤖 Model switched to: **{}**", model_name));
                             }
                             Err(e) => {
                                 let _ = reply_tx.send(format!("❌ {}", e));
@@ -519,7 +517,11 @@ Use `/help` for the full slash command list.
                         let mut models = Vec::new();
                         for (provider_name, provider) in &self.config.providers {
                             for m in &provider.models {
-                                let marker = if m.name == current_model { "●" } else { "○" };
+                                let marker = if m.name == current_model {
+                                    "●"
+                                } else {
+                                    "○"
+                                };
                                 models.push(format!(
                                     "{} **{}** | ctx={} | {} | {}",
                                     marker,
@@ -552,12 +554,11 @@ Use `/help` for the full slash command list.
                             } else {
                                 "Free".to_string()
                             };
-                            let default_marker =
-                                if model.name == self.config.default_model {
-                                    " [default]"
-                                } else {
-                                    ""
-                                };
+                            let default_marker = if model.name == self.config.default_model {
+                                " [default]"
+                            } else {
+                                ""
+                            };
                             lines.push(format!(
                                 "  • `{}` | ctx={} | {} | capabilities: {}{}",
                                 model.name,
@@ -575,9 +576,10 @@ Use `/help` for the full slash command list.
                 // ─── Agent ───
                 "agent" => {
                     if let Some(task) = get_string_option(&cmd.data.options, "task") {
-                        let _ = reply_tx.send(
-                            format!("🦈 Starting agent task: **{}**\nThis may take a moment...", task)
-                        );
+                        let _ = reply_tx.send(format!(
+                            "🦈 Starting agent task: **{}**\nThis may take a moment...",
+                            task
+                        ));
 
                         // Run agent task
                         let agent_config = crate::agent::AgentConfig::default();
@@ -629,7 +631,10 @@ Use `/help` for the full slash command list.
                     for tool in tools {
                         lines.push(format!("• `{}`: {}", tool.name(), tool.description()));
                     }
-                    lines.push("\nUse `/tool name:<tool> args:<arguments>` to execute directly.".to_string());
+                    lines.push(
+                        "\nUse `/tool name:<tool> args:<arguments>` to execute directly."
+                            .to_string(),
+                    );
                     let _ = reply_tx.send(lines.join("\n"));
                 }
 
@@ -645,10 +650,7 @@ Use `/help` for the full slash command list.
                     }
 
                     if let Some(tool) = find_tool(tool_name) {
-                        let _ = reply_tx.send(format!(
-                            "🔧 Executing `{} {}`...",
-                            tool_name, args
-                        ));
+                        let _ = reply_tx.send(format!("🔧 Executing `{} {}`...", tool_name, args));
                         match tool.execute(args) {
                             Ok(result) => {
                                 let display = if result.len() > 1800 {
@@ -656,10 +658,8 @@ Use `/help` for the full slash command list.
                                 } else {
                                     result
                                 };
-                                let _ = reply_tx.send(format!(
-                                    "✅ **Result:**\n```\n{}\n```",
-                                    display
-                                ));
+                                let _ =
+                                    reply_tx.send(format!("✅ **Result:**\n```\n{}\n```", display));
                             }
                             Err(e) => {
                                 let _ = reply_tx.send(format!("❌ Tool error: {}", e));
@@ -679,9 +679,8 @@ Use `/help` for the full slash command list.
                         match self.memory.search_messages(query, 10) {
                             Ok(messages) => {
                                 if messages.is_empty() {
-                                    let _ = reply_tx.send(
-                                        "🔍 No memories found for that query.".to_string(),
-                                    );
+                                    let _ = reply_tx
+                                        .send("🔍 No memories found for that query.".to_string());
                                 } else {
                                     let mut lines = vec![format!(
                                         "🔍 **Memory Search:** '{}' ({} results)\n",
@@ -709,9 +708,8 @@ Use `/help` for the full slash command list.
                             }
                         }
                     } else {
-                        let _ = reply_tx.send(
-                            "❌ Usage: `/memory query:your search query`".to_string(),
-                        );
+                        let _ = reply_tx
+                            .send("❌ Usage: `/memory query:your search query`".to_string());
                     }
                 }
 
@@ -728,18 +726,16 @@ Use `/help` for the full slash command list.
                         };
                         match self.memory.save_message(&msg) {
                             Ok(()) => {
-                                let _ = reply_tx.send(
-                                    "💾 Fact saved to long-term memory.".to_string(),
-                                );
+                                let _ =
+                                    reply_tx.send("💾 Fact saved to long-term memory.".to_string());
                             }
                             Err(e) => {
                                 let _ = reply_tx.send(format!("❌ Failed to save: {}", e));
                             }
                         }
                     } else {
-                        let _ = reply_tx.send(
-                            "❌ Usage: `/remember fact:the fact to remember`".to_string(),
-                        );
+                        let _ = reply_tx
+                            .send("❌ Usage: `/remember fact:the fact to remember`".to_string());
                     }
                 }
 
@@ -768,32 +764,30 @@ Use `/help` for the full slash command list.
                     let _ = reply_tx.send(lines.join("\n"));
                 }
 
-                "stats" => {
-                    match self.memory.get_stats_summary() {
-                        Ok(stats) => {
-                            let mut lines = vec!["📊 **OpenShark Stats**\n".to_string()];
-                            lines.push(format!("Total Sessions: {}", stats.total_sessions));
-                            lines.push(format!("Total Messages: {}", stats.total_messages));
-                            lines.push(format!("Total Tool Calls: {}", stats.total_tool_calls));
+                "stats" => match self.memory.get_stats_summary() {
+                    Ok(stats) => {
+                        let mut lines = vec!["📊 **OpenShark Stats**\n".to_string()];
+                        lines.push(format!("Total Sessions: {}", stats.total_sessions));
+                        lines.push(format!("Total Messages: {}", stats.total_messages));
+                        lines.push(format!("Total Tool Calls: {}", stats.total_tool_calls));
+                        lines.push(format!(
+                            "Successful Tools: {} ({:.1}%)",
+                            stats.successful_tool_calls, stats.tool_success_rate
+                        ));
+                        lines.push(format!("Total Tokens: {}", stats.total_tokens));
+                        lines.push(format!("Unique Models: {}", stats.unique_models));
+                        if let Some(latest) = stats.latest_session {
                             lines.push(format!(
-                                "Successful Tools: {} ({:.1}%)",
-                                stats.successful_tool_calls, stats.tool_success_rate
+                                "Latest Session: {}",
+                                latest.format("%Y-%m-%d %H:%M")
                             ));
-                            lines.push(format!("Total Tokens: {}", stats.total_tokens));
-                            lines.push(format!("Unique Models: {}", stats.unique_models));
-                            if let Some(latest) = stats.latest_session {
-                                lines.push(format!(
-                                    "Latest Session: {}",
-                                    latest.format("%Y-%m-%d %H:%M")
-                                ));
-                            }
-                            let _ = reply_tx.send(lines.join("\n"));
                         }
-                        Err(e) => {
-                            let _ = reply_tx.send(format!("❌ Error loading stats: {}", e));
-                        }
+                        let _ = reply_tx.send(lines.join("\n"));
                     }
-                }
+                    Err(e) => {
+                        let _ = reply_tx.send(format!("❌ Error loading stats: {}", e));
+                    }
+                },
 
                 // ─── Settings ───
                 "settings" => {
@@ -874,12 +868,19 @@ Use `/help` for the full slash command list.
                             }
                             "toggle" => {
                                 state.multi_model_enabled = !state.multi_model_enabled;
-                                let status = if state.multi_model_enabled { "✅ ON" } else { "❌ OFF" };
+                                let status = if state.multi_model_enabled {
+                                    "✅ ON"
+                                } else {
+                                    "❌ OFF"
+                                };
                                 let _ = reply_tx.send(format!("🤖 Multi-model mode: {}", status));
                             }
                             "set" => {
                                 if let Some(models_str) = models {
-                                    let model_list: Vec<String> = models_str.split(',').map(|s| s.trim().to_string()).collect();
+                                    let model_list: Vec<String> = models_str
+                                        .split(',')
+                                        .map(|s| s.trim().to_string())
+                                        .collect();
                                     state.multi_model_secondary = model_list.clone();
                                     let _ = reply_tx.send(format!(
                                         "🤖 Secondary models set to: {}\nUse `/multi action:on` to enable.",
@@ -899,7 +900,11 @@ Use `/help` for the full slash command list.
                         }
                     } else {
                         // Show current status
-                        let status = if state.multi_model_enabled { "✅ ON" } else { "❌ OFF" };
+                        let status = if state.multi_model_enabled {
+                            "✅ ON"
+                        } else {
+                            "❌ OFF"
+                        };
                         let secondary = if state.multi_model_secondary.is_empty() {
                             "none configured".to_string()
                         } else {
@@ -1015,10 +1020,7 @@ Use `/help` for the full slash command list.
                         secondary_responses.push((model_name.clone(), response));
                     }
                     Err(e) => {
-                        secondary_responses.push((
-                            model_name.clone(),
-                            format!("❌ Error: {}", e),
-                        ));
+                        secondary_responses.push((model_name.clone(), format!("❌ Error: {}", e)));
                     }
                 }
             } else {
@@ -1030,18 +1032,12 @@ Use `/help` for the full slash command list.
         }
 
         // Format comparison response
-        let mut output = format!(
-            "🤖 **Primary** (`{}`)\n{}",
-            primary_model, primary_response
-        );
+        let mut output = format!("🤖 **Primary** (`{}`)\n{}", primary_model, primary_response);
 
         if !secondary_responses.is_empty() {
             output.push_str("\n\n---\n\n");
             for (model_name, response) in &secondary_responses {
-                output.push_str(&format!(
-                    "🤖 **{}**\n{}\n\n",
-                    model_name, response
-                ));
+                output.push_str(&format!("🤖 **{}**\n{}\n\n", model_name, response));
             }
         }
 
@@ -1049,9 +1045,7 @@ Use `/help` for the full slash command list.
     }
 
     /// Try to execute any TOOL: or TOOL. invocations in the response.
-    async fn try_execute_tools(&self,
-        response: &str,
-    ) -> Option<String> {
+    async fn try_execute_tools(&self, response: &str) -> Option<String> {
         // Find first occurrence of either TOOL: or TOOL.
         let tool_start = response.find("TOOL:").or_else(|| response.find("TOOL."))?;
         let tool_line = &response[tool_start..];

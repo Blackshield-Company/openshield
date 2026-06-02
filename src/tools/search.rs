@@ -1,7 +1,7 @@
+use super::Tool;
 use anyhow::{Context, Result};
 use regex::RegexBuilder;
 use std::process::Command;
-use super::Tool;
 
 pub struct SearchTool;
 
@@ -64,7 +64,8 @@ impl Tool for SearchTool {
 
         cmd.arg(pattern).arg(path);
 
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .with_context(|| "Failed to run ripgrep. Is it installed?")?;
 
         let mut result = String::new();
@@ -155,7 +156,11 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_search_test_{}_{}", std::process::id(), count);
+        let dir = format!(
+            "/tmp/openshark_search_test_{}_{}",
+            std::process::id(),
+            count
+        );
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -168,7 +173,11 @@ mod tests {
     #[test]
     fn test_grep_tool_finds_matches() {
         let dir = temp_dir();
-        fs::write(format!("{}/test.txt", dir), "Hello world\nRust is great\nHello again").unwrap();
+        fs::write(
+            format!("{}/test.txt", dir),
+            "Hello world\nRust is great\nHello again",
+        )
+        .unwrap();
 
         let tool = GrepTool;
         let result = tool.execute(&format!("Hello {}", dir)).unwrap();

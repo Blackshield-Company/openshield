@@ -1,0 +1,35 @@
+/// Parse JSON tool format: tool_name:0>{"args":"value"} or tool_name:0>{"query":"value"}
+fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
+    // Find the first ':' followed by a digit and '>'
+    let colon_pos = rest.find(':')?;
+    let after_colon = &rest[colon_pos + 1..];
+    if after_colon.is_empty() || !after_colon.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    // Find the '>'
+    let gt_pos = after_colon.find('>')?;
+    if !after_colon[gt_pos..].starts_with(">{") {
+        return None;
+    }
+
+    let tool_name = rest[..colon_pos].trim().to_string();
+    let json_str = &after_colon[gt_pos + 1..]; // after '>'
+
+    // Parse JSON to extract "args" or "query" value
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+        if let Some(args) = v.get("args").and_then(|a| a.as_str()) {
+            return Some((tool_name, args.to_string()));
+        }
+        if let Some(args) = v.get("query").and_then(|a| a.as_str()) {
+            return Some((tool_name, args.to_string()));
+        }
+        // Fallback: collect all string values from the JSON object
+        if let Some(obj) = v.as_object() {
+            let parts: Vec<&str> = obj.values().filter_map(|v| v.as_str()).collect();
+            if !parts.is_empty() {
+                return Some((tool_name, parts.join(" ")));
+            }
+        }
+    }
+    None
+}

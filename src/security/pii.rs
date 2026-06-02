@@ -26,7 +26,10 @@ impl PiiDetector {
 
         // Default patterns
         let defaults = [
-            (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "EMAIL"),
+            (
+                r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+                "EMAIL",
+            ),
             (r"\b(?:\d{4}[\s-]?){3}\d{4}\b", "CREDIT_CARD"),
             (r"\b\d{3}-\d{2}-\d{4}\b", "SSN"),
             (r"\b\d{3}-\d{3}-\d{4}\b", "PHONE"),
@@ -34,7 +37,10 @@ impl PiiDetector {
             (r"ghp_[a-zA-Z0-9]{36}", "GITHUB_TOKEN"),
             (r"gho_[a-zA-Z0-9]{36}", "GITHUB_OAUTH"),
             (r"AKIA[0-9A-Z]{16}", "AWS_KEY"),
-            (r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", "UUID"),
+            (
+                r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+                "UUID",
+            ),
             (r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "IP_ADDRESS"),
         ];
 
@@ -152,7 +158,11 @@ mod tests {
         assert_eq!(key.len(), 51, "Test key must be 51 chars (sk- + 48)");
         let text = format!("Key: {}", key);
         let findings = detector.scan(&text);
-        assert_eq!(findings.len(), 1, "Expected API_KEY finding for sk-...48alnum");
+        assert_eq!(
+            findings.len(),
+            1,
+            "Expected API_KEY finding for sk-...48alnum"
+        );
         assert_eq!(findings[0].category, "API_KEY");
         assert_eq!(findings[0].snippet, key);
     }

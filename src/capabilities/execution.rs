@@ -19,7 +19,10 @@ impl Tool for CodeExecutionTool {
     fn execute(&self, args: &str) -> Result<String> {
         let trimmed = args.trim();
         if trimmed.is_empty() {
-            return Ok("Usage: code_execution <python_code> [--timeout <secs>] [--venv <path>]".to_string());
+            return Ok(
+                "Usage: code_execution <python_code> [--timeout <secs>] [--venv <path>]"
+                    .to_string(),
+            );
         }
 
         // Extract timeout
@@ -41,7 +44,11 @@ impl Tool for CodeExecutionTool {
         if let Some(pos) = code.rfind("--venv") {
             let before = &code[..pos];
             let after = &code[pos + 6..];
-            _venv = after.trim().split_whitespace().next().map(|s| s.to_string());
+            _venv = after
+                .trim()
+                .split_whitespace()
+                .next()
+                .map(|s| s.to_string());
             code = before.trim();
         }
 
@@ -86,10 +93,7 @@ impl Tool for CodeExecutionTool {
         }
 
         if !output.status.success() {
-            result.push_str(&format!(
-                "\nExit code: {:?}",
-                output.status.code()
-            ));
+            result.push_str(&format!("\nExit code: {:?}", output.status.code()));
         }
 
         Ok(result)

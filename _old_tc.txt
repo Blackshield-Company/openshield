@@ -1,0 +1,15 @@
+                        // Parse the JSON arguments to extract the actual args string for our tools
+                        let tool_args = match serde_json::from_str::<serde_json::Value>(&args) {
+                            Ok(v) => {
+                                // For tools with a single "command" or "args" field, extract it
+                                if let Some(cmd) = v.get("command").and_then(|c| c.as_str()) {
+                                    cmd.to_string()
+                                } else if let Some(a) = v.get("args").and_then(|a| a.as_str()) {
+                                    a.to_string()
+                                } else {
+                                    // Otherwise pass the full JSON as args
+                                    args.clone()
+                                }
+                            }
+                            Err(_) => args.clone(),
+                        };

@@ -146,10 +146,23 @@ pub struct McpServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum McpTransport {
-    Stdio { command: String, args: Vec<String>, env: std::collections::HashMap<String, String> },
-    Sse { url: String, headers: std::collections::HashMap<String, String> },
+    Stdio {
+        command: String,
+        args: Vec<String>,
+        env: std::collections::HashMap<String, String>,
+    },
+    Sse {
+        url: String,
+        headers: std::collections::HashMap<String, String>,
+    },
 }
 
-fn default_true() -> bool { true }
-fn default_prefix() -> String { "!shark".to_string() }
-fn default_max_length() -> usize { 2000 }
+fn default_true() -> bool {
+    true
+}
+fn default_prefix() -> String {
+    "!shark".to_string()
+}
+fn default_max_length() -> usize {
+    2000
+}

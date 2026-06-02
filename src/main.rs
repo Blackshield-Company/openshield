@@ -8,23 +8,28 @@ mod agent;
 mod cache;
 mod capabilities;
 mod config;
+mod diff;
+mod doctor;
 mod evolution;
 mod gateway;
 mod image_utils;
 mod lsp;
 mod mcp;
 mod memory;
+mod plugins;
 mod providers;
+mod sandbox;
 mod router;
 mod security;
 mod self_improve;
+mod session;
 mod skills;
 mod swarm;
 mod tools;
 mod tui;
 
-use config::Config;
 use crate::tools::Tool;
+use config::Config;
 
 /// Parse embedded TOOL: lines from CLI chat responses.
 /// Handles both raw args and JSON-like `key="value"` formats.
@@ -36,14 +41,22 @@ fn parse_embedded_tools_cli(text: &str) -> Vec<(String, String)> {
         Err(_) => return tools,
     };
     for cap in re.captures_iter(text) {
-        let tool_name = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
-        let args = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+        let tool_name = cap
+            .get(1)
+            .map(|m| m.as_str().trim())
+            .unwrap_or("")
+            .to_string();
+        let args = cap
+            .get(2)
+            .map(|m| m.as_str().trim())
+            .unwrap_or("")
+            .to_string();
         if tool_name.is_empty() {
             continue;
         }
         // Handle JSON-like `command="value"` format by extracting the value
         let args = if args.starts_with("command=\"") && args.ends_with("\"") {
-            args[9..args.len()-1].to_string()
+            args[9..args.len() - 1].to_string()
         } else {
             args
         };
@@ -116,6 +129,18 @@ enum Commands {
         #[arg(default_value = "list")]
         cmd: String,
     },
+    Doctor {
+        #[arg(short, long, default_value_t = false)]
+        fix: bool,
+        #[arg(short, long, default_value = "")]
+        component: String,
+    },
+    Plugins {
+        #[arg(default_value = "list")]
+        cmd: String,
+        #[arg(default_value = "")]
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -142,8 +167,11 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let mut event_rx = crate::gateway::discord::spawn_bot(discord_config.clone());
-                        let mut router = match crate::gateway::message_router::MessageRouter::new(discord_config) {
+                        let mut event_rx =
+                            crate::gateway::discord::spawn_bot(discord_config.clone());
+                        let mut router = match crate::gateway::message_router::MessageRouter::new(
+                            discord_config,
+                        ) {
                             Ok(r) => r,
                             Err(e) => {
                                 tracing::error!("Failed to create message router: {}", e);
@@ -171,8 +199,11 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let (mut event_rx, reply_sender) = crate::gateway::telegram::spawn_bot(telegram_config.clone());
-                        let router = match crate::gateway::message_router::MessageRouter::new(telegram_config) {
+                        let (mut event_rx, reply_sender) =
+                            crate::gateway::telegram::spawn_bot(telegram_config.clone());
+                        let router = match crate::gateway::message_router::MessageRouter::new(
+                            telegram_config,
+                        ) {
                             Ok(r) => r,
                             Err(e) => {
                                 tracing::error!("Failed to create message router: {}", e);
@@ -181,13 +212,16 @@ async fn main() -> anyhow::Result<()> {
                         };
 
                         while let Some(event) = event_rx.recv().await {
-                            let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
-                                Ok(u) => u,
-                                Err(e) => {
-                                    tracing::error!("Failed to create unified router: {}", e);
-                                    return;
-                                }
-                            };
+                            let mut unified =
+                                match crate::gateway::unified_router::UnifiedRouter::new(
+                                    router.config.clone(),
+                                ) {
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        tracing::error!("Failed to create unified router: {}", e);
+                                        return;
+                                    }
+                                };
                             unified.handle_telegram_event(event, &reply_sender).await;
                         }
                     });
@@ -207,8 +241,11 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let (mut event_rx, reply_sender) = crate::gateway::slack::spawn_bot(slack_config.clone());
-                        let router = match crate::gateway::message_router::MessageRouter::new(slack_config) {
+                        let (mut event_rx, reply_sender) =
+                            crate::gateway::slack::spawn_bot(slack_config.clone());
+                        let router = match crate::gateway::message_router::MessageRouter::new(
+                            slack_config,
+                        ) {
                             Ok(r) => r,
                             Err(e) => {
                                 tracing::error!("Failed to create message router: {}", e);
@@ -217,13 +254,16 @@ async fn main() -> anyhow::Result<()> {
                         };
 
                         while let Some(event) = event_rx.recv().await {
-                            let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
-                                Ok(u) => u,
-                                Err(e) => {
-                                    tracing::error!("Failed to create unified router: {}", e);
-                                    return;
-                                }
-                            };
+                            let mut unified =
+                                match crate::gateway::unified_router::UnifiedRouter::new(
+                                    router.config.clone(),
+                                ) {
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        tracing::error!("Failed to create unified router: {}", e);
+                                        return;
+                                    }
+                                };
                             unified.handle_slack_event(event, &reply_sender).await;
                         }
                     });
@@ -243,23 +283,29 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
                     rt.block_on(async {
-                        let (mut event_rx, reply_sender) = crate::gateway::matrix::spawn_bot(matrix_config.clone());
-                        let router = match crate::gateway::message_router::MessageRouter::new(matrix_config) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                tracing::error!("Failed to create message router: {}", e);
-                                return;
-                            }
-                        };
-
-                        while let Some(event) = event_rx.recv().await {
-                            let mut unified = match crate::gateway::unified_router::UnifiedRouter::new(router.config.clone()) {
-                                Ok(u) => u,
+                        let (mut event_rx, reply_sender) =
+                            crate::gateway::matrix::spawn_bot(matrix_config.clone());
+                        let router =
+                            match crate::gateway::message_router::MessageRouter::new(matrix_config)
+                            {
+                                Ok(r) => r,
                                 Err(e) => {
-                                    tracing::error!("Failed to create unified router: {}", e);
+                                    tracing::error!("Failed to create message router: {}", e);
                                     return;
                                 }
                             };
+
+                        while let Some(event) = event_rx.recv().await {
+                            let mut unified =
+                                match crate::gateway::unified_router::UnifiedRouter::new(
+                                    router.config.clone(),
+                                ) {
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        tracing::error!("Failed to create unified router: {}", e);
+                                        return;
+                                    }
+                                };
                             unified.handle_matrix_event(event, &reply_sender).await;
                         }
                     });
@@ -308,7 +354,10 @@ async fn main() -> anyhow::Result<()> {
                     println!("  Total Sessions:    {}", stats.total_sessions);
                     println!("  Total Messages:    {}", stats.total_messages);
                     println!("  Total Tool Calls:  {}", stats.total_tool_calls);
-                    println!("  Successful Tools:  {} ({:.1}%)", stats.successful_tool_calls, stats.tool_success_rate);
+                    println!(
+                        "  Successful Tools:  {} ({:.1}%)",
+                        stats.successful_tool_calls, stats.tool_success_rate
+                    );
                     println!("  Total Tokens:      {}", stats.total_tokens);
                     println!("  Unique Models:     {}", stats.unique_models);
                     if let Some(first) = stats.first_session {
@@ -326,16 +375,20 @@ async fn main() -> anyhow::Result<()> {
                 Ok(models) if !models.is_empty() => {
                     println!("🤖 Model Usage");
                     println!("{}", "─".repeat(70));
-                    println!("  {:<20} | {:>8} | {:>8} | {:>10} | {:>6}",
-                             "Model", "Sessions", "Messages", "Tokens", "Tools%");
+                    println!(
+                        "  {:<20} | {:>8} | {:>8} | {:>10} | {:>6}",
+                        "Model", "Sessions", "Messages", "Tokens", "Tools%"
+                    );
                     println!("{}", "─".repeat(70));
                     for m in models {
-                        println!("  {:<20} | {:>8} | {:>8} | {:>10} | {:>5.1}%",
-                                 &m.model[..m.model.len().min(20)],
-                                 m.session_count,
-                                 m.message_count,
-                                 m.total_tokens,
-                                 m.tool_success_rate);
+                        println!(
+                            "  {:<20} | {:>8} | {:>8} | {:>10} | {:>5.1}%",
+                            &m.model[..m.model.len().min(20)],
+                            m.session_count,
+                            m.message_count,
+                            m.total_tokens,
+                            m.tool_success_rate
+                        );
                     }
                     println!();
                 }
@@ -346,15 +399,16 @@ async fn main() -> anyhow::Result<()> {
                 Ok(tools) if !tools.is_empty() => {
                     println!("🔧 Tool Usage");
                     println!("{}", "─".repeat(50));
-                    println!("  {:<15} | {:>8} | {:>8} | {:>6}",
-                             "Tool", "Calls", "Success", "Rate%");
+                    println!(
+                        "  {:<15} | {:>8} | {:>8} | {:>6}",
+                        "Tool", "Calls", "Success", "Rate%"
+                    );
                     println!("{}", "─".repeat(50));
                     for t in tools {
-                        println!("  {:<15} | {:>8} | {:>8} | {:>5.1}%",
-                                 t.tool_name,
-                                 t.total_calls,
-                                 t.successful_calls,
-                                 t.success_rate);
+                        println!(
+                            "  {:<15} | {:>8} | {:>8} | {:>5.1}%",
+                            t.tool_name, t.total_calls, t.successful_calls, t.success_rate
+                        );
                     }
                     println!();
                 }
@@ -368,10 +422,10 @@ async fn main() -> anyhow::Result<()> {
                     println!("  {:<12} | {:>8} | {:>8}", "Date", "Sessions", "Models");
                     println!("{}", "─".repeat(40));
                     for day in days.iter().take(7) {
-                        println!("  {:<12} | {:>8} | {:>8}",
-                                 day.day,
-                                 day.session_count,
-                                 day.model_count);
+                        println!(
+                            "  {:<12} | {:>8} | {:>8}",
+                            day.day, day.session_count, day.model_count
+                        );
                     }
                     println!();
                 }
@@ -384,7 +438,10 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", "─".repeat(50));
                     println!("  Total Routes:      {}", router_stats.total_routes);
                     println!("  Avg Success Rate:  {:.1}%", router_stats.avg_success_rate);
-                    println!("  Top Model:         {} ({} uses)", router_stats.top_model, router_stats.top_model_usage);
+                    println!(
+                        "  Top Model:         {} ({} uses)",
+                        router_stats.top_model, router_stats.top_model_usage
+                    );
                     println!();
                 }
                 Err(e) => println!("❌ Error loading router stats: {}", e),
@@ -452,7 +509,12 @@ async fn main() -> anyhow::Result<()> {
             }
             println!("  Cost Limit:        ${:.2}", config.cost_limit_usd);
         }
-        Some(Commands::Memory { query, recent, semantic, limit }) => {
+        Some(Commands::Memory {
+            query,
+            recent,
+            semantic,
+            limit,
+        }) => {
             if query.is_empty() && !recent {
                 println!("🦈 Memory Query");
                 println!("Usage: openshark memory <query>");
@@ -464,7 +526,8 @@ async fn main() -> anyhow::Result<()> {
                     Ok(sessions) => {
                         println!("🦈 Recent Sessions (last {}):", limit);
                         for s in sessions {
-                            println!("  {} | {} | {} | {}",
+                            println!(
+                                "  {} | {} | {} | {}",
                                 &s.id[..8.min(s.id.len())],
                                 s.started_at.format("%Y-%m-%d %H:%M"),
                                 s.model,
@@ -478,10 +541,15 @@ async fn main() -> anyhow::Result<()> {
                 let memory = memory::MemoryStore::new(&config.memory_db_path)?;
                 match memory.semantic_search(&query, limit) {
                     Ok(results) => {
-                        println!("🦈 Semantic Search: '{}' ({} results)", query, results.len());
+                        println!(
+                            "🦈 Semantic Search: '{}' ({} results)",
+                            query,
+                            results.len()
+                        );
                         for (msg, score) in results {
                             let preview = &msg.content[..msg.content.len().min(100)];
-                            println!("  [{:.3}] [{}] {}: {}",
+                            println!(
+                                "  [{:.3}] [{}] {}: {}",
                                 score,
                                 msg.created_at.format("%Y-%m-%d %H:%M"),
                                 msg.role,
@@ -498,7 +566,8 @@ async fn main() -> anyhow::Result<()> {
                         println!("🦈 Memory Search: '{}' ({} results)", query, messages.len());
                         for msg in messages {
                             let preview = &msg.content[..msg.content.len().min(100)];
-                            println!("  [{}] {}: {}",
+                            println!(
+                                "  [{}] {}: {}",
                                 msg.created_at.format("%Y-%m-%d %H:%M"),
                                 msg.role,
                                 preview
@@ -525,7 +594,14 @@ async fn main() -> anyhow::Result<()> {
                 let agent = agent::Agent::new(agent_config, &config)?;
                 match agent.run_task(&task).await {
                     Ok(result) => {
-                        println!("\n🦈 Agent Result: {}", if result.success { "✅ Success" } else { "⚠️ Partial" });
+                        println!(
+                            "\n🦈 Agent Result: {}",
+                            if result.success {
+                                "✅ Success"
+                            } else {
+                                "⚠️ Partial"
+                            }
+                        );
                         println!("Message: {}", result.message);
                         println!("Total iterations: {}", result.total_iterations);
                         for (i, step) in result.step_results.iter().enumerate() {
@@ -586,7 +662,8 @@ async fn main() -> anyhow::Result<()> {
                 println!("       openshark chat 'hello' --model kimi-k2.6");
             } else {
                 let model_name = model.as_deref().unwrap_or(&config.default_model);
-                let (provider_name, provider_config) = config.find_provider_for_model(model_name)
+                let (provider_name, provider_config) = config
+                    .find_provider_for_model(model_name)
                     .unwrap_or_else(|| {
                         println!("⚠️  Model '{}' not found, using default", model_name);
                         let (n, p) = config.providers.iter().next().unwrap();
@@ -630,25 +707,22 @@ async fn main() -> anyhow::Result<()> {
                         role: "system".to_string(),
                         content: system_prompt,
                         images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
                     },
                     providers::Message {
                         role: "user".to_string(),
                         content: message.clone(),
                         images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
                     },
                 ];
 
-                let mut request = providers::ChatRequest::new(
-                    model_name.to_string(),
-                    messages,
-                    true,
-                );
+                let mut request =
+                    providers::ChatRequest::new(model_name.to_string(), messages, true);
                 // Attach tools so the model knows it can call them
                 request.tools = Some(tools::get_openai_tool_definitions());
 
@@ -663,22 +737,19 @@ async fn main() -> anyhow::Result<()> {
                         println!();
 
                         // Parse and execute any embedded TOOL: lines from the response
-                        let embedded_tools = parse_embedded_tools_cli(&full_response
-                        );
+                        let embedded_tools = parse_embedded_tools_cli(&full_response);
                         if !embedded_tools.is_empty() {
                             for (tool_name, args) in embedded_tools {
                                 println!("🔧 Executing: {} {}", tool_name, args);
                                 match tools::find_tool(&tool_name) {
-                                    Some(tool) => {
-                                        match tool.execute(&args) {
-                                            Ok(result) => {
-                                                println!("✅ Result:\n{}", result);
-                                            }
-                                            Err(e) => {
-                                                println!("❌ Error: {}", e);
-                                            }
+                                    Some(tool) => match tool.execute(&args) {
+                                        Ok(result) => {
+                                            println!("✅ Result:\n{}", result);
                                         }
-                                    }
+                                        Err(e) => {
+                                            println!("❌ Error: {}", e);
+                                        }
+                                    },
                                     None => {
                                         println!("❌ Unknown tool: {}", tool_name);
                                     }
@@ -707,18 +778,68 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", "─".repeat(60));
                     println!("  Version:           {}", sec_config.version);
                     println!("  Working Dir:       {:?}", sec_config.working_directory);
-                    println!("  Allow Escape:      {}", sec_config.allow_escape_working_dir);
-                    println!("  PII Redaction:     {}", if sec_config.pii_redaction_enabled { "✅" } else { "❌" });
-                    println!("  Injection Detect:  {}", if sec_config.prompt_injection_detection_enabled { "✅" } else { "❌" });
-                    println!("  Auto-approve:      {:?}", sec_config.auto_approve_risk_level);
-                    println!("  Max Output:        {} bytes", sec_config.max_model_output_bytes);
+                    println!(
+                        "  Allow Escape:      {}",
+                        sec_config.allow_escape_working_dir
+                    );
+                    println!(
+                        "  PII Redaction:     {}",
+                        if sec_config.pii_redaction_enabled {
+                            "✅"
+                        } else {
+                            "❌"
+                        }
+                    );
+                    println!(
+                        "  Injection Detect:  {}",
+                        if sec_config.prompt_injection_detection_enabled {
+                            "✅"
+                        } else {
+                            "❌"
+                        }
+                    );
+                    println!(
+                        "  Auto-approve:      {:?}",
+                        sec_config.auto_approve_risk_level
+                    );
+                    println!(
+                        "  Max Output:        {} bytes",
+                        sec_config.max_model_output_bytes
+                    );
                     println!();
-                    println!("  Sudo:              {}", if sec_config.sudo.enabled { "✅ Enabled" } else { "❌ Disabled" });
-                    println!("  Sudo Persist:      {}", if sec_config.sudo.persist_password { "✅" } else { "❌" });
+                    println!(
+                        "  Sudo:              {}",
+                        if sec_config.sudo.enabled {
+                            "✅ Enabled"
+                        } else {
+                            "❌ Disabled"
+                        }
+                    );
+                    println!(
+                        "  Sudo Persist:      {}",
+                        if sec_config.sudo.persist_password {
+                            "✅"
+                        } else {
+                            "❌"
+                        }
+                    );
                     println!();
-                    println!("  Zero-Trust:        {}", if sec_config.identity.zero_trust_enabled { "✅" } else { "❌" });
-                    println!("  Max Sessions:      {}", sec_config.identity.max_concurrent_sessions);
-                    println!("  Credential TTL:    {}s", sec_config.identity.credential_ttl_secs);
+                    println!(
+                        "  Zero-Trust:        {}",
+                        if sec_config.identity.zero_trust_enabled {
+                            "✅"
+                        } else {
+                            "❌"
+                        }
+                    );
+                    println!(
+                        "  Max Sessions:      {}",
+                        sec_config.identity.max_concurrent_sessions
+                    );
+                    println!(
+                        "  Credential TTL:    {}s",
+                        sec_config.identity.credential_ttl_secs
+                    );
                     println!();
                     println!("  Tool Permissions:");
                     for (tool, perm) in &sec_config.tool_permissions {
@@ -738,7 +859,8 @@ async fn main() -> anyhow::Result<()> {
                     println!("🔒 Security Audit Log (last {} entries)", entries.len());
                     println!("{}", "─".repeat(80));
                     for entry in entries {
-                        println!("  [{}] {} {} {:?} approved={} {}",
+                        println!(
+                            "  [{}] {} {} {:?} approved={} {}",
                             entry.timestamp.format("%Y-%m-%d %H:%M:%S"),
                             entry.tool,
                             entry.action,
@@ -755,21 +877,21 @@ async fn main() -> anyhow::Result<()> {
                     println!("🔒 Security Test");
                     println!("{}", "─".repeat(60));
                     println!("  Input: '{}'", test_input);
-                    
+
                     // Test PII detection
                     let pii_findings = engine.pii_detector.scan(test_input);
                     println!("  PII findings: {}", pii_findings.len());
                     for finding in &pii_findings {
                         println!("    - [{}] {}", finding.category, finding.snippet);
                     }
-                    
+
                     // Test prompt injection
                     if let Some(injection) = engine.check_prompt_injection(test_input) {
                         println!("  ⚠️  Injection detected: {}", injection);
                     } else {
                         println!("  ✅ No injection detected");
                     }
-                    
+
                     // Test tool call check
                     let decision = engine.check_tool_call("terminal", test_input);
                     println!("  Tool check: {:?}", decision);
@@ -782,138 +904,192 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Some(Commands::Mcp { cmd }) => {
-            match cmd.as_str() {
-                "status" => {
-                    println!("🔌 MCP Status");
-                    println!("{}", "─".repeat(60));
+        Some(Commands::Mcp { cmd }) => match cmd.as_str() {
+            "status" => {
+                println!("🔌 MCP Status");
+                println!("{}", "─".repeat(60));
 
-                    if !config.gateway.mcp.enabled {
-                        println!("  MCP is disabled in config.");
-                        println!("  Set [gateway.mcp] enabled = true to enable.");
-                    } else if config.gateway.mcp.servers.is_empty() {
-                        println!("  MCP enabled but no servers configured.");
-                        println!("  Add servers under [[gateway.mcp.servers]] in config.");
-                    } else {
-                        println!("  Configured servers: {}", config.gateway.mcp.servers.len());
-                        for server in &config.gateway.mcp.servers {
-                            let transport_type = match &server.transport {
-                                crate::gateway::McpTransport::Stdio { command, .. } => {
-                                    format!("stdio: {}", command)
-                                }
-                                crate::gateway::McpTransport::Sse { url, .. } => {
-                                    format!("sse: {}", url)
-                                }
-                            };
-                            println!("  • {} ({})", server.name, transport_type);
-                        }
-                        println!();
-                        println!("  Run `openshark` (TUI mode) to connect to MCP servers.");
-                    }
-                }
-                "tools" => {
-                    println!("🔌 MCP Tools");
-                    println!("{}", "─".repeat(60));
-                    println!("  MCP tools are discovered dynamically at runtime.");
-                    println!("  Start the TUI to connect to servers and discover tools.");
-                }
-                _ => {
-                    println!("🔌 MCP Commands");
-                    println!("  openshark mcp status - Show MCP configuration");
-                    println!("  openshark mcp tools  - Show tool discovery info");
-                }
-            }
-        }
-        Some(Commands::Swarm { cmd, prompt }) => {
-            match cmd.as_str() {
-                "init" => {
-                    if prompt.is_empty() {
-                        println!("🐝 Swarm Mode");
-                        println!("Usage: openshark swarm init 'your seed prompt here'");
-                        println!();
-                        println!("Example:");
-                        println!("  openshark swarm init 'Build a REST API with auth'");
-                    } else {
-                        println!("🐝 Initializing swarm...");
-                        let swarm_config = config.swarm.clone();
-                        let engine = swarm::SwarmEngine::new(swarm_config);
-                        match engine.init(&prompt, &config).await {
-                            Ok(()) => {
-                                println!("✅ Swarm initialized with {} agents", engine.agent_snapshot().await.len());
-                                println!();
-                                for agent in engine.agent_snapshot().await {
-                                    println!("  🐝 {} ({}) - {}", agent.name, agent.role.name, agent.status);
-                                }
-                                println!();
-                                println!("  Run `openshark swarm start` to begin the autonomous loop.");
+                if !config.gateway.mcp.enabled {
+                    println!("  MCP is disabled in config.");
+                    println!("  Set [gateway.mcp] enabled = true to enable.");
+                } else if config.gateway.mcp.servers.is_empty() {
+                    println!("  MCP enabled but no servers configured.");
+                    println!("  Add servers under [[gateway.mcp.servers]] in config.");
+                } else {
+                    println!("  Configured servers: {}", config.gateway.mcp.servers.len());
+                    for server in &config.gateway.mcp.servers {
+                        let transport_type = match &server.transport {
+                            crate::gateway::McpTransport::Stdio { command, .. } => {
+                                format!("stdio: {}", command)
                             }
-                            Err(e) => println!("❌ Failed to initialize swarm: {}", e),
-                        }
+                            crate::gateway::McpTransport::Sse { url, .. } => {
+                                format!("sse: {}", url)
+                            }
+                        };
+                        println!("  • {} ({})", server.name, transport_type);
                     }
-                }
-                "start" => {
-                    println!("🐝 Starting swarm...");
-                    let swarm_config = config.swarm.clone();
-                    let engine = swarm::SwarmEngine::new(swarm_config);
-                    match engine.start().await {
-                        Ok(()) => {
-                            println!("✅ Swarm loop started");
-                            println!("  Run `openshark swarm status` to check progress.");
-                        }
-                        Err(e) => println!("❌ Failed to start swarm: {}", e),
-                    }
-                }
-                "stop" => {
-                    println!("🐝 Stopping swarm...");
-                    let swarm_config = config.swarm.clone();
-                    let engine = swarm::SwarmEngine::new(swarm_config);
-                    match engine.stop().await {
-                        Ok(()) => println!("✅ Swarm stopped"),
-                        Err(e) => println!("❌ Failed to stop swarm: {}", e),
-                    }
-                }
-                "status" => {
-                    let swarm_config = config.swarm.clone();
-                    let engine = swarm::SwarmEngine::new(swarm_config);
-                    let status = engine.status().await;
-                    println!("{}", status);
-                }
-                _ => {
-                    println!("🐝 Swarm Commands");
-                    println!("  openshark swarm init 'prompt'  - Initialize swarm with seed prompt");
-                    println!("  openshark swarm start           - Start autonomous loop");
-                    println!("  openshark swarm stop            - Stop swarm");
-                    println!("  openshark swarm status          - Show swarm status");
                     println!();
-                    println!("  Roles: {:?}", config.swarm.roles);
+                    println!("  Run `openshark` (TUI mode) to connect to MCP servers.");
                 }
             }
-        }
-        Some(Commands::Tools { cmd }) => {
-            match cmd.as_str() {
-                "list" | "" => {
-                    println!("🦈 OpenShark Tools — {} total\n", crate::tools::get_tools().len());
-
-                    println!("🔧 Native Tools:");
-                    for tool in crate::tools::get_native_tools() {
-                        println!("  {} — {}", tool.name(), tool.description());
+            "tools" => {
+                println!("🔌 MCP Tools");
+                println!("{}", "─".repeat(60));
+                println!("  MCP tools are discovered dynamically at runtime.");
+                println!("  Start the TUI to connect to servers and discover tools.");
+            }
+            _ => {
+                println!("🔌 MCP Commands");
+                println!("  openshark mcp status - Show MCP configuration");
+                println!("  openshark mcp tools  - Show tool discovery info");
+            }
+        },
+        Some(Commands::Swarm { cmd, prompt }) => match cmd.as_str() {
+            "init" => {
+                if prompt.is_empty() {
+                    println!("🐝 Swarm Mode");
+                    println!("Usage: openshark swarm init 'your seed prompt here'");
+                    println!();
+                    println!("Example:");
+                    println!("  openshark swarm init 'Build a REST API with auth'");
+                } else {
+                    println!("🐝 Initializing swarm...");
+                    let swarm_config = config.swarm.clone();
+                    let engine = swarm::SwarmEngine::new(swarm_config);
+                    match engine.init(&prompt, &config).await {
+                        Ok(()) => {
+                            println!(
+                                "✅ Swarm initialized with {} agents",
+                                engine.agent_snapshot().await.len()
+                            );
+                            println!();
+                            for agent in engine.agent_snapshot().await {
+                                println!(
+                                    "  🐝 {} ({}) - {}",
+                                    agent.name, agent.role.name, agent.status
+                                );
+                            }
+                            println!();
+                            println!("  Run `openshark swarm start` to begin the autonomous loop.");
+                        }
+                        Err(e) => println!("❌ Failed to initialize swarm: {}", e),
                     }
-
-                    println!("\n⚡ Capability Tools:");
-                    for tool in crate::tools::get_capability_tools() {
-                        println!("  {} — {}", tool.name(), tool.description());
-                    }
-
-                    println!("\n💡 Usage:");
-                    println!("  In agent mode, the model can invoke any tool.");
-                    println!("  In TUI, use TOOL:<tool_name> <args> or TOOL.<tool_name> <args> to execute manually.");
-                }
-                _ => {
-                    println!("🦈 Tools Commands");
-                    println!("  openshark tools list  - Show all available tools");
                 }
             }
+            "start" => {
+                println!("🐝 Starting swarm...");
+                let swarm_config = config.swarm.clone();
+                let engine = swarm::SwarmEngine::new(swarm_config);
+                match engine.start().await {
+                    Ok(()) => {
+                        println!("✅ Swarm loop started");
+                        println!("  Run `openshark swarm status` to check progress.");
+                    }
+                    Err(e) => println!("❌ Failed to start swarm: {}", e),
+                }
+            }
+            "stop" => {
+                println!("🐝 Stopping swarm...");
+                let swarm_config = config.swarm.clone();
+                let engine = swarm::SwarmEngine::new(swarm_config);
+                match engine.stop().await {
+                    Ok(()) => println!("✅ Swarm stopped"),
+                    Err(e) => println!("❌ Failed to stop swarm: {}", e),
+                }
+            }
+            "status" => {
+                let swarm_config = config.swarm.clone();
+                let engine = swarm::SwarmEngine::new(swarm_config);
+                let status = engine.status().await;
+                println!("{}", status);
+            }
+            _ => {
+                println!("🐝 Swarm Commands");
+                println!("  openshark swarm init 'prompt'  - Initialize swarm with seed prompt");
+                println!("  openshark swarm start           - Start autonomous loop");
+                println!("  openshark swarm stop            - Stop swarm");
+                println!("  openshark swarm status          - Show swarm status");
+                println!();
+                println!("  Roles: {:?}", config.swarm.roles);
+            }
+        },
+        Some(Commands::Tools { cmd }) => match cmd.as_str() {
+            "list" | "" => {
+                println!(
+                    "🦈 OpenShark Tools — {} total\n",
+                    crate::tools::get_tools().len()
+                );
+
+                println!("🔧 Native Tools:");
+                for tool in crate::tools::get_native_tools() {
+                    println!("  {} — {}", tool.name(), tool.description());
+                }
+
+                println!("\n⚡ Capability Tools:");
+                for tool in crate::tools::get_capability_tools() {
+                    println!("  {} — {}", tool.name(), tool.description());
+                }
+
+                println!("\n💡 Usage:");
+                println!("  In agent mode, the model can invoke any tool.");
+                println!(
+                    "  In TUI, use TOOL:<tool_name> <args> or TOOL.<tool_name> <args> to execute manually."
+                );
+            }
+            _ => {
+                println!("🦈 Tools Commands");
+                println!("  openshark tools list  - Show all available tools");
+            }
+        },
+        Some(Commands::Doctor { fix, component: _ }) => {
+            let report = crate::doctor::run_checks(fix).await?;
+            report.print();
         }
+        Some(Commands::Plugins { cmd, name }) => match cmd.as_str() {
+            "list" | "" => {
+                crate::plugins::list_plugins_cli();
+            }
+            "create" if !name.is_empty() => {
+                match crate::plugins::PluginRegistry::new() {
+                    Ok(registry) => {
+                        match registry.create_scaffold(&name) {
+                            Ok(path) => println!("✅ Plugin scaffold created at {}", path.display()),
+                            Err(e) => println!("❌ Failed to create plugin: {}", e),
+                        }
+                    }
+                    Err(e) => println!("❌ Failed to initialize plugin registry: {}", e),
+                }
+            }
+            "enable" if !name.is_empty() => {
+                match crate::plugins::PluginRegistry::new() {
+                    Ok(mut registry) => {
+                        match registry.enable(&name) {
+                            Ok(()) => println!("✅ Plugin '{}' enabled", name),
+                            Err(e) => println!("❌ {}", e),
+                        }
+                    }
+                    Err(e) => println!("❌ Failed to initialize plugin registry: {}", e),
+                }
+            }
+            "disable" if !name.is_empty() => {
+                match crate::plugins::PluginRegistry::new() {
+                    Ok(mut registry) => {
+                        match registry.disable(&name) {
+                            Ok(()) => println!("✅ Plugin '{}' disabled", name),
+                            Err(e) => println!("❌ {}", e),
+                        }
+                    }
+                    Err(e) => println!("❌ Failed to initialize plugin registry: {}", e),
+                }
+            }
+            _ => {
+                println!("🦈 Plugin Commands");
+                println!("  openshark plugins list           - List all plugins");
+                println!("  openshark plugins create <name>  - Create plugin scaffold");
+                println!("  openshark plugins enable <name>  - Enable a plugin");
+                println!("  openshark plugins disable <name> - Disable a plugin");
+            }
+        },
     }
 
     Ok(())

@@ -198,8 +198,8 @@ impl SecurityConfig {
         let mut config = if path.exists() {
             let content = std::fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read {}", path.display()))?;
-            let config: SecurityConfig = toml::from_str(&content)
-                .context("Failed to parse security.toml")?;
+            let config: SecurityConfig =
+                toml::from_str(&content).context("Failed to parse security.toml")?;
             config
         } else {
             let config = SecurityConfig::default();
@@ -234,8 +234,8 @@ impl SecurityConfig {
         if config.sudo.password_hash.is_some() {
             config.sudo.password_hash = Some("****".to_string());
         }
-        let content = toml::to_string_pretty(&config)
-            .context("Failed to serialize security config")?;
+        let content =
+            toml::to_string_pretty(&config).context("Failed to serialize security config")?;
         std::fs::write(&path, content)
             .with_context(|| format!("Failed to write {}", path.display()))?;
         Ok(())
@@ -286,7 +286,10 @@ pub enum SecurityDecision {
     /// Execution is approved.
     Allow,
     /// Execution requires human approval.
-    RequireApproval { reason: String, risk_level: RiskLevel },
+    RequireApproval {
+        reason: String,
+        risk_level: RiskLevel,
+    },
     /// Execution is denied.
     Deny { reason: String },
 }
@@ -579,10 +582,12 @@ impl SecurityEngine {
     #[allow(dead_code)]
     pub fn approve_sudo(&self, command: &str, duration_secs: u64) {
         if let Ok(mut sessions) = self.sudo_sessions.lock() {
-            let expiry = std::time::Instant::now()
-                + std::time::Duration::from_secs(duration_secs);
+            let expiry = std::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
             sessions.insert(command.to_string(), expiry);
-            info!("Sudo approved for '{}' for {} seconds", command, duration_secs);
+            info!(
+                "Sudo approved for '{}' for {} seconds",
+                command, duration_secs
+            );
         }
     }
 
@@ -668,7 +673,10 @@ mod tests {
     #[test]
     fn test_is_path_allowed() {
         let wd = Path::new("/home/user/project");
-        assert!(is_path_allowed(Path::new("/home/user/project/src"), Some(wd)));
+        assert!(is_path_allowed(
+            Path::new("/home/user/project/src"),
+            Some(wd)
+        ));
         assert!(!is_path_allowed(Path::new("/etc/passwd"), Some(wd)));
         assert!(is_path_allowed(Path::new("/any/path"), None));
     }

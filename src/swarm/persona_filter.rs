@@ -3,7 +3,7 @@
 /// that clutters the output. This removes it.
 pub fn strip_persona_preamble(content: &str) -> String {
     let _lower = content.to_lowercase();
-    
+
     // Common persona-preamble patterns
     let patterns = [
         "i am the architect",
@@ -916,7 +916,7 @@ pub fn strip_persona_preamble(content: &str) -> String {
         "i will jerk off back off",
         "i will tug off back off",
     ];
-    
+
     // Find the first non-persona line
     let mut first_real_line = 0usize;
     for (i, line) in content.lines().enumerate() {
@@ -931,7 +931,7 @@ pub fn strip_persona_preamble(content: &str) -> String {
             break;
         }
     }
-    
+
     // Also strip trailing persona lines at the end
     let lines: Vec<&str> = content.lines().collect();
     let mut last_real_line = lines.len();
@@ -947,12 +947,15 @@ pub fn strip_persona_preamble(content: &str) -> String {
             break;
         }
     }
-    
+
     if first_real_line >= last_real_line {
         return content.trim().to_string();
     }
-    
-    lines[first_real_line..last_real_line].join("\n").trim().to_string()
+
+    lines[first_real_line..last_real_line]
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]

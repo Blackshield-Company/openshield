@@ -68,7 +68,11 @@ pub struct StdioTransport {
 }
 
 impl StdioTransport {
-    pub async fn new(command: &str, args: &[String], env: &HashMap<String, String>) -> Result<Self> {
+    pub async fn new(
+        command: &str,
+        args: &[String],
+        env: &HashMap<String, String>,
+    ) -> Result<Self> {
         let mut cmd = Command::new(command);
         cmd.args(args)
             .stdin(std::process::Stdio::piped())
@@ -79,16 +83,12 @@ impl StdioTransport {
             cmd.env(key, val);
         }
 
-        let mut child = cmd.spawn().with_context(|| format!("Failed to spawn MCP server: {}", command))?;
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("Failed to spawn MCP server: {}", command))?;
 
-        let stdin = child
-            .stdin
-            .take()
-            .context("Failed to open stdin")?;
-        let stdout = child
-            .stdout
-            .take()
-            .context("Failed to open stdout")?;
+        let stdin = child.stdin.take().context("Failed to open stdin")?;
+        let stdout = child.stdout.take().context("Failed to open stdout")?;
 
         Ok(Self {
             child,
@@ -117,10 +117,7 @@ impl Transport for StdioTransport {
             .write_all(line.as_bytes())
             .await
             .context("Failed to write to stdin")?;
-        self.stdin
-            .flush()
-            .await
-            .context("Failed to flush stdin")?;
+        self.stdin.flush().await.context("Failed to flush stdin")?;
 
         // Read response line
         let mut response_line = String::new();
@@ -133,17 +130,15 @@ impl Transport for StdioTransport {
     }
 
     async fn send_notification(&mut self, notification: &JsonRpcRequest) -> Result<()> {
-        let json = serde_json::to_string(notification).context("Failed to serialize notification")?;
+        let json =
+            serde_json::to_string(notification).context("Failed to serialize notification")?;
         let line = format!("{}\n", json);
 
         self.stdin
             .write_all(line.as_bytes())
             .await
             .context("Failed to write notification to stdin")?;
-        self.stdin
-            .flush()
-            .await
-            .context("Failed to flush stdin")?;
+        self.stdin.flush().await.context("Failed to flush stdin")?;
 
         Ok(())
     }
@@ -261,24 +256,32 @@ impl Transport for SseTransport {
                                     let event = buffer[..pos].to_string();
                                     buffer = buffer[pos + 2..].to_string();
 
-                                    if let Some(data_line) = event.lines().find(|l| l.starts_with("data:")) {
+                                    if let Some(data_line) =
+                                        event.lines().find(|l| l.starts_with("data:"))
+                                    {
                                         let data = data_line["data:".len()..].trim_start();
                                         if data == "[DONE]" {
                                             continue;
                                         }
-                                        let _ = tx.send(TransportMessage::Error(data.to_string())).await;
+                                        let _ = tx
+                                            .send(TransportMessage::Error(data.to_string()))
+                                            .await;
                                     }
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(TransportMessage::Error(format!("stream error: {}", e))).await;
+                                let _ = tx
+                                    .send(TransportMessage::Error(format!("stream error: {}", e)))
+                                    .await;
                                 break;
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(TransportMessage::Error(format!("connection error: {}", e))).await;
+                    let _ = tx
+                        .send(TransportMessage::Error(format!("connection error: {}", e)))
+                        .await;
                 }
             }
         });
@@ -298,13 +301,13 @@ pub fn parse_transport_message(raw: &str) -> Result<TransportMessage> {
 
     // Check if it's a notification (no id field)
     if value.get("id").is_none() {
-        let notification: JsonRpcNotification = serde_json::from_value(value)
-            .context("Failed to parse notification")?;
+        let notification: JsonRpcNotification =
+            serde_json::from_value(value).context("Failed to parse notification")?;
         return Ok(TransportMessage::Notification(notification));
     }
 
     // It's a response
-    let response: JsonRpcResponse = serde_json::from_value(value)
-        .context("Failed to parse response")?;
+    let response: JsonRpcResponse =
+        serde_json::from_value(value).context("Failed to parse response")?;
     Ok(TransportMessage::Response(response))
 }

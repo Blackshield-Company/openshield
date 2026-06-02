@@ -3,6 +3,23 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
+/// Maximum output size in bytes before truncation (128KB).
+const MAX_OUTPUT_BYTES: usize = 128 * 1024;
+/// Maximum lines of output to capture.
+const MAX_OUTPUT_LINES: usize = 2000;
+/// Paths that should never be treated as project roots for test discovery.
+const BLOCKED_PATH_PREFIXES: &[&str] = &[
+    "/home/synth/.cargo",
+    "/home/synth/.cache",
+    "/home/synth/.local/share",
+    "/home/synth/.rustup",
+    "/usr",
+    "/var",
+    "/tmp",
+    "/etc",
+    "/opt",
+];
+
 pub struct TestTool;
 
 impl Tool for TestTool {
@@ -18,6 +35,11 @@ impl Tool for TestTool {
         let parts: Vec<&str> = args.split_whitespace().collect();
         let cmd = parts.first().copied().unwrap_or("run");
         let path = parts.get(1).copied().unwrap_or(".");
+
+        // Validate path before doing anything
+        if let Err(e) = validate_test_path(path) {
+            return Ok(format!("Test path validation failed: {}", e));
+        }
 
         let framework = detect_test_framework(path);
 
@@ -47,6 +69,36 @@ enum TestFramework {
     Pytest,
     GoTest,
     Unknown,
+}
+
+fn validate_test_path(path: &str) -> Result<()> {
+    let canonical = std::fs::canonicalize(path)
+        .with_context(|| format!("Cannot resolve test path: {}", path))?;
+
+    let canonical_str = canonical.to_string_lossy();
+
+    for blocked in BLOCKED_PATH_PREFIXES {
+        if canonical_str.starts_with(*blocked) {
+            anyhow::bail!(
+                "Path '{}' is in a blocked directory ({}). \
+                 These directories contain system/package files, not project tests. \
+                 Run OpenShark from your project directory or set working_directory in config.",
+                path,
+                blocked
+            );
+        }
+    }
+
+    // Warn if the path is the home directory itself — almost never intentional
+    if canonical_str == "/home/synth" || canonical_str == "/home/synth/" {
+        anyhow::bail!(
+            "Refusing to run tests from home directory (/home/synth). \
+             This would recursively execute every test file on your system. \
+             cd into a project directory or set working_directory in config."
+        );
+    }
+
+    Ok(())
 }
 
 fn detect_test_framework(path: &str) -> TestFramework {
@@ -148,7 +200,7 @@ fn watch_tests(path: &str, framework: &TestFramework) -> Result<String> {
         TestFramework::Pytest => "pytest-watch",
         TestFramework::GoTest => "gow test ./...",
         TestFramework::Unknown => {
-            return Ok("No test framework detected for watch mode.".to_string())
+            return Ok("No test framework detected for watch mode.".to_string());
         }
     };
 
@@ -159,16 +211,38 @@ fn watch_tests(path: &str, framework: &TestFramework) -> Result<String> {
 }
 
 fn format_output(output: &std::process::Output) -> Result<String> {
+    let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // Truncate stdout if too large
+    if stdout.len() > MAX_OUTPUT_BYTES {
+        let truncated = truncate_to_lines(&stdout, MAX_OUTPUT_LINES);
+        stdout = format!(
+            "{}\n\n[TRUNCATED: output exceeded {} lines / {}KB limit]",
+            truncated,
+            MAX_OUTPUT_LINES,
+            MAX_OUTPUT_BYTES / 1024
+        );
+    }
+
+    // Truncate stderr if too large
+    if stderr.len() > MAX_OUTPUT_BYTES {
+        let truncated = truncate_to_lines(&stderr, MAX_OUTPUT_LINES);
+        stderr = format!(
+            "{}\n\n[TRUNCATED: stderr exceeded {} lines / {}KB limit]",
+            truncated,
+            MAX_OUTPUT_LINES,
+            MAX_OUTPUT_BYTES / 1024
+        );
+    }
+
     let mut result = String::new();
 
-    if !output.stdout.is_empty() {
-        result.push_str(&String::from_utf8_lossy(&output.stdout));
+    if !stdout.is_empty() {
+        result.push_str(&stdout);
     }
-    if !output.stderr.is_empty() {
-        result.push_str(&format!(
-            "\n[stderr]: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    if !stderr.is_empty() {
+        result.push_str(&format!("\n[stderr]: {}", stderr));
     }
 
     let status = if output.status.success() {
@@ -180,6 +254,16 @@ fn format_output(output: &std::process::Output) -> Result<String> {
     Ok(format!("Test run: {}\n\n{}", status, result))
 }
 
+/// Truncate a string to at most `max_lines` lines, preserving the start.
+fn truncate_to_lines(text: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= max_lines {
+        return text.to_string();
+    }
+    let kept: Vec<&str> = lines.into_iter().take(max_lines).collect();
+    kept.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,7 +273,11 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_testrunner_test_{}_{}", std::process::id(), count);
+        let dir = format!(
+            "/tmp/openshark_testrunner_test_{}_{}",
+            std::process::id(),
+            count
+        );
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -197,6 +285,34 @@ mod tests {
 
     fn cleanup(dir: &str) {
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_validate_blocks_cargo_registry() {
+        let result = validate_test_path("/home/synth/.cargo/registry/src");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("blocked directory"));
+    }
+
+    #[test]
+    fn test_validate_blocks_home_dir() {
+        let result = validate_test_path("/home/synth");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("home directory"));
+    }
+
+    #[test]
+    fn test_validate_allows_project_dir() {
+        // Use a path under /home/synth so it doesn't hit the /tmp block
+        let dir = format!("/home/synth/.tmp_testrunner_{}", std::process::id());
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(format!("{}/Cargo.toml", dir), "[package]\nname = \"test\"").unwrap();
+        let result = validate_test_path(&dir);
+        assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -235,7 +351,10 @@ mod tests {
         fs::write(format!("{}/go.mod", dir), "module test").unwrap();
 
         let framework = detect_test_framework(&dir);
-        assert!(matches!(framework, TestFramework::GoTest) || matches!(framework, TestFramework::Unknown));
+        assert!(
+            matches!(framework, TestFramework::GoTest)
+                || matches!(framework, TestFramework::Unknown)
+        );
         cleanup(&dir);
     }
 
@@ -276,5 +395,12 @@ mod tests {
         let tool = TestTool;
         let result = tool.execute("unknown").unwrap();
         assert!(result.contains("Unknown test command"));
+    }
+
+    #[test]
+    fn test_truncate_to_lines() {
+        let text = "line1\nline2\nline3\nline4\nline5";
+        assert_eq!(truncate_to_lines(text, 3), "line1\nline2\nline3");
+        assert_eq!(truncate_to_lines(text, 10), text);
     }
 }

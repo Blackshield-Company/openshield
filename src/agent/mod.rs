@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::memory::{MemoryStore, Message as MemoryMessage, ToolCall};
 use crate::providers::{ChatRequest, Message, Provider};
-use crate::router::{route_task, RoutingDecision};
+use crate::router::{RoutingDecision, route_task};
 use crate::tools::{find_tool, get_tools};
 
 pub mod soul;
@@ -118,7 +118,7 @@ impl Agent {
         );
 
         let security_engine = crate::security::SecurityEngine::new(
-            crate::security::SecurityConfig::load().unwrap_or_default()
+            crate::security::SecurityConfig::load().unwrap_or_default(),
         )?;
 
         memory.create_session(&session_id, model_name, "agentic")?;
@@ -171,7 +171,9 @@ impl Agent {
                 });
             }
 
-            let step_result = self.execute_step_with_retry(step, &mut total_iterations).await?;
+            let step_result = self
+                .execute_step_with_retry(step, &mut total_iterations)
+                .await?;
             step_results.push(step_result.clone());
 
             self.save_agent_message(
@@ -227,17 +229,14 @@ impl Agent {
 
     /// Generate a plan by asking the model to break down the task.
     pub async fn generate_plan(&self, task: &str) -> Result<Plan> {
-        let routing_decision = route_task(
-            &self.infer_config(),
-            task,
-        )
-        .await
-        .unwrap_or_else(|_| RoutingDecision {
-            task_type: "agentic".to_string(),
-            model: self.config.default_model.clone(),
-            provider: "local".to_string(),
-            reason: "Fallback".to_string(),
-        });
+        let routing_decision = route_task(&self.infer_config(), task)
+            .await
+            .unwrap_or_else(|_| RoutingDecision {
+                task_type: "agentic".to_string(),
+                model: self.config.default_model.clone(),
+                provider: "local".to_string(),
+                reason: "Fallback".to_string(),
+            });
 
         let tools_description = get_tools()
             .iter()
@@ -266,17 +265,17 @@ impl Agent {
                     role: "system".to_string(),
                     content: system_prompt,
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: format!("Create a plan for this task: {}", task),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 },
             ],
             false,
@@ -312,7 +311,9 @@ impl Agent {
             *total_iterations += 1;
             iterations += 1;
 
-            let output = self.execute_single_step(step, &self.security_engine).await?;
+            let output = self
+                .execute_single_step(step, &self.security_engine)
+                .await?;
             let verified = self.verify_step(step, &output).await?;
 
             if verified || iterations >= max_retries {
@@ -330,7 +331,8 @@ impl Agent {
     }
 
     /// Execute a single plan step by invoking the appropriate tool.
-    async fn execute_single_step(&self,
+    async fn execute_single_step(
+        &self,
         step: &PlanStep,
         security_engine: &crate::security::SecurityEngine,
     ) -> Result<String> {
@@ -340,16 +342,23 @@ impl Agent {
             crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
                 return Err(anyhow::anyhow!(
                     "Security approval required for tool '{}': {} (risk: {:?})",
-                    step.tool_name, reason, risk_level
+                    step.tool_name,
+                    reason,
+                    risk_level
                 ));
             }
             crate::security::SecurityDecision::Deny { reason } => {
-                security_engine.audit(&step.tool_name, &step.args, false,
-                    crate::security::RiskLevel::Critical, &reason
+                security_engine.audit(
+                    &step.tool_name,
+                    &step.args,
+                    false,
+                    crate::security::RiskLevel::Critical,
+                    &reason,
                 );
                 return Err(anyhow::anyhow!(
                     "Security blocked tool '{}': {}",
-                    step.tool_name, reason
+                    step.tool_name,
+                    reason
                 ));
             }
         }
@@ -370,8 +379,12 @@ impl Agent {
             created_at: Utc::now(),
         };
         self.memory.save_tool_call(&tool_call)?;
-        security_engine.audit(&step.tool_name, &step.args, true,
-            crate::security::RiskLevel::Low, "approved"
+        security_engine.audit(
+            &step.tool_name,
+            &step.args,
+            true,
+            crate::security::RiskLevel::Low,
+            "approved",
         );
 
         Ok(sanitized)
@@ -388,8 +401,16 @@ impl Agent {
         let result_lower = result.to_lowercase();
 
         // Check for negation indicators in the result
-        let negation_words = ["error", "failed", "failure", "not found", "permission denied"];
-        let has_negation = negation_words.iter().any(|word| result_lower.contains(word));
+        let negation_words = [
+            "error",
+            "failed",
+            "failure",
+            "not found",
+            "permission denied",
+        ];
+        let has_negation = negation_words
+            .iter()
+            .any(|word| result_lower.contains(word));
 
         // Check if expected result keywords are present
         let expected_keywords: Vec<&str> = expected_lower.split_whitespace().collect();
@@ -402,7 +423,10 @@ impl Agent {
     pub async fn escalate(&self, failed_step: &PlanStep, error: &str) -> Result<Plan> {
         let routing_decision = route_task(
             &self.infer_config(),
-            &format!("Recover from failed step: {} - {}", failed_step.tool_name, error),
+            &format!(
+                "Recover from failed step: {} - {}",
+                failed_step.tool_name, error
+            ),
         )
         .await
         .unwrap_or_else(|_| RoutingDecision {
@@ -429,17 +453,17 @@ impl Agent {
                     role: "system".to_string(),
                     content: system_prompt,
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: "Create a recovery plan.".to_string(),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 },
             ],
             false,
@@ -492,6 +516,7 @@ impl Agent {
             filesystem: crate::config::FilesystemConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
+            keybindings: crate::config::KeybindingsConfig::default(),
         }
     }
 }
@@ -569,8 +594,8 @@ pub fn prompt_edit_plan(plan: &Plan) -> Result<Plan> {
     if trimmed.is_empty() {
         Ok(plan.clone())
     } else {
-        let edited: Plan = serde_json::from_str(trimmed)
-            .context("Failed to parse edited plan JSON")?;
+        let edited: Plan =
+            serde_json::from_str(trimmed).context("Failed to parse edited plan JSON")?;
         Ok(edited)
     }
 }
@@ -614,14 +639,12 @@ More text"#;
     fn test_plan_serialization() {
         let plan = Plan {
             description: "Test plan".to_string(),
-            steps: vec![
-                PlanStep {
-                    tool_name: "search".to_string(),
-                    args: "find TODOs".to_string(),
-                    expected_result: "list of TODOs".to_string(),
-                    verification_criteria: "non-empty list".to_string(),
-                },
-            ],
+            steps: vec![PlanStep {
+                tool_name: "search".to_string(),
+                args: "find TODOs".to_string(),
+                expected_result: "list of TODOs".to_string(),
+                verification_criteria: "non-empty list".to_string(),
+            }],
         };
 
         let json = serde_json::to_string(&plan).unwrap();
@@ -726,14 +749,12 @@ More text"#;
         };
         let result = TaskResult {
             success: true,
-            step_results: vec![
-                StepResult {
-                    step: step.clone(),
-                    output: "test result: ok".to_string(),
-                    verified: true,
-                    iterations: 1,
-                },
-            ],
+            step_results: vec![StepResult {
+                step: step.clone(),
+                output: "test result: ok".to_string(),
+                verified: true,
+                iterations: 1,
+            }],
             total_iterations: 1,
             message: "All good".to_string(),
         };

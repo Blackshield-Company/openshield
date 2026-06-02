@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
-use std::fs;
 use super::Tool;
 use crate::lsp::{LspClient, Symbol};
+use anyhow::{Context, Result};
+use std::fs;
 
 pub struct LspTool;
 
@@ -86,7 +86,8 @@ fn detect_lsp_server(file_path: &str) -> (&'static str, &'static [&'static str],
         ("typescript-language-server", &["--stdio"], "typescript")
     } else if file_path.ends_with(".go") {
         ("gopls", &[], "go")
-    } else if file_path.ends_with(".c") || file_path.ends_with(".cpp") || file_path.ends_with(".h") {
+    } else if file_path.ends_with(".c") || file_path.ends_with(".cpp") || file_path.ends_with(".h")
+    {
         ("clangd", &[], "cpp")
     } else {
         ("rust-analyzer", &[], "rust") // default
@@ -100,7 +101,11 @@ fn format_symbols(symbols: &[Symbol]) -> String {
 
     let mut lines = Vec::new();
     for s in symbols {
-        let detail = s.detail.as_ref().map(|d| format!(" ({})" , d)).unwrap_or_default();
+        let detail = s
+            .detail
+            .as_ref()
+            .map(|d| format!(" ({})", d))
+            .unwrap_or_default();
         lines.push(format!(
             "{}:{}:{} | {}{} | {}",
             s.file, s.line, s.character, s.name, detail, s.kind

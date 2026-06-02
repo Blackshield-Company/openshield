@@ -5,14 +5,16 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::tools::Tool;
 use serde_json::json;
-use tungstenite::{connect, Message as WsMsg};
+use tungstenite::{Message as WsMsg, connect};
 
 // ─── Web Search ─────────────────────────────────────────────────────────────
 
 pub struct WebSearchTool;
 
 impl Tool for WebSearchTool {
-    fn name(&self) -> &str { "web" }
+    fn name(&self) -> &str {
+        "web"
+    }
     fn description(&self) -> &str {
         "Web search and scraping. Args: <query> or --scrape <url> [--max-results <n>]"
     }
@@ -25,18 +27,19 @@ impl Tool for WebSearchTool {
     }
 }
 
-fn web_search(query: &str) -> Result<String> {
+pub fn web_search(query: &str) -> Result<String> {
     if query.is_empty() {
         return Ok("Usage: web <search query>".to_string());
     }
 
-    // Brave Search via HTTP — returns clean HTML results without blocking.
-    match brave_search(query) {
+    // DuckDuckGo HTML — returns real results without JS rendering or captcha.
+    match duckduckgo_search(query) {
         Ok(results) if !results.starts_with("No results") => return Ok(results),
         Ok(_) => {}
         Err(e) => {
             return Err(anyhow::anyhow!(
-                "Search failed: {}. Try browser --navigate to search directly.", e
+                "Search failed: {}. Try browser --navigate to search directly.",
+                e
             ));
         }
     }
@@ -46,52 +49,76 @@ fn web_search(query: &str) -> Result<String> {
     ))
 }
 
-/// Search via Brave Search — fast HTTP, no browser needed.
-fn brave_search(query: &str) -> Result<String> {
+/// Search via DuckDuckGo HTML interface — no JS, no captcha, clean results.
+fn duckduckgo_search(query: &str) -> Result<String> {
     let url = format!(
-        "https://search.brave.com/search?q={}&source=web",
+        "https://html.duckduckgo.com/html/?q={}",
         urlencoding::encode(query)
     );
     let body = fetch_text(&url)?;
-    parse_brave_results(query, &body)
+    parse_duckduckgo_results(query, &body)
 }
 
-/// Parse Brave Search HTML by extracting titles and descriptions independently.
-/// Titles: <div class="title search-snippet-title ...">, Descriptions: <div class="generic-snippet ...">
-fn parse_brave_results(query: &str, body: &str) -> Result<String> {
+/// Parse DuckDuckGo HTML results.
+/// Results are in `.result` divs with `.result__a` (title+link) and `.result__snippet` (description).
+fn parse_duckduckgo_results(query: &str, body: &str) -> Result<String> {
     use regex::Regex;
 
+    // Extract title and link from result__a
     let title_re = Regex::new(
-        r#"<div[^>]*class="[^"]*search-snippet-title[^"]*"[^>]*>([^<]*)</div>"#
-    ).unwrap();
-    let desc_re = Regex::new(
-        r#"<div[^>]*class="[^"]*generic-snippet[^"]*"[^>]*>([^<]*)</div>"#
-    ).unwrap();
+        r#"class="result__a" href="([^"]+)"[^>]*>([^<]+)"#,
+    )
+    .unwrap();
 
-    let titles: Vec<String> = title_re
+    // Extract snippet from result__snippet
+    let snippet_re = Regex::new(
+        r#"class="result__snippet"[^>]*>([^<]+)"#,
+    )
+    .unwrap();
+
+    let titles: Vec<(String, String)> = title_re
         .captures_iter(body)
-        .map(|cap| strip_html_tags(cap.get(1).map(|m| m.as_str()).unwrap_or("")))
-        .filter(|t| !t.is_empty() && t.len() > 3)
+        .filter_map(|cap| {
+            let href = cap.get(1)?.as_str();
+            let title = strip_html_tags(cap.get(2)?.as_str());
+            // DuckDuckGo redirects through their own URL — extract the real URL
+            let real_url = extract_ddg_url(href);
+            Some((title.trim().to_string(), real_url))
+        })
+        .filter(|(t, _)| !t.is_empty() && t.len() > 3)
         .take(10)
         .collect();
 
-    let snippets: Vec<String> = desc_re
+    let snippets: Vec<String> = snippet_re
         .captures_iter(body)
         .map(|cap| {
             let s = strip_html_tags(cap.get(1).map(|m| m.as_str()).unwrap_or(""));
-            if s.len() > 300 { s[..300].to_string() } else { s }
+            if s.len() > 300 {
+                s[..300].to_string()
+            } else {
+                s
+            }
         })
         .take(10)
         .collect();
 
     if titles.is_empty() {
+        // Check if we got a "no results" page or were blocked
+        if body.contains("No results") || body.contains("no results") {
+            return Ok(format!("No results found for '{}'", query));
+        }
+        if body.contains("captcha") || body.contains("CAPTCHA") {
+            return Err(anyhow::anyhow!(
+                "DuckDuckGo served a captcha. Try again later or use browser --navigate."
+            ));
+        }
         return Ok(format!("No results found for '{}'", query));
     }
 
     let max = titles.len().min(10);
     let mut lines = vec![format!("Search results for '{}':", query)];
     for i in 0..max {
-        lines.push(format!("{}. {}", i + 1, titles[i]));
+        lines.push(format!("{}. {}\n   {}", i + 1, titles[i].0, titles[i].1));
         if let Some(snippet) = snippets.get(i) {
             if !snippet.is_empty() {
                 lines.push(format!("   {}", snippet));
@@ -102,13 +129,29 @@ fn parse_brave_results(query: &str, body: &str) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
-
+/// Extract the real URL from DuckDuckGo's redirect URL.
+fn extract_ddg_url(href: &str) -> String {
+    // href looks like: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&amp;rut=...
+    if let Some(start) = href.find("uddg=") {
+        let after = &href[start + 5..];
+        let end = after.find('&').unwrap_or(after.len());
+        let encoded = &after[..end];
+        return urlencoding::decode(encoded)
+            .unwrap_or(std::borrow::Cow::Borrowed(encoded))
+            .to_string();
+    }
+    href.to_string()
+}
 
 fn scrape_url(url: &str) -> Result<String> {
     let body = fetch_text(url)?;
     let text = strip_html_tags(&body);
     let truncated = if text.len() > 8000 {
-        format!("{}...\n[truncated {} chars]", &text[..8000], text.len() - 8000)
+        format!(
+            "{}...\n[truncated {} chars]",
+            &text[..8000],
+            text.len() - 8000
+        )
     } else {
         text
     };
@@ -129,13 +172,14 @@ impl CdpSession {
         self.cmd_id += 1;
         let id = self.cmd_id;
         let msg = json!({"id": id, "method": method, "params": params});
-        self.ws.send(WsMsg::Text(msg.to_string().into()))
+        self.ws
+            .send(WsMsg::Text(msg.to_string().into()))
             .context("CDP send failed")?;
         loop {
             let resp = self.ws.read().context("CDP read failed")?;
             if let WsMsg::Text(text) = resp {
-                let v: serde_json::Value = serde_json::from_str(&text)
-                    .context("CDP parse failed")?;
+                let v: serde_json::Value =
+                    serde_json::from_str(&text).context("CDP parse failed")?;
                 if let Some(msg_id) = v.get("id").and_then(|i| i.as_u64()) {
                     if msg_id == id {
                         return Ok(v);
@@ -151,9 +195,13 @@ fn get_cdp_session() -> Result<std::sync::MutexGuard<'static, Option<CdpSession>
     if guard.is_none() {
         let port = 9222u16 + (std::process::id() % 100) as u16;
         let _child = std::process::Command::new(chromium_path())
-            .args(["--headless", "--disable-gpu", "--no-sandbox",
-                   &format!("--remote-debugging-port={}", port),
-                   "about:blank"])
+            .args([
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                &format!("--remote-debugging-port={}", port),
+                "about:blank",
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -167,7 +215,8 @@ fn get_cdp_session() -> Result<std::sync::MutexGuard<'static, Option<CdpSession>
             .context("Failed to connect to Chrome DevTools")?;
         let body = resp.text()?;
         let pages: Vec<serde_json::Value> = serde_json::from_str(&body)?;
-        let ws_url = pages.first()
+        let ws_url = pages
+            .first()
             .and_then(|p| p["webSocketDebuggerUrl"].as_str())
             .ok_or_else(|| anyhow::anyhow!("No debuggable page found"))?;
 
@@ -190,7 +239,9 @@ fn chromium_path() -> &'static str {
 pub struct BrowserTool;
 
 impl Tool for BrowserTool {
-    fn name(&self) -> &str { "browser" }
+    fn name(&self) -> &str {
+        "browser"
+    }
     fn description(&self) -> &str {
         "Headless browser (Chromium CDP). Args: --navigate <url> | --snapshot [url] | --click <selector> | --type <selector> <text>"
     }
@@ -217,7 +268,9 @@ fn browser_navigate(url: &str) -> Result<String> {
         return Err(anyhow::anyhow!("Usage: browser --navigate <url>"));
     }
     let mut guard = get_cdp_session()?;
-    let s = guard.as_mut().ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
+    let s = guard
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
 
     s.send_cmd("Page.enable", json!({}))?;
     s.send_cmd("Page.navigate", json!({"url": url}))?;
@@ -233,7 +286,11 @@ fn browser_navigate(url: &str) -> Result<String> {
         .unwrap_or("(no text content)");
 
     let truncated = if text.len() > 6000 {
-        format!("{}...\n[truncated {} chars]", &text[..6000], text.len() - 6000)
+        format!(
+            "{}...\n[truncated {} chars]",
+            &text[..6000],
+            text.len() - 6000
+        )
     } else {
         text.to_string()
     };
@@ -242,17 +299,22 @@ fn browser_navigate(url: &str) -> Result<String> {
 
 fn browser_snapshot(url_or_empty: &str) -> Result<String> {
     let mut guard = get_cdp_session()?;
-    let s = guard.as_mut().ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
+    let s = guard
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
 
     if !url_or_empty.is_empty() {
         s.send_cmd("Page.navigate", json!({"url": url_or_empty}))?;
         std::thread::sleep(std::time::Duration::from_millis(2000));
     }
 
-    let result = s.send_cmd("Page.captureScreenshot", json!({
-        "format": "png",
-        "clip": {"x": 0, "y": 0, "width": 1280, "height": 900, "scale": 1}
-    }))?;
+    let result = s.send_cmd(
+        "Page.captureScreenshot",
+        json!({
+            "format": "png",
+            "clip": {"x": 0, "y": 0, "width": 1280, "height": 900, "scale": 1}
+        }),
+    )?;
 
     let b64 = result["result"]["data"]
         .as_str()
@@ -271,7 +333,9 @@ fn browser_click(selector: &str) -> Result<String> {
         return Err(anyhow::anyhow!("Usage: browser --click <css_selector>"));
     }
     let mut guard = get_cdp_session()?;
-    let s = guard.as_mut().ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
+    let s = guard
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
 
     // Escape single quotes and backslashes for JS string
     let escaped = selector.replace('\\', "\\\\").replace('\'', "\\'");
@@ -279,17 +343,23 @@ fn browser_click(selector: &str) -> Result<String> {
         "(() => {{ const el = document.querySelector('{}'); if (el) {{ el.click(); return 'clicked'; }} return 'not found'; }})()",
         escaped
     );
-    let result = s.send_cmd("Runtime.evaluate", json!({
-        "expression": js,
-        "returnByValue": true
-    }))?;
+    let result = s.send_cmd(
+        "Runtime.evaluate",
+        json!({
+            "expression": js,
+            "returnByValue": true
+        }),
+    )?;
 
     let status = result["result"]["result"]["value"]
         .as_str()
         .unwrap_or("unknown");
 
     std::thread::sleep(std::time::Duration::from_millis(500));
-    Ok(format!("Clicked '{}': {}. Use --snapshot to see the result.", selector, status))
+    Ok(format!(
+        "Clicked '{}': {}. Use --snapshot to see the result.",
+        selector, status
+    ))
 }
 
 fn browser_type(args: &str) -> Result<String> {
@@ -297,10 +367,14 @@ fn browser_type(args: &str) -> Result<String> {
     let selector = parts.first().unwrap_or(&"").trim();
     let text = parts.get(1).unwrap_or(&"").trim();
     if selector.is_empty() {
-        return Err(anyhow::anyhow!("Usage: browser --type <css_selector> <text>"));
+        return Err(anyhow::anyhow!(
+            "Usage: browser --type <css_selector> <text>"
+        ));
     }
     let mut guard = get_cdp_session()?;
-    let s = guard.as_mut().ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
+    let s = guard
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("No CDP session"))?;
 
     let escaped_sel = selector.replace('\\', "\\\\").replace('\'', "\\'");
     let escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'");
@@ -308,16 +382,22 @@ fn browser_type(args: &str) -> Result<String> {
         "(() => {{ const el = document.querySelector('{}'); if (!el) return 'not found'; el.focus(); el.value = '{}'; el.dispatchEvent(new Event('input', {{ bubbles: true }})); return 'typed'; }})()",
         escaped_sel, escaped_text
     );
-    let result = s.send_cmd("Runtime.evaluate", json!({
-        "expression": js,
-        "returnByValue": true
-    }))?;
+    let result = s.send_cmd(
+        "Runtime.evaluate",
+        json!({
+            "expression": js,
+            "returnByValue": true
+        }),
+    )?;
 
     let status = result["result"]["result"]["value"]
         .as_str()
         .unwrap_or("unknown");
 
-    Ok(format!("Typed '{}' into '{}': {}. Use --snapshot to see the result.", text, selector, status))
+    Ok(format!(
+        "Typed '{}' into '{}': {}. Use --snapshot to see the result.",
+        text, selector, status
+    ))
 }
 
 // ─── X / Twitter Search ─────────────────────────────────────────────────────
@@ -325,13 +405,18 @@ fn browser_type(args: &str) -> Result<String> {
 pub struct XSearchTool;
 
 impl Tool for XSearchTool {
-    fn name(&self) -> &str { "x_search" }
+    fn name(&self) -> &str {
+        "x_search"
+    }
     fn description(&self) -> &str {
         "Search X (Twitter) posts. Args: <query> [--from-date YYYY-MM-DD] [--to-date YYYY-MM-DD]"
     }
     fn execute(&self, args: &str) -> Result<String> {
         if args.trim().is_empty() {
-            return Ok("Usage: x_search <query> [--from-date YYYY-MM-DD] [--to-date YYYY-MM-DD]".to_string());
+            return Ok(
+                "Usage: x_search <query> [--from-date YYYY-MM-DD] [--to-date YYYY-MM-DD]"
+                    .to_string(),
+            );
         }
         Ok(format!(
             "X Search for '{}':\n\nNote: X/Twitter search requires API credentials. \

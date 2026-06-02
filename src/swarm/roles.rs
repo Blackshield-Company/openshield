@@ -22,7 +22,9 @@ impl RoleTemplate {
     /// Get a role template by name.
     pub fn get(name: &str) -> Option<Self> {
         let templates = Self::all_templates();
-        templates.into_iter().find(|t| t.short_name == name || t.name.to_lowercase() == name.to_lowercase())
+        templates
+            .into_iter()
+            .find(|t| t.short_name == name || t.name.to_lowercase() == name.to_lowercase())
     }
 
     /// Get all available role templates.
@@ -157,7 +159,8 @@ impl RoleTemplate {
                 "You are the DevOps engineer. Your role is to handle deployment, CI/CD, ",
                 "and infrastructure. Ensure builds are reproducible, deployments are safe, ",
                 "and monitoring is in place. Automate everything that can be automated."
-            ).to_string(),
+            )
+            .to_string(),
         }
     }
 
@@ -217,7 +220,8 @@ impl RoleTemplate {
                 "You are the Project Manager. Your role is to coordinate the swarm's activities, ",
                 "track progress against goals, and ensure tasks are completed in the right order. ",
                 "Identify blockers and reassign work when agents are stuck. Keep the swarm focused."
-            ).to_string(),
+            )
+            .to_string(),
         }
     }
 
@@ -235,7 +239,8 @@ impl RoleTemplate {
             system_prompt: concat!(
                 "You are a general-purpose agent. Execute the tasks assigned to you, ",
                 "report your progress, and ask for clarification when requirements are unclear."
-            ).to_string(),
+            )
+            .to_string(),
         }
     }
 }

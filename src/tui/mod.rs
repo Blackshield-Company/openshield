@@ -18,11 +18,12 @@ use crate::agent::{Agent, AgentConfig};
 use crate::config::Config;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, ToolCall};
 use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetrics};
-use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, ToolSuggestion};
+use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, GitTool, Tool, ToolSuggestion};
 use chrono::Utc;
 use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
 use crate::skills::SkillRegistry;
+use crate::session::{SessionExport, ExportMessage, ExportBranch, export_to_default, list_exports};
 
 mod theme;
 mod clipboard_image;
@@ -233,6 +234,14 @@ struct App {
     history_index: Option<usize>,
     /// File path for persisting input history.
     history_file: std::path::PathBuf,
+    /// Diff preview content for inline diff before applying edits.
+    pending_diff: Option<String>,
+    /// Scroll position for diff preview.
+    diff_scroll: usize,
+    /// File tree entries for the Files sidebar tab.
+    file_tree: Vec<String>,
+    /// Selected file index in the file tree.
+    file_tree_selected: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +259,7 @@ enum AppMode {
     Normal,
     Agent,
     ToolApproval,
+    DiffPreview,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -484,6 +494,10 @@ impl App {
             input_history,
             history_index: None,
             history_file,
+            pending_diff: None,
+            diff_scroll: 0,
+            file_tree: Vec::new(),
+            file_tree_selected: 0,
         })
     }
 
@@ -766,6 +780,79 @@ impl App {
             reasoning: None,
         };
         self.messages.push(msg);
+    }
+
+    /// Scan the project directory and build the file tree.
+    fn refresh_file_tree(&mut self) {
+        let project_path = self.config.filesystem.working_directory.clone()
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "/home/synth".to_string());
+
+        let mut entries = Vec::new();
+        entries.push(format!("📁 {}", project_path));
+
+        match std::fs::read_dir(&project_path) {
+            Ok(dir) => {
+                let mut files: Vec<_> = dir.filter_map(|e| e.ok()).collect();
+                files.sort_by(|a, b| {
+                    let a_is_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    let b_is_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    match (a_is_dir, b_is_dir) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a.file_name().cmp(&b.file_name()),
+                    }
+                });
+
+                for entry in files.iter().take(50) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    let icon = if is_dir { "📁" } else { "📄" };
+                    entries.push(format!("  {} {}", icon, name));
+                }
+            }
+            Err(e) => {
+                entries.push(format!("  ❌ Error: {}", e));
+            }
+        }
+
+        self.file_tree = entries;
+        self.file_tree_selected = 0;
+    }
+
+    /// Read a file from the file tree and add it as a system message.
+    fn read_file_from_tree(&mut self, index: usize) {
+        if index == 0 || index >= self.file_tree.len() {
+            return;
+        }
+
+        let line = &self.file_tree[index];
+        let name = line.trim_start_matches("  📄 ").trim_start_matches("  📁 ").to_string();
+
+        let project_path = self.config.filesystem.working_directory.clone()
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "/home/synth".to_string());
+
+        let file_path = std::path::Path::new(&project_path).join(&name);
+
+        if file_path.is_dir() {
+            self.add_system_message(format!("📁 {} is a directory", name));
+            return;
+        }
+
+        match std::fs::read_to_string(&file_path) {
+            Ok(content) => {
+                let preview = if content.len() > 800 {
+                    format!("{}\n... ({} more chars)", &content[..800], content.len() - 800)
+                } else {
+                    content
+                };
+                self.add_system_message(format!("📄 {}:\n```\n{}\n```", name, preview));
+            }
+            Err(e) => {
+                self.add_system_message(format!("❌ Failed to read {}: {}", name, e));
+            }
+        }
     }
 
     /// Apply a stream event from the background task.
@@ -1106,6 +1193,16 @@ impl App {
                 }
             }
             StreamEvent::SetPendingSuggestion(suggestion) => {
+                // For edit tool suggestions, show diff preview first
+                if suggestion.tool_name == "edit" {
+                    if let Some(diff) = generate_edit_diff(&suggestion.args) {
+                        self.pending_diff = Some(diff);
+                        self.pending_suggestion = Some(suggestion);
+                        self.mode = AppMode::DiffPreview;
+                        self.diff_scroll = 0;
+                        return;
+                    }
+                }
                 self.pending_suggestion = Some(suggestion);
                 self.mode = AppMode::ToolApproval;
                 self.tool_approval_shown_at = Some(Instant::now());
@@ -1452,34 +1549,87 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     }
 
+    // DiffPreview mode: show diff, handle y/n/scroll
+    if app.mode == AppMode::DiffPreview {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                // Approve the edit — switch to ToolApproval to execute
+                app.mode = AppMode::ToolApproval;
+                app.pending_diff = None;
+                app.diff_scroll = 0;
+                app.add_system_message("Diff approved. Press 'y' again to execute or 'n' to cancel.".to_string());
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
+                app.pending_suggestion = None;
+                app.pending_diff = None;
+                app.diff_scroll = 0;
+                app.mode = AppMode::Normal;
+                app.add_system_message(format!(
+                    "⏭ Skipped edit suggestion{}.",
+                    if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
+                ));
+            }
+            KeyCode::Up => {
+                app.diff_scroll = app.diff_scroll.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                app.diff_scroll += 1;
+            }
+            KeyCode::PageUp => {
+                app.diff_scroll = app.diff_scroll.saturating_sub(5);
+            }
+            KeyCode::PageDown => {
+                app.diff_scroll += 5;
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
-            let now = Instant::now();
-            let within_window = app.last_ctrl_c.map(|t| now.duration_since(t).as_secs() < 2).unwrap_or(false);
-            
-            if within_window {
-                app.ctrl_c_count += 1;
+            if app.show_comparison {
+                app.show_comparison = false;
             } else {
-                app.ctrl_c_count = 1;
-            }
-            app.last_ctrl_c = Some(now);
-            
-            if app.ctrl_c_count >= 2 {
-                return Ok(true);
-            } else if !app.input.is_empty() {
-                app.input.clear();
-                app.cursor_position = 0;
-                app.add_system_message("Input cleared. Press Ctrl+C again to quit.".to_string());
-            } else {
-                app.add_system_message("Press Ctrl+C again to quit.".to_string());
+                let now = Instant::now();
+                let within_window = app.last_ctrl_c.map(|t| now.duration_since(t).as_secs() < 2).unwrap_or(false);
+                
+                if within_window {
+                    app.ctrl_c_count += 1;
+                } else {
+                    app.ctrl_c_count = 1;
+                }
+                app.last_ctrl_c = Some(now);
+                
+                if app.ctrl_c_count >= 2 {
+                    return Ok(true);
+                } else if !app.input.is_empty() {
+                    app.input.clear();
+                    app.cursor_position = 0;
+                    app.add_system_message("Input cleared. Press Ctrl+C again to quit.".to_string());
+                } else {
+                    app.add_system_message("Press Ctrl+C again to quit.".to_string());
+                }
             }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             return Ok(true);
         }
-        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.messages.clear();
-            app.scroll = 0;
+        KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Show current keybindings — clone to avoid borrow issues
+            let kb = app.config.keybindings.clone();
+            app.add_system_message("⌨️  Keybindings (custom overrides shown if set):".to_string());
+            app.add_system_message(format!("  Ctrl+B  — Toggle sidebar {}", kb.toggle_sidebar.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!("  Ctrl+S  — Cycle sidebar tab {}", kb.cycle_sidebar_tab.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!("  Ctrl+M  — Toggle multi-model {}", kb.toggle_multi_model.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!("  Ctrl+W  — Toggle swarm {}", kb.toggle_swarm.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!("  Ctrl+L  — Clear chat {}", kb.clear_chat.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!("  Ctrl+Y  — Copy last response {}", kb.copy_last.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!("  Ctrl+C×2 — Quit {}", kb.quit.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message("".to_string());
+            app.add_system_message("Add to ~/.config/openshark/config.toml under [keybindings] to customize.".to_string());
+            app.add_system_message("Example: toggle_sidebar = \"ctrl+f\"".to_string());
         }
         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.sidebar_expanded = !app.sidebar_expanded;
@@ -1508,13 +1658,14 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.sidebar_tab = (app.sidebar_tab + 1) % 4; // Now 4 tabs: Tools, Skills, Swarm, Inspector
+            app.sidebar_tab = (app.sidebar_tab + 1) % 5; // 5 tabs: Tools, Skills, Swarm, Inspector, Files
             app.sidebar_scroll = 0;
             let tab_name = match app.sidebar_tab {
                 0 => "Tools",
                 1 => "Skills",
                 2 => "Swarm",
                 3 => "Inspector",
+                4 => "Files",
                 _ => "Tools",
             };
             app.add_system_message(format!("📋 Sidebar: {}", tab_name));
@@ -1572,6 +1723,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 // Insert newline for multi-line input
                 app.input.insert(app.cursor_position, '\n');
                 app.cursor_position += 1;
+            } else if app.focused_pane == 0 && app.sidebar_tab == 4 {
+                // Files tab: Enter to read selected file
+                let idx = app.file_tree_selected;
+                app.read_file_from_tree(idx);
             } else {
                 let input = app.input.trim().to_string();
                 if !input.is_empty() {
@@ -1622,6 +1777,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Up => {
             if app.show_comparison {
                 app.comparison_selected = app.comparison_selected.saturating_sub(1);
+            } else if app.focused_pane == 0 && app.sidebar_tab == 4 {
+                // Files tab: navigate file tree selection
+                app.file_tree_selected = app.file_tree_selected.saturating_sub(1);
+                app.sidebar_scroll = app.sidebar_scroll.saturating_sub(1);
             } else if app.focused_pane == 0 {
                 app.sidebar_scroll = app.sidebar_scroll.saturating_sub(1);
             } else if !app.input_history.is_empty() {
@@ -1647,6 +1806,12 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if max_responses > 0 {
                     app.comparison_selected = (app.comparison_selected + 1).min(max_responses.saturating_sub(1));
                 }
+            } else if app.focused_pane == 0 && app.sidebar_tab == 4 {
+                // Files tab: navigate file tree selection
+                if app.file_tree_selected + 1 < app.file_tree.len() {
+                    app.file_tree_selected += 1;
+                }
+                app.sidebar_scroll += 1;
             } else if app.focused_pane == 0 {
                 app.sidebar_scroll += 1;
             } else if let Some(idx) = app.history_index {
@@ -1747,6 +1912,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • /swarm stop       — Stop swarm\n\
             • /swarm status     — Show swarm status\n\
             \n\
+            Session commands:\n\
+            • /export [path]    — Export session to JSON\n\
+            • /import <path>    — Import session from JSON\n\
+            • /imports          — List exported sessions\n\
+            \n\
             Keybindings:\n\
             • Ctrl+C            — Copy / Quit (double-tap)\n\
             • Ctrl+L            — Clear chat\n\
@@ -1761,7 +1931,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • PgUp / PgDn       — Fast scroll\n\
             \n\
             Tool commands:\n\
-            • /undo             — Undo last file edit"
+            • /undo             — Undo last file edit\n\
+            • /diff             — Show diff preview for last edit"
                 .to_string(),
         );
         return Ok(());
@@ -1807,10 +1978,239 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         return Ok(());
     }
 
+    if input == "/compare" {
+        // Find the last assistant message with secondary responses
+        let has_alternates = app.messages.iter()
+            .filter(|m| m.role == "assistant")
+            .any(|m| !m.multi_model_responses.is_empty());
+        
+        if has_alternates {
+            app.show_comparison = true;
+            app.comparison_selected = 0;
+            app.add_system_message("📊 Comparison mode ON. Use ↑/↓ to navigate models, Ctrl+C to close.".to_string());
+        } else {
+            app.add_system_message("No alternate responses available. Enable multi-model mode with /multi and send a message first.".to_string());
+        }
+        return Ok(());
+    }
+
     if input == "/undo" {
         match crate::tools::edit::undo_last_edit() {
             Ok(msg) => app.add_system_message(msg),
             Err(e) => app.add_system_message(format!("Undo failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/diff" {
+        app.add_system_message("💡 Diff preview is shown automatically when file edits are suggested.".to_string());
+        app.add_system_message("   When a write/replace/patch is proposed, you'll see the diff first.".to_string());
+        app.add_system_message("   Press 'y' to apply, 'n' to skip.".to_string());
+        return Ok(());
+    }
+
+    if input == "/git" || input.starts_with("/git ") {
+        let subcmd = input.strip_prefix("/git ").unwrap_or("").trim();
+        if subcmd.is_empty() {
+            app.add_system_message("Git commands:".to_string());
+            app.add_system_message("  /git status          - Working tree status".to_string());
+            app.add_system_message("  /git diff            - Unstaged changes".to_string());
+            app.add_system_message("  /git diff-staged     - Staged changes".to_string());
+            app.add_system_message("  /git log [n]         - Commit history".to_string());
+            app.add_system_message("  /git branch          - List branches".to_string());
+            app.add_system_message("  /git add <path>      - Stage file(s)".to_string());
+            app.add_system_message("  /git commit <msg>    - Commit staged".to_string());
+            return Ok(());
+        }
+
+        let git_tool = crate::tools::GitTool;
+        match git_tool.execute(subcmd) {
+            Ok(output) => {
+                if output.trim().is_empty() {
+                    app.add_system_message(format!("✅ git {} (no output)", subcmd.split_whitespace().next().unwrap_or(subcmd)));
+                } else {
+                    app.add_system_message(format!("📦 git {}:\n```\n{}\n```", subcmd, output.trim()));
+                }
+            }
+            Err(e) => {
+                app.add_system_message(format!("❌ git {} failed: {}", subcmd, e));
+            }
+        }
+        return Ok(());
+    }
+
+    if input == "/search" || input.starts_with("/search ") {
+        let query = input.strip_prefix("/search ").unwrap_or("").trim();
+        if query.is_empty() {
+            app.add_system_message("Usage: /search <query>".to_string());
+            return Ok(());
+        }
+        app.add_system_message(format!("🔍 Searching for '{}'...", query));
+        match crate::capabilities::web::web_search(query) {
+            Ok(results) => {
+                app.add_system_message(format!("🔍 Results for '{}':\n```\n{}\n```", query, results));
+            }
+            Err(e) => {
+                app.add_system_message(format!("❌ Search failed: {}", e));
+            }
+        }
+        return Ok(());
+    }
+
+    if input == "/run" {
+        // Find last assistant message with code blocks
+        let last_content = app.messages.iter().rev()
+            .find(|m| m.role == "assistant")
+            .map(|m| m.content.clone());
+        
+        if let Some(content) = last_content {
+            let blocks = crate::sandbox::extract_code_blocks(&content);
+            if blocks.is_empty() {
+                app.add_system_message("No code blocks found in the last assistant message.".to_string());
+            } else {
+                app.add_system_message(format!("🔧 Executing {} code block(s)...", blocks.len()));
+                let results = crate::sandbox::run_code_blocks(&content);
+                for (lang, stdout, stderr, success) in results {
+                    let status = if success { "✅" } else { "❌" };
+                    app.add_system_message(format!("{} {} execution:", status, lang));
+                    if !stdout.is_empty() {
+                        app.add_system_message(format!("stdout:\n```\n{}\n```", stdout.trim()));
+                    }
+                    if !stderr.is_empty() {
+                        app.add_system_message(format!("stderr:\n```\n{}\n```", stderr.trim()));
+                    }
+                }
+            }
+        } else {
+            app.add_system_message("No assistant message found to run code from.".to_string());
+        }
+        return Ok(());
+    }
+
+    // ── Session Export ──────────────────────────────────────────────────────
+    if input == "/export" || input.starts_with("/export ") {
+        let path_override = input.strip_prefix("/export ").map(|s| s.trim());
+        
+        let export_messages: Vec<ExportMessage> = app.messages.iter().map(|m| ExportMessage {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            images: m.images.clone(),
+            reasoning: m.reasoning.clone(),
+            timestamp: m.timestamp,
+        }).collect();
+
+        let export_branches: Vec<ExportBranch> = app.branches.iter().map(|b| ExportBranch {
+            name: b.name.clone(),
+            messages: b.messages.iter().map(|m| ExportMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+                images: m.images.clone(),
+                reasoning: m.reasoning.clone(),
+                timestamp: m.timestamp,
+            }).collect(),
+            created_at: b.created_at,
+        }).collect();
+
+        let export = SessionExport::from_tui_state(
+            app.session_id.clone(),
+            app.model.clone(),
+            export_messages,
+            export_branches,
+            app.tokens_used,
+            app.tool_calls_count,
+        );
+
+        let result = if let Some(path) = path_override {
+            export.save_to_file(path).map(|_| path.to_string())
+        } else {
+            export_to_default(&export).map(|p| p.to_string_lossy().to_string())
+        };
+
+        match result {
+            Ok(path) => app.add_system_message(format!("💾 Session exported to: {}", path)),
+            Err(e) => app.add_system_message(format!("❌ Export failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    // ── Session Import ──────────────────────────────────────────────────────
+    if input.starts_with("/import ") {
+        let path = input[8..].trim();
+        match SessionExport::load_from_file(path) {
+            Ok(export) => {
+                // Convert export messages to ChatMessages
+                let imported_messages: Vec<ChatMessage> = export.messages.iter().map(|m| ChatMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                    images: m.images.clone(),
+                    timestamp: m.timestamp,
+                    multi_model_responses: Vec::new(),
+                    reasoning: m.reasoning.clone(),
+                }).collect();
+
+                // Convert export branches
+                let imported_branches: Vec<SessionBranch> = export.branches.iter().map(|b| SessionBranch {
+                    name: b.name.clone(),
+                    messages: b.messages.iter().map(|m| ChatMessage {
+                        role: m.role.clone(),
+                        content: m.content.clone(),
+                        images: m.images.clone(),
+                        timestamp: m.timestamp,
+                        multi_model_responses: Vec::new(),
+                        reasoning: m.reasoning.clone(),
+                    }).collect(),
+                    model_messages: Vec::new(),
+                    created_at: b.created_at,
+                }).collect();
+
+                app.messages = imported_messages;
+                app.branches = imported_branches;
+                let imported_model = export.model.clone();
+                app.model = imported_model;
+                app.tokens_used = export.metadata.tokens_used;
+                app.tool_calls_count = export.metadata.tool_calls_count;
+                app.model_messages = export.to_model_messages();
+                app.scroll = 0;
+
+                app.add_system_message(format!(
+                    "📂 Session imported from {} (v{}, exported {})",
+                    path,
+                    export.version,
+                    export.exported_at.format("%Y-%m-%d %H:%M:%S")
+                ));
+                app.add_system_message(format!(
+                    "   Messages: {} | Branches: {} | Model: {}",
+                    export.messages.len(),
+                    export.branches.len(),
+                    export.model
+                ));
+            }
+            Err(e) => app.add_system_message(format!("❌ Import failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/imports" || input == "/list-exports" {
+        match list_exports() {
+            Ok(exports) if exports.is_empty() => {
+                app.add_system_message("No exported sessions found.".to_string());
+            }
+            Ok(exports) => {
+                app.add_system_message(format!("📂 Exported sessions ({} found):", exports.len()));
+                for (i, (path, export)) in exports.iter().take(10).enumerate() {
+                    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
+                    app.add_system_message(format!(
+                        "  {}. {} — {} messages, {} branches — {}",
+                        i + 1,
+                        filename,
+                        export.messages.len(),
+                        export.branches.len(),
+                        export.exported_at.format("%Y-%m-%d %H:%M")
+                    ));
+                }
+                app.add_system_message("Use /import <path> to load one.".to_string());
+            }
+            Err(e) => app.add_system_message(format!("❌ Failed to list exports: {}", e)),
         }
         return Ok(());
     }
@@ -3724,6 +4124,10 @@ fn draw_ui(f: &mut Frame, app: &App) {
         draw_tool_approval_popup(f, app);
     }
 
+    if app.mode == AppMode::DiffPreview {
+        draw_diff_preview_popup(f, app);
+    }
+
     if app.show_comparison {
         draw_comparison_overlay(f, app);
     }
@@ -3878,6 +4282,26 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             ]);
         let count = app.skill_registry.as_ref().map(|r| r.all_skills().len()).unwrap_or(0);
         (format!(" Skills [{}] ", count), skills)
+    } else if app.sidebar_tab == 4 {
+        // Files tab — project file tree
+        let file_lines: Vec<Line> = if app.file_tree.is_empty() {
+            vec![Line::from(vec![Span::styled("No files scanned", muted_style())])]
+        } else {
+            app.file_tree.iter().enumerate()
+                .skip(app.sidebar_scroll)
+                .take(20)
+                .map(|(i, entry)| {
+                    let is_selected = i == app.file_tree_selected;
+                    let style = if is_selected {
+                        highlight_style().add_modifier(Modifier::BOLD)
+                    } else {
+                        text_style()
+                    };
+                    Line::from(vec![Span::styled(entry.clone(), style)])
+                })
+                .collect()
+        };
+        (" Files ".to_string(), file_lines)
     } else if app.sidebar_tab == 2 {
         // Swarm tab
         let swarm_lines: Vec<Line> = if !app.swarm_agents.is_empty() {
@@ -4577,6 +5001,66 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+/// Draw the diff preview popup (80% x 70% popup with scrollable diff).
+fn draw_diff_preview_popup(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let popup_area = centered_rect(80, 70, area);
+
+    let clear = Clear;
+    f.render_widget(clear, popup_area);
+
+    let block = Block::default()
+        .title(" Diff Preview ")
+        .title_style(title_style())
+        .borders(Borders::ALL)
+        .border_style(focused_border_style())
+        .style(bg_style());
+
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("📝 Proposed file edit:", highlight_style()),
+        ]),
+        Line::from(""),
+    ];
+
+    if let Some(ref diff) = app.pending_diff {
+        for diff_line in diff.lines().skip(app.diff_scroll) {
+            let styled_line = if diff_line.starts_with('+') {
+                Line::from(vec![Span::styled(diff_line, Style::default().fg(ratatui::style::Color::Green))])
+            } else if diff_line.starts_with('-') {
+                Line::from(vec![Span::styled(diff_line, Style::default().fg(ratatui::style::Color::Red))])
+            } else if diff_line.starts_with("@@") {
+                Line::from(vec![Span::styled(diff_line, Style::default().fg(ratatui::style::Color::Cyan))])
+            } else {
+                Line::from(vec![Span::styled(diff_line, text_style())])
+            };
+            lines.push(styled_line);
+        }
+    } else {
+        lines.push(Line::from("No diff available."));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Press ", text_style()),
+        Span::styled("y", accent_style()),
+        Span::styled(" to approve diff, ", text_style()),
+        Span::styled("n", error_style()),
+        Span::styled(" to skip", text_style()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("↑/↓ or PgUp/PgDn to scroll", muted_style()),
+    ]));
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .style(bg_style())
+        .wrap(Wrap { trim: false });
+    f.render_widget(paragraph, inner);
+}
+
 /// Draw the multi-model comparison overlay (90% × 85% popup).
 fn draw_comparison_overlay(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -4863,5 +5347,60 @@ fn emergency_truncate_messages(
         } else {
             break;
         }
+    }
+}
+
+/// Generate a diff preview for an edit tool suggestion.
+/// Returns Some(diff) if the suggestion is for write/replace/patch and a diff can be generated.
+fn generate_edit_diff(args: &str) -> Option<String> {
+    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let cmd = parts[0];
+    let rest = parts[1];
+
+    match cmd {
+        "write" => {
+            let wparts: Vec<&str> = rest.splitn(2, ' ').collect();
+            if wparts.len() < 2 {
+                return None;
+            }
+            let path = wparts[0];
+            let content = wparts[1];
+            crate::diff::preview_write(path, content).ok()
+        }
+        "replace" => {
+            let delimiter = " ||| ";
+            let rp: Vec<&str> = rest.splitn(2, delimiter).collect();
+            if rp.len() < 2 {
+                return None;
+            }
+            let pp: Vec<&str> = rp[0].splitn(2, ' ').collect();
+            if pp.len() < 2 {
+                return None;
+            }
+            let path = pp[0];
+            let old_str = pp[1];
+            let new_str = rp[1];
+            crate::diff::preview_replace(path, old_str, new_str).ok()
+        }
+        "patch" => {
+            let delimiter = " ||| ";
+            let pp: Vec<&str> = rest.splitn(2, delimiter).collect();
+            if pp.len() < 2 {
+                return None;
+            }
+            let ppp: Vec<&str> = pp[0].splitn(2, ' ').collect();
+            if ppp.len() < 2 {
+                return None;
+            }
+            let path = ppp[0];
+            let old_lines = ppp[1];
+            let new_lines = pp[1];
+            crate::diff::preview_patch(path, old_lines, new_lines).ok()
+        }
+        _ => None,
     }
 }

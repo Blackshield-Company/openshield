@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::memory::store::{MemoryStore, Message};
 use crate::memory::embeddings::{cosine_similarity, generate_embedding};
+use crate::memory::store::{MemoryStore, Message};
 
 /// A layer in the memory hierarchy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,18 +30,23 @@ impl<'a> MemoryHierarchy<'a> {
 
     /// Get all messages for a specific session.
     pub fn get_session_context(&self, session_id: &str) -> Result<Vec<Message>> {
-        self.store.get_session_messages(session_id)
+        self.store
+            .get_session_messages(session_id)
             .context("Failed to get session context")
     }
 
     /// Get all messages for sessions belonging to a specific project.
     pub fn get_project_context(&self, project_path: &str) -> Result<Vec<Message>> {
-        let session_ids = self.store.get_sessions_by_project(project_path)
+        let session_ids = self
+            .store
+            .get_sessions_by_project(project_path)
             .context("Failed to get sessions by project")?;
 
         let mut all_messages = Vec::new();
         for session in session_ids {
-            let messages = self.store.get_session_messages(&session.id)
+            let messages = self
+                .store
+                .get_session_messages(&session.id)
                 .context("Failed to get session messages for project context")?;
             all_messages.extend(messages);
         }
@@ -53,12 +58,16 @@ impl<'a> MemoryHierarchy<'a> {
 
     /// Get all messages across all sessions (global context).
     pub fn get_global_context(&self) -> Result<Vec<Message>> {
-        let sessions = self.store.get_recent_sessions(1000)
+        let sessions = self
+            .store
+            .get_recent_sessions(1000)
             .context("Failed to get recent sessions for global context")?;
 
         let mut all_messages = Vec::new();
         for session in sessions {
-            let messages = self.store.get_session_messages(&session.id)
+            let messages = self
+                .store
+                .get_session_messages(&session.id)
                 .context("Failed to get session messages for global context")?;
             all_messages.extend(messages);
         }
@@ -87,12 +96,11 @@ impl<'a> MemoryHierarchy<'a> {
                 // For session layer, we need a session_id in the query context
                 // This is handled by the caller providing the session_id as part of query
                 // or we search globally and filter. For simplicity, search globally here.
-                self.store.get_recent_sessions(1000)
+                self.store
+                    .get_recent_sessions(1000)
                     .context("Failed to get sessions for query")?
                     .into_iter()
-                    .flat_map(|s| {
-                        self.store.get_session_messages(&s.id).unwrap_or_default()
-                    })
+                    .flat_map(|s| self.store.get_session_messages(&s.id).unwrap_or_default())
                     .collect::<Vec<_>>()
             }
             ContextLayer::Project => {
@@ -100,9 +108,7 @@ impl<'a> MemoryHierarchy<'a> {
                 // For now, we return empty since project path must be provided externally
                 Vec::new()
             }
-            ContextLayer::Global => {
-                self.get_global_context().unwrap_or_default()
-            }
+            ContextLayer::Global => self.get_global_context().unwrap_or_default(),
         };
 
         if candidates.is_empty() {
@@ -128,10 +134,7 @@ impl<'a> MemoryHierarchy<'a> {
             .collect();
 
         // Sort by score descending
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Deduplicate by content (keep highest scoring)
         let mut seen = std::collections::HashSet::new();
@@ -153,8 +156,7 @@ impl<'a> MemoryHierarchy<'a> {
             return Ok(Vec::new());
         }
 
-        let candidates = self.get_project_context(project_path)
-            .unwrap_or_default();
+        let candidates = self.get_project_context(project_path).unwrap_or_default();
 
         if candidates.is_empty() {
             return Ok(Vec::new());
@@ -174,10 +176,7 @@ impl<'a> MemoryHierarchy<'a> {
             })
             .collect();
 
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut seen = std::collections::HashSet::new();
         scored.retain(|(msg, _)| seen.insert(msg.content.clone()));
@@ -198,8 +197,7 @@ impl<'a> MemoryHierarchy<'a> {
             return Ok(Vec::new());
         }
 
-        let candidates = self.get_session_context(session_id)
-            .unwrap_or_default();
+        let candidates = self.get_session_context(session_id).unwrap_or_default();
 
         if candidates.is_empty() {
             return Ok(Vec::new());
@@ -219,10 +217,7 @@ impl<'a> MemoryHierarchy<'a> {
             })
             .collect();
 
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut seen = std::collections::HashSet::new();
         scored.retain(|(msg, _)| seen.insert(msg.content.clone()));
@@ -234,8 +229,7 @@ impl<'a> MemoryHierarchy<'a> {
     /// Compute semantic similarity score between a message and query embedding.
     fn compute_semantic_score(&self, msg: &Message, query_embedding: &[f32]) -> f32 {
         let msg_embedding = generate_embedding(&msg.content);
-        cosine_similarity(&msg_embedding, query_embedding)
-            .max(0.0) // Clamp to [0, 1]
+        cosine_similarity(&msg_embedding, query_embedding).max(0.0) // Clamp to [0, 1]
     }
 
     /// Compute keyword match score.
@@ -282,12 +276,15 @@ mod tests {
     use super::*;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
-    
 
     fn create_test_store() -> MemoryStore {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = format!("/tmp/openshark_hierarchy_test_{}_{}.db", std::process::id(), count);
+        let db_path = format!(
+            "/tmp/openshark_hierarchy_test_{}_{}.db",
+            std::process::id(),
+            count
+        );
         let _ = std::fs::remove_file(&db_path);
         MemoryStore::new(Path::new(&db_path)).unwrap()
     }
@@ -339,9 +336,15 @@ mod tests {
         let hierarchy = MemoryHierarchy::new(&store);
         let project_path = "/home/user/myproject";
 
-        store.create_session_with_project("sess-1", "model-a", "code", project_path).unwrap();
-        store.create_session_with_project("sess-2", "model-b", "chat", project_path).unwrap();
-        store.create_session_with_project("sess-3", "model-c", "other", "/other/project").unwrap();
+        store
+            .create_session_with_project("sess-1", "model-a", "code", project_path)
+            .unwrap();
+        store
+            .create_session_with_project("sess-2", "model-b", "chat", project_path)
+            .unwrap();
+        store
+            .create_session_with_project("sess-3", "model-c", "other", "/other/project")
+            .unwrap();
 
         let msg1 = create_test_message("sess-1", "msg-1", "user", "Hello from session 1");
         let msg2 = create_test_message("sess-2", "msg-2", "user", "Hello from session 2");
@@ -355,7 +358,11 @@ mod tests {
         assert_eq!(context.len(), 2);
         assert!(context.iter().any(|m| m.content == "Hello from session 1"));
         assert!(context.iter().any(|m| m.content == "Hello from session 2"));
-        assert!(!context.iter().any(|m| m.content == "Hello from other project"));
+        assert!(
+            !context
+                .iter()
+                .any(|m| m.content == "Hello from other project")
+        );
     }
 
     #[test]
@@ -388,7 +395,9 @@ mod tests {
         store.save_message(&msg1).unwrap();
         store.save_message(&msg2).unwrap();
 
-        let results = hierarchy.query_layer(ContextLayer::Global, "rust programming", 5).unwrap();
+        let results = hierarchy
+            .query_layer(ContextLayer::Global, "rust programming", 5)
+            .unwrap();
         assert!(!results.is_empty());
         // Rust message should be top result
         assert!(results[0].0.content.contains("rust"));
@@ -412,7 +421,9 @@ mod tests {
         let msg = create_test_message("sess-1", "msg-1", "user", "test");
         store.save_message(&msg).unwrap();
 
-        let results = hierarchy.query_layer(ContextLayer::Global, "test", 0).unwrap();
+        let results = hierarchy
+            .query_layer(ContextLayer::Global, "test", 0)
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -439,14 +450,18 @@ mod tests {
         let hierarchy = MemoryHierarchy::new(&store);
         let project_path = "/home/user/auth-project";
 
-        store.create_session_with_project("sess-1", "model-a", "code", project_path).unwrap();
+        store
+            .create_session_with_project("sess-1", "model-a", "code", project_path)
+            .unwrap();
         let msg1 = create_test_message("sess-1", "msg-1", "user", "jwt token implementation");
         let msg2 = create_test_message("sess-1", "msg-2", "user", "user profile page");
 
         store.save_message(&msg1).unwrap();
         store.save_message(&msg2).unwrap();
 
-        let results = hierarchy.query_project_layer(project_path, "jwt", 5).unwrap();
+        let results = hierarchy
+            .query_project_layer(project_path, "jwt", 5)
+            .unwrap();
         assert!(!results.is_empty());
         assert!(results[0].0.content.contains("jwt"));
     }
@@ -463,7 +478,9 @@ mod tests {
         store.save_message(&msg1).unwrap();
         store.save_message(&msg2).unwrap();
 
-        let results = hierarchy.query_layer(ContextLayer::Global, "rust", 5).unwrap();
+        let results = hierarchy
+            .query_layer(ContextLayer::Global, "rust", 5)
+            .unwrap();
         assert_eq!(results.len(), 2);
         // Rust message should score higher
         assert!(results[0].0.content.contains("rust"));
@@ -483,7 +500,9 @@ mod tests {
         store.save_message(&msg1).unwrap();
         store.save_message(&msg2).unwrap();
 
-        let results = hierarchy.query_layer(ContextLayer::Global, "duplicate", 5).unwrap();
+        let results = hierarchy
+            .query_layer(ContextLayer::Global, "duplicate", 5)
+            .unwrap();
         assert_eq!(results.len(), 1);
     }
 

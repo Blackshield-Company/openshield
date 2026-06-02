@@ -28,8 +28,9 @@ impl Sandbox {
 
         if let Some(ref dir) = wd {
             if !dir.exists() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("Failed to create sandbox directory: {}", dir.display()))?;
+                std::fs::create_dir_all(dir).with_context(|| {
+                    format!("Failed to create sandbox directory: {}", dir.display())
+                })?;
                 info!("Created sandbox directory: {}", dir.display());
             }
         }
@@ -106,7 +107,10 @@ impl Sandbox {
                         "Path '{}' is outside the allowed directories. \
                          Allowed: {:?}",
                         path_str,
-                        self.allowed_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
+                        self.allowed_paths
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect::<Vec<_>>()
                     ));
                 }
             }
@@ -167,6 +171,8 @@ impl Sandbox {
 }
 
 /// Extract potential file paths from tool arguments.
+/// Handles both plain-text args ("read /home/user/file.txt") and
+/// JSON-formatted args ("{\"operation\": \"read\", \"path\": \"/home/user/file.txt\"}").
 fn extract_paths_from_args(args: &str) -> Vec<String> {
     let mut paths = Vec::new();
 
@@ -185,8 +191,13 @@ fn extract_paths_from_args(args: &str) -> Vec<String> {
         }
 
         // Check if it looks like a path
-        if token.starts_with('/') || token.starts_with("~") || token.starts_with("./") {
-            paths.push(token.to_string());
+        if token.starts_with('/') || token.starts_with('~') || token.starts_with("./") {
+            // Strip trailing JSON delimiters that may leak in from JSON-formatted args.
+            // e.g. "/home/synth"}" → "/home/synth"
+            let cleaned = token.trim_end_matches(|c: char| {
+                c == '}' || c == ']' || c == ',' || c == '"' || c == '\''
+            });
+            paths.push(cleaned.to_string());
         }
     }
 
@@ -257,7 +268,11 @@ mod tests {
 
         // Home path should succeed
         let test_path = home.join(".config/test");
-        assert!(sandbox.validate_path("fs", &format!("read {}", test_path.display())).is_ok());
+        assert!(
+            sandbox
+                .validate_path("fs", &format!("read {}", test_path.display()))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -270,5 +285,39 @@ mod tests {
 
         let paths = extract_paths_from_args("echo hello");
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_extract_paths_from_json_args() {
+        // Path with trailing JSON quote and brace — the bug this fixes
+        let paths = extract_paths_from_args("{\"operation\": \"tree\", \"path\": \"/home/synth\"}");
+        assert_eq!(paths, vec!["/home/synth"]);
+
+        // Path with trailing quote (no brace)
+        let paths = extract_paths_from_args("{\"operation\": \"read\", \"path\": \"/etc/hosts\"}");
+        assert_eq!(paths, vec!["/etc/hosts"]);
+
+        // Multiple paths in JSON
+        let paths = extract_paths_from_args(
+            "{\"operation\": \"read\", \"path\": \"/tmp/a.txt\"} {\"path\": \"/tmp/b.txt\"}",
+        );
+        assert_eq!(paths, vec!["/tmp/a.txt", "/tmp/b.txt"]);
+
+        // JSON with trailing comma
+        let paths = extract_paths_from_args("{\"operation\": \"list\", \"path\": \"/var/log\",}");
+        assert_eq!(paths, vec!["/var/log"]);
+    }
+
+    #[test]
+    fn test_extract_paths_plain_args_unaffected() {
+        // Plain text args should still work correctly
+        let paths = extract_paths_from_args("read /home/user/file.txt");
+        assert_eq!(paths, vec!["/home/user/file.txt"]);
+
+        let paths = extract_paths_from_args("tree /tmp 3");
+        assert_eq!(paths, vec!["/tmp"]);
+
+        let paths = extract_paths_from_args("cat /home/user/log.txt 0 100");
+        assert_eq!(paths, vec!["/home/user/log.txt"]);
     }
 }

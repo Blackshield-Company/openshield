@@ -138,7 +138,9 @@ impl ContextCompressor {
             None
         };
 
-        let preserve_start = model_messages.len().saturating_sub(self.config.preserve_recent * 2);
+        let preserve_start = model_messages
+            .len()
+            .saturating_sub(self.config.preserve_recent * 2);
         let preserved: Vec<ProviderMessage> = model_messages.split_off(preserve_start);
         let compressible = model_messages.clone();
 
@@ -172,9 +174,9 @@ impl ContextCompressor {
                     summary
                 ),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
             summarized_count += chunk.len();
         }
@@ -188,7 +190,8 @@ impl ContextCompressor {
             self.stats.compressions_done += 1;
             self.stats.messages_summarized += summarized_count;
             // Rough estimate: each message ~100 tokens, summary ~max_summary_tokens
-            let saved = summarized_count.saturating_mul(100)
+            let saved = summarized_count
+                .saturating_mul(100)
                 .saturating_sub(self.config.max_summary_tokens);
             self.stats.tokens_saved += saved;
         }
@@ -239,10 +242,7 @@ impl ContextCompressor {
     }
 
     /// Ask the LLM to summarize a chunk of messages.
-    fn summarize_chunk(
-        &self,
-        chunk: &[ProviderMessage],
-    ) -> Result<String> {
+    fn summarize_chunk(&self, chunk: &[ProviderMessage]) -> Result<String> {
         let conversation = chunk
             .iter()
             .map(|m| format!("{}: {}", m.role, m.content))
@@ -310,7 +310,12 @@ impl ContextCompressor {
             // Extract decisions (imperative statements)
             for line in content.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("Set ") || trimmed.starts_with("Changed ") || trimmed.starts_with("Fixed ") || trimmed.starts_with("Added ") || trimmed.starts_with("Removed ") {
+                if trimmed.starts_with("Set ")
+                    || trimmed.starts_with("Changed ")
+                    || trimmed.starts_with("Fixed ")
+                    || trimmed.starts_with("Added ")
+                    || trimmed.starts_with("Removed ")
+                {
                     decisions.push(trimmed.to_string());
                 }
             }
@@ -335,7 +340,10 @@ impl ContextCompressor {
             summary.push_str("Code: ");
             // Deduplicate
             let mut seen = std::collections::HashSet::new();
-            let unique: Vec<_> = code_snippets.into_iter().filter(|s| seen.insert(s.clone())).collect();
+            let unique: Vec<_> = code_snippets
+                .into_iter()
+                .filter(|s| seen.insert(s.clone()))
+                .collect();
             summary.push_str(&unique.join(", "));
             summary.push('\n');
         }
@@ -448,8 +456,14 @@ mod tests {
         let compressor = ContextCompressor::new(config);
 
         let chunk = vec![
-            make_msg("user", "We need to fix the auth bug. Set the token expiry to 1 hour."),
-            make_msg("assistant", "```rust\nlet expiry = Duration::from_secs(3600);\n```\nDone."),
+            make_msg(
+                "user",
+                "We need to fix the auth bug. Set the token expiry to 1 hour.",
+            ),
+            make_msg(
+                "assistant",
+                "```rust\nlet expiry = Duration::from_secs(3600);\n```\nDone.",
+            ),
         ];
 
         let summary = compressor.local_summarize(&chunk);
@@ -473,7 +487,10 @@ mod tests {
             make_msg("user", "What's new?"),
             make_msg("assistant", "Not much."),
             make_msg("user", "Tell me a joke."),
-            make_msg("assistant", "Why did the shark cross the ocean? To get to the other tide."),
+            make_msg(
+                "assistant",
+                "Why did the shark cross the ocean? To get to the other tide.",
+            ),
         ];
 
         let result = compressor.compress(

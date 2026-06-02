@@ -33,7 +33,7 @@ use tracing::info;
 
 use crate::config::Config;
 use crate::memory::{ContextInjector, MemoryStore};
-use crate::skills::{format_skills_prompt, Skill, SkillRegistry};
+use crate::skills::{Skill, SkillRegistry, format_skills_prompt};
 
 /// Tracks adaptive parameters that evolve based on performance data.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -91,8 +91,7 @@ impl EvolutionEngine {
     /// Create a new evolution engine
     pub fn new(config: &Config) -> Result<Self> {
         let memory = Arc::new(Mutex::new(
-            MemoryStore::new(&config.memory_db_path)
-                .context("Failed to open memory store")?
+            MemoryStore::new(&config.memory_db_path).context("Failed to open memory store")?,
         ));
 
         let skills_dir = dirs::config_dir()
@@ -102,14 +101,12 @@ impl EvolutionEngine {
             .join("user");
 
         let skill_registry = Arc::new(Mutex::new(
-            SkillRegistry::new(skills_dir)
-                .context("Failed to load skill registry")?
+            SkillRegistry::new(skills_dir).context("Failed to load skill registry")?,
         ));
 
         // Load adaptive state from memory or use defaults
         let adaptive_state = Arc::new(Mutex::new(
-            Self::load_adaptive_state(&memory.lock().unwrap())
-                .unwrap_or_default()
+            Self::load_adaptive_state(&memory.lock().unwrap()).unwrap_or_default(),
         ));
 
         Ok(Self {
@@ -250,10 +247,7 @@ impl EvolutionEngine {
             .collect();
 
         if !ask_tools.is_empty() {
-            guidance.push_str(&format!(
-                "Confirm before using: {}\n",
-                ask_tools.join(", ")
-            ));
+            guidance.push_str(&format!("Confirm before using: {}\n", ask_tools.join(", ")));
         }
 
         // Model bias hints
@@ -336,8 +330,7 @@ impl EvolutionEngine {
             Err(_) => return false,
         };
 
-        state.auto_analysis_enabled
-            && state.sessions_since_analysis >= state.analysis_threshold
+        state.auto_analysis_enabled && state.sessions_since_analysis >= state.analysis_threshold
     }
 
     /// Increment session counter and return whether analysis should trigger.
@@ -362,14 +355,18 @@ impl EvolutionEngine {
 
     /// Save adaptive state to memory store.
     pub fn save_state(&self) -> Result<()> {
-        let state = self.adaptive_state.lock()
+        let state = self
+            .adaptive_state
+            .lock()
             .map_err(|_| anyhow::anyhow!("Failed to lock adaptive state"))?;
 
-        let memory = self.memory.lock()
+        let memory = self
+            .memory
+            .lock()
             .map_err(|_| anyhow::anyhow!("Failed to lock memory"))?;
 
-        let state_json = serde_json::to_string(&*state)
-            .context("Failed to serialize adaptive state")?;
+        let state_json =
+            serde_json::to_string(&*state).context("Failed to serialize adaptive state")?;
 
         memory.save_analysis_result("adaptive_state", "current", &state_json)?;
 
@@ -380,9 +377,7 @@ impl EvolutionEngine {
     /// Load adaptive state from memory store.
     fn load_adaptive_state(memory: &MemoryStore) -> Option<AdaptiveState> {
         match memory.get_analysis_result("adaptive_state", "current") {
-            Ok(Some(json)) => {
-                serde_json::from_str(&json).ok()
-            }
+            Ok(Some(json)) => serde_json::from_str(&json).ok(),
             _ => None,
         }
     }
@@ -452,7 +447,11 @@ mod tests {
 
         let state = engine.adaptive_state.lock().unwrap();
         let threshold = state.tool_confidence.get("fs").copied().unwrap();
-        assert!(threshold < 0.7, "Success should lower threshold, got {}", threshold);
+        assert!(
+            threshold < 0.7,
+            "Success should lower threshold, got {}",
+            threshold
+        );
     }
 
     #[test]
@@ -467,7 +466,11 @@ mod tests {
 
         let state = engine.adaptive_state.lock().unwrap();
         let threshold = state.tool_confidence.get("terminal").copied().unwrap();
-        assert!(threshold > 0.8, "Failure should raise threshold, got {}", threshold);
+        assert!(
+            threshold > 0.8,
+            "Failure should raise threshold, got {}",
+            threshold
+        );
     }
 
     #[test]

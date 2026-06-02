@@ -18,7 +18,10 @@ impl Tool for VisionTool {
     fn execute(&self, args: &str) -> Result<String> {
         let parts: Vec<&str> = args.split("--question").collect();
         let image_path = parts.first().unwrap_or(&"").trim();
-        let question = parts.get(1).map(|s| s.trim()).unwrap_or("Describe this image.");
+        let question = parts
+            .get(1)
+            .map(|s| s.trim())
+            .unwrap_or("Describe this image.");
 
         if image_path.is_empty() {
             return Ok("Usage: vision <image_path> [--question <question>]\nSupports: PNG, JPG, GIF, WebP. Use after browser --snapshot for page analysis.".to_string());
@@ -31,7 +34,8 @@ impl Tool for VisionTool {
                 .with_context(|| format!("Failed to read image: {}", image_path))?;
 
             // Detect MIME type from extension
-            let ext = path.extension()
+            let ext = path
+                .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("png")
                 .to_lowercase();
@@ -48,7 +52,11 @@ impl Tool for VisionTool {
 
             Ok(format!(
                 "Image loaded: {} ({} bytes, {})Question: {}\n--- VISION DATA (base64 data URL) ---\n{}\nUse this data URL as an image attachment in your next message to analyze it with a vision-capable model.",
-                image_path, data.len(), mime, question, data_url
+                image_path,
+                data.len(),
+                mime,
+                question,
+                data_url
             ))
         } else {
             Ok(format!(
@@ -76,7 +84,9 @@ impl Tool for ImageGenTool {
         let aspect = parts.get(1).map(|s| s.trim()).unwrap_or("landscape");
 
         if prompt.is_empty() {
-            return Ok("Usage: image_gen <prompt> [--aspect-ratio landscape|square|portrait]".to_string());
+            return Ok(
+                "Usage: image_gen <prompt> [--aspect-ratio landscape|square|portrait]".to_string(),
+            );
         }
 
         Ok(format!(
@@ -100,7 +110,10 @@ impl Tool for VideoTool {
     fn execute(&self, args: &str) -> Result<String> {
         let parts: Vec<&str> = args.split("--question").collect();
         let video_path = parts.first().unwrap_or(&"").trim();
-        let question = parts.get(1).map(|s| s.trim()).unwrap_or("Describe this video.");
+        let question = parts
+            .get(1)
+            .map(|s| s.trim())
+            .unwrap_or("Describe this video.");
 
         if video_path.is_empty() {
             return Ok("Usage: video <video_path_or_url> [--question <question>]".to_string());
@@ -154,9 +167,10 @@ impl Tool for TtsTool {
     fn execute(&self, args: &str) -> Result<String> {
         let parts: Vec<&str> = args.split("--output").collect();
         let text = parts.first().unwrap_or(&"").trim();
-        let output_path = parts.get(1).map(|s| {
-            s.split("--voice").next().unwrap_or(s).trim()
-        }).unwrap_or("~/.hermes/audio_cache/openshark_tts.mp3");
+        let output_path = parts
+            .get(1)
+            .map(|s| s.split("--voice").next().unwrap_or(s).trim())
+            .unwrap_or("~/.hermes/audio_cache/openshark_tts.mp3");
 
         if text.is_empty() {
             return Ok("Usage: tts <text> [--output <path>] [--voice <voice_id>]".to_string());

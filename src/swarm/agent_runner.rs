@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
 use crate::providers::{ChatRequest, Message, Provider};
-use crate::tools::{detect_tool_suggestions, AsyncToolExecutor};
+use crate::tools::{AsyncToolExecutor, detect_tool_suggestions};
 
 use super::{AgentId, AgentStatus, SwarmAgent, SwarmEvent};
 
@@ -24,9 +24,9 @@ impl AgentContext {
                 role: "system".to_string(),
                 content: system_prompt.to_string(),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             }],
             task_history: Vec::new(),
             tool_calls_count: 0,
@@ -38,9 +38,9 @@ impl AgentContext {
             role: "user".to_string(),
             content: content.to_string(),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
     }
 
@@ -49,9 +49,9 @@ impl AgentContext {
             role: "assistant".to_string(),
             content: content.to_string(),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
     }
 
@@ -60,9 +60,9 @@ impl AgentContext {
             role: "user".to_string(),
             content: format!("TOOL_RESULT:{}\n{}", tool_name, result),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
     }
 
@@ -116,7 +116,11 @@ impl AgentRunner {
         agents: &Arc<RwLock<HashMap<AgentId, SwarmAgent>>>,
         agent_id: &AgentId,
     ) -> Result<String> {
-        info!("🐝 Agent {} executing: {}", self.agent_id, task.chars().take(60).collect::<String>());
+        info!(
+            "🐝 Agent {} executing: {}",
+            self.agent_id,
+            task.chars().take(60).collect::<String>()
+        );
 
         // Update status to Working
         {
@@ -147,7 +151,12 @@ impl AgentRunner {
         let mut final_result = String::new();
 
         for iteration in 0..self.max_iterations {
-            debug!("🐝 Agent {} iteration {}/{}", self.agent_id, iteration + 1, self.max_iterations);
+            debug!(
+                "🐝 Agent {} iteration {}/{}",
+                self.agent_id,
+                iteration + 1,
+                self.max_iterations
+            );
 
             let request = ChatRequest::new(self.model.clone(), messages.clone(), true);
 
@@ -163,14 +172,17 @@ impl AgentRunner {
 
             let response = match tokio::time::timeout(
                 std::time::Duration::from_secs(180), // 3 min — swarm agents run in parallel, requests queue
-                self.provider.chat_stream(request)
-            ).await {
+                self.provider.chat_stream(request),
+            )
+            .await
+            {
                 Ok(Ok((chunks, _metrics))) => {
                     let mut full_content = String::new();
                     for (i, chunk) in chunks.iter().enumerate() {
                         full_content.push_str(chunk);
                         // Filter persona-preamble from streaming chunks
-                        let filtered_chunk = crate::swarm::persona_filter::strip_persona_preamble(chunk);
+                        let filtered_chunk =
+                            crate::swarm::persona_filter::strip_persona_preamble(chunk);
                         if !filtered_chunk.is_empty() {
                             let _ = self.event_tx.send(SwarmEvent::AgentChunk {
                                 agent_id: self.agent_id.clone(),
@@ -193,7 +205,9 @@ impl AgentRunner {
                     {
                         let mut agents_lock = agents.write().await;
                         if let Some(agent) = agents_lock.get_mut(agent_id) {
-                            agent.status = AgentStatus::Error { message: err_msg.clone() };
+                            agent.status = AgentStatus::Error {
+                                message: err_msg.clone(),
+                            };
                             agent.errors_count += 1;
                         }
                     }
@@ -209,7 +223,9 @@ impl AgentRunner {
                     {
                         let mut agents_lock = agents.write().await;
                         if let Some(agent) = agents_lock.get_mut(agent_id) {
-                            agent.status = AgentStatus::Error { message: err_msg.clone() };
+                            agent.status = AgentStatus::Error {
+                                message: err_msg.clone(),
+                            };
                             agent.errors_count += 1;
                         }
                     }
@@ -238,7 +254,10 @@ impl AgentRunner {
 
             // Execute the first suggested tool
             let suggestion = &suggestions[0];
-            info!("🐝 Agent {} using tool: {}", self.agent_id, suggestion.tool_name);
+            info!(
+                "🐝 Agent {} using tool: {}",
+                self.agent_id, suggestion.tool_name
+            );
 
             // Broadcast tool call
             let _ = self.event_tx.send(SwarmEvent::AgentToolCall {
@@ -248,17 +267,26 @@ impl AgentRunner {
             });
 
             let executor = AsyncToolExecutor::new();
-            let (tool_result, _success) = match executor.execute_with_timeout(
-                suggestion.tool_name.clone(),
-                suggestion.args.clone(),
-                30000, // 30s timeout per tool call
-            ).await {
+            let (tool_result, _success) = match executor
+                .execute_with_timeout(
+                    suggestion.tool_name.clone(),
+                    suggestion.args.clone(),
+                    30000, // 30s timeout per tool call
+                )
+                .await
+            {
                 Ok((result, metrics)) => {
                     let success = metrics.success;
                     let formatted = if success {
-                        format!("✅ {} ({}ms)\n{}", suggestion.tool_name, metrics.duration_ms, result)
+                        format!(
+                            "✅ {} ({}ms)\n{}",
+                            suggestion.tool_name, metrics.duration_ms, result
+                        )
                     } else {
-                        format!("❌ {} ({}ms)\n{}", suggestion.tool_name, metrics.duration_ms, result)
+                        format!(
+                            "❌ {} ({}ms)\n{}",
+                            suggestion.tool_name, metrics.duration_ms, result
+                        )
                     };
                     let _ = self.event_tx.send(SwarmEvent::AgentToolResult {
                         agent_id: self.agent_id.clone(),
@@ -292,14 +320,19 @@ impl AgentRunner {
             messages = ctx.messages.clone();
             drop(ctx);
 
-            final_result.push_str(&format!("\n\n[Tool: {}]\n{}", suggestion.tool_name, tool_result));
+            final_result.push_str(&format!(
+                "\n\n[Tool: {}]\n{}",
+                suggestion.tool_name, tool_result
+            ));
         }
 
         // Update agent status to completed
         {
             let mut agents_lock = agents.write().await;
             if let Some(agent) = agents_lock.get_mut(agent_id) {
-                agent.status = AgentStatus::Completed { result: final_result.clone() };
+                agent.status = AgentStatus::Completed {
+                    result: final_result.clone(),
+                };
                 agent.cycles_completed += 1;
                 agent.last_activity = Some(format!("Completed: {}", task));
             }
@@ -312,7 +345,11 @@ impl AgentRunner {
             result: final_result.clone(),
         });
 
-        info!("🐝 Agent {} completed task ({} chars result)", self.agent_id, final_result.len());
+        info!(
+            "🐝 Agent {} completed task ({} chars result)",
+            self.agent_id,
+            final_result.len()
+        );
         Ok(final_result)
     }
 
@@ -354,23 +391,36 @@ impl AgentRunner {
         let request = ChatRequest::new(self.model.clone(), messages, false);
         let response = self.provider.chat(request).await?;
 
-        let content = response.choices.into_iter()
+        let content = response
+            .choices
+            .into_iter()
             .next()
             .map(|c| c.message.content)
             .unwrap_or_default();
 
         let approved = content.to_uppercase().starts_with("APPROVED");
         let feedback = if approved {
-            content.strip_prefix("APPROVED:").unwrap_or(&content).trim().to_string()
+            content
+                .strip_prefix("APPROVED:")
+                .unwrap_or(&content)
+                .trim()
+                .to_string()
         } else {
-            content.strip_prefix("REJECTED:").unwrap_or(&content).trim().to_string()
+            content
+                .strip_prefix("REJECTED:")
+                .unwrap_or(&content)
+                .trim()
+                .to_string()
         };
 
         {
             let mut agent = agent_ref.write().await;
             agent.status = AgentStatus::Idle;
-            agent.last_activity = Some(format!("Reviewed {}: {}", target_agent,
-                if approved { "approved" } else { "rejected" }));
+            agent.last_activity = Some(format!(
+                "Reviewed {}: {}",
+                target_agent,
+                if approved { "approved" } else { "rejected" }
+            ));
         }
 
         // Send review completed event
@@ -381,8 +431,12 @@ impl AgentRunner {
             feedback: feedback.clone(),
         });
 
-        info!("🐝 Agent {} review of {}: {}", self.agent_id, target_agent,
-            if approved { "APPROVED" } else { "REJECTED" });
+        info!(
+            "🐝 Agent {} review of {}: {}",
+            self.agent_id,
+            target_agent,
+            if approved { "APPROVED" } else { "REJECTED" }
+        );
 
         Ok((approved, feedback))
     }
@@ -390,20 +444,28 @@ impl AgentRunner {
 
 /// Build a provider for a swarm agent from global config.
 pub fn build_agent_provider(config: &Config) -> Result<Provider> {
-    let (provider_name, provider_config) = config.find_provider_for_model(&config.default_model)
-        .unwrap_or_else(|| config.providers.iter().next()
-            .map(|(name, cfg)| (name.clone(), cfg.clone()))
-            .unwrap_or_else(|| (
-                "local".to_string(),
-                crate::config::ProviderConfig {
-                    base_url: "http://127.0.0.1:8080/v1".to_string(),
-                    api_key: "local".to_string(),
-                    models: vec![],
-                    kind: crate::config::ProviderKind::OpenAiCompatible,
-                    headers: std::collections::HashMap::new(),
-                    env_file: None,
-                }
-            )));
+    let (provider_name, provider_config) = config
+        .find_provider_for_model(&config.default_model)
+        .unwrap_or_else(|| {
+            config
+                .providers
+                .iter()
+                .next()
+                .map(|(name, cfg)| (name.clone(), cfg.clone()))
+                .unwrap_or_else(|| {
+                    (
+                        "local".to_string(),
+                        crate::config::ProviderConfig {
+                            base_url: "http://127.0.0.1:8080/v1".to_string(),
+                            api_key: "local".to_string(),
+                            models: vec![],
+                            kind: crate::config::ProviderKind::OpenAiCompatible,
+                            headers: std::collections::HashMap::new(),
+                            env_file: None,
+                        },
+                    )
+                })
+        });
 
     Ok(Provider::new(
         provider_name,

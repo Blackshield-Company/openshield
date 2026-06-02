@@ -1,8 +1,8 @@
+use super::Tool;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
 use walkdir::WalkDir;
-use super::Tool;
 
 pub struct FsTool;
 
@@ -55,8 +55,8 @@ fn expand_path(path: &str) -> PathBuf {
 
 fn cmd_read(path_str: &str) -> Result<String> {
     let path = expand_path(path_str);
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
     Ok(content)
 }
 
@@ -69,8 +69,8 @@ fn cmd_cat(args: &str) -> Result<String> {
     let offset: usize = tokens.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     let limit: usize = tokens.get(2).and_then(|s| s.parse().ok()).unwrap_or(100);
 
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
 
     let lines: Vec<&str> = content.lines().collect();
     let start = offset.min(lines.len());
@@ -105,13 +105,13 @@ fn cmd_write(args: &str) -> Result<String> {
         return Ok("Usage: fs write <path> <content>".to_string());
     }
     let path = expand_path(write_parts[0]);
-    
+
     // Auto-create parent directories if needed
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory for {}", path.display()))?;
     }
-    
+
     fs::write(&path, write_parts[1])
         .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(format!("Written successfully to {}", path.display()))
@@ -119,8 +119,8 @@ fn cmd_write(args: &str) -> Result<String> {
 
 fn cmd_list(path_str: &str) -> Result<String> {
     let path = expand_path(path_str);
-    let entries = fs::read_dir(&path)
-        .with_context(|| format!("Failed to list {}", path.display()))?;
+    let entries =
+        fs::read_dir(&path).with_context(|| format!("Failed to list {}", path.display()))?;
 
     let mut dirs = Vec::new();
     let mut files = Vec::new();
@@ -134,7 +134,8 @@ fn cmd_list(path_str: &str) -> Result<String> {
         } else {
             "DIR".to_string()
         };
-        let modified = meta.modified()
+        let modified = meta
+            .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| format_time(d.as_secs()))
@@ -188,24 +189,36 @@ fn cmd_tree(args: &str) -> Result<String> {
             result.push_str(&format!("{}{}{}/\n", indent, prefix, name));
             dir_count += 1;
         } else {
-            let size = entry.metadata().map(|m| format_size(m.len())).unwrap_or_default();
+            let size = entry
+                .metadata()
+                .map(|m| format_size(m.len()))
+                .unwrap_or_default();
             result.push_str(&format!("{}{}{}  {}\n", indent, prefix, name, size));
             file_count += 1;
         }
     }
 
-    result.push_str(&format!("\n{} dirs, {} files (depth ≤ {})\n", dir_count, file_count, max_depth));
+    result.push_str(&format!(
+        "\n{} dirs, {} files (depth ≤ {})\n",
+        dir_count, file_count, max_depth
+    ));
     Ok(result)
 }
 
 fn cmd_stat(path_str: &str) -> Result<String> {
     let path = expand_path(path_str);
-    let meta = fs::metadata(&path)
-        .with_context(|| format!("Failed to stat {}", path.display()))?;
+    let meta = fs::metadata(&path).with_context(|| format!("Failed to stat {}", path.display()))?;
 
     let mut result = format!("Path: {}\n", path.display());
-    result.push_str(&format!("Type: {}\n", if meta.is_dir() { "directory" } else { "file" }));
-    result.push_str(&format!("Size: {} ({} bytes)\n", format_size(meta.len()), meta.len()));
+    result.push_str(&format!(
+        "Type: {}\n",
+        if meta.is_dir() { "directory" } else { "file" }
+    ));
+    result.push_str(&format!(
+        "Size: {} ({} bytes)\n",
+        format_size(meta.len()),
+        meta.len()
+    ));
 
     if let Ok(modified) = meta.modified() {
         if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
@@ -291,7 +304,12 @@ fn cmd_find(args: &str) -> Result<String> {
     }
 
     results.sort();
-    let mut result = format!("Find '{}' under {}\nFound {} matches:\n", name, path.display(), results.len());
+    let mut result = format!(
+        "Find '{}' under {}\nFound {} matches:\n",
+        name,
+        path.display(),
+        results.len()
+    );
     for r in &results {
         result.push_str(&format!("  {}\n", r));
     }
@@ -387,7 +405,9 @@ mod tests {
         let path = format!("{}/test_write.txt", dir);
 
         let tool = FsTool;
-        let result = tool.execute(&format!("write {} Hello World", path)).unwrap();
+        let result = tool
+            .execute(&format!("write {} Hello World", path))
+            .unwrap();
 
         assert!(result.contains("Written successfully"));
         let content = fs::read_to_string(&path).unwrap();

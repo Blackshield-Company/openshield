@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
 use crate::config::{Config, ModelConfig};
 use crate::memory::{MemoryStore, Session, ToolCall};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 
 /// Weights for the scoring system. These can be tuned based on operational priorities.
@@ -159,10 +159,7 @@ fn compute_success_rate(
 
 /// Compute cost efficiency score (lower cost = higher score).
 /// Returns a normalized score between 0.0 and 1.0.
-fn compute_cost_efficiency(
-    model: &ModelConfig,
-    all_models: &[(&ModelConfig, &str)],
-) -> f64 {
+fn compute_cost_efficiency(model: &ModelConfig, all_models: &[(&ModelConfig, &str)]) -> f64 {
     let total_cost = model.cost_per_1k_input + model.cost_per_1k_output;
 
     if all_models.is_empty() {
@@ -202,11 +199,7 @@ fn compute_capability_match(model: &ModelConfig, task_type: &str) -> f64 {
         let partial = model.capabilities.iter().any(|c| {
             c.to_lowercase().contains(&task_lower) || task_lower.contains(&c.to_lowercase())
         });
-        if partial {
-            0.5
-        } else {
-            0.0
-        }
+        if partial { 0.5 } else { 0.0 }
     }
 }
 
@@ -233,10 +226,7 @@ fn build_tool_calls_map(
 /// 3. Scores all available models
 /// 4. Enforces cost limits and context requirements
 /// 5. Returns a `RoutingDecision` with detailed reasoning
-pub async fn route_task(
-    config: &Config,
-    task_description: &str,
-) -> Result<RoutingDecision> {
+pub async fn route_task(config: &Config, task_description: &str) -> Result<RoutingDecision> {
     let task_type = classify_task(task_description);
 
     let memory = MemoryStore::new(&config.memory_db_path)
@@ -279,14 +269,8 @@ pub fn find_best_model_for_task(config: &Config, task_type: &str) -> String {
 
     let health = ProviderHealth::new();
 
-    let result = find_best_model_with_data(
-        config,
-        task_type,
-        "",
-        &sessions,
-        &tool_calls_map,
-        &health,
-    );
+    let result =
+        find_best_model_with_data(config, task_type, "", &sessions, &tool_calls_map, &health);
 
     match result {
         Ok(decision) => decision.model,
@@ -328,7 +312,8 @@ fn find_best_model_with_data(
     // Score each model
     let mut scored_models: Vec<ScoreBreakdown> = Vec::new();
     for (model, provider_name) in &all_models {
-        let success_rate = compute_success_rate(sessions, tool_calls_map, &model.name, Some(task_type));
+        let success_rate =
+            compute_success_rate(sessions, tool_calls_map, &model.name, Some(task_type));
         let capability_match = compute_capability_match(model, task_type);
         let cost_efficiency = compute_cost_efficiency(model, &all_models);
         let context_ok = model_can_handle_context(model, task_description);
@@ -380,8 +365,14 @@ fn find_best_model_with_data(
     let mut reasons = Vec::new();
     reasons.push(format!("score={:.3}", best.total_score));
     reasons.push(format!("success_rate={:.1}%", best.success_rate * 100.0));
-    reasons.push(format!("capability_match={:.1}%", best.capability_match * 100.0));
-    reasons.push(format!("cost_efficiency={:.1}%", best.cost_efficiency * 100.0));
+    reasons.push(format!(
+        "capability_match={:.1}%",
+        best.capability_match * 100.0
+    ));
+    reasons.push(format!(
+        "cost_efficiency={:.1}%",
+        best.cost_efficiency * 100.0
+    ));
 
     if !best.within_budget {
         reasons.push("WARNING: exceeds cost limit".to_string());
@@ -421,15 +412,15 @@ pub struct RouterStats {
 
 /// Get router performance statistics.
 pub async fn get_router_stats(config: &Config) -> Result<RouterStats> {
-    let memory = MemoryStore::new(&config.memory_db_path)
-        .context("Failed to open memory store")?;
+    let memory = MemoryStore::new(&config.memory_db_path).context("Failed to open memory store")?;
     let recent_sessions = memory
         .get_recent_sessions(100)
         .context("Failed to load recent sessions")?;
 
     let tool_calls_map = build_tool_calls_map(&memory, &recent_sessions)?;
 
-    let mut model_usage: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut model_usage: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let mut total_success = 0usize;
     let mut total_calls = 0usize;
 
@@ -462,14 +453,20 @@ pub async fn get_router_stats(config: &Config) -> Result<RouterStats> {
 
 /// Display current routing decisions and model performance analytics.
 pub async fn show_decisions(config: &Config) -> Result<()> {
-    let memory = MemoryStore::new(&config.memory_db_path)
-        .context("Failed to open memory store")?;
+    let memory = MemoryStore::new(&config.memory_db_path).context("Failed to open memory store")?;
     let recent_sessions = memory
         .get_recent_sessions(50)
         .context("Failed to load recent sessions")?;
 
     println!("🦈 Routing Decisions");
-    println!("Auto-route: {}", if config.auto_route { "enabled" } else { "disabled" });
+    println!(
+        "Auto-route: {}",
+        if config.auto_route {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     println!("Default model: {}", config.default_model);
     println!("Cost limit: ${:.2}", config.cost_limit_usd);
     println!();
@@ -482,38 +479,35 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
         println!();
         show_capability_routing(config);
     } else {
-        println!("Recent session analysis (last {} sessions):", recent_sessions.len());
+        println!(
+            "Recent session analysis (last {} sessions):",
+            recent_sessions.len()
+        );
         println!();
 
         let mut model_success: HashMap<String, (usize, usize)> = HashMap::new();
         let mut task_model: HashMap<String, HashMap<String, (usize, usize)>> = HashMap::new();
 
         for session in &recent_sessions {
-            let tool_calls = tool_calls_map
-                .get(&session.id)
-                .cloned()
-                .unwrap_or_default();
+            let tool_calls = tool_calls_map.get(&session.id).cloned().unwrap_or_default();
             let success_count = tool_calls.iter().filter(|tc| tc.success).count();
             let total_count = tool_calls.len();
 
-            let entry = model_success
-                .entry(session.model.clone())
-                .or_insert((0, 0));
+            let entry = model_success.entry(session.model.clone()).or_insert((0, 0));
             entry.0 += success_count;
             entry.1 += total_count;
 
-            let task_entry = task_model
-                .entry(session.task_type.clone())
-                .or_default();
-            let model_entry = task_entry
-                .entry(session.model.clone())
-                .or_insert((0, 0));
+            let task_entry = task_model.entry(session.task_type.clone()).or_default();
+            let model_entry = task_entry.entry(session.model.clone()).or_insert((0, 0));
             model_entry.0 += success_count;
             model_entry.1 += total_count;
         }
 
         println!("Model Performance:");
-        println!("{:<20} | {:>8} | {:>8} | {:>6}", "Model", "Success", "Total", "Rate");
+        println!(
+            "{:<20} | {:>8} | {:>8} | {:>6}",
+            "Model", "Success", "Total", "Rate"
+        );
         println!("{}", "-".repeat(50));
         for (model, (success, total)) in &model_success {
             let rate = if *total > 0 {
@@ -521,7 +515,10 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
             } else {
                 0.0
             };
-            println!("{:<20} | {:>8} | {:>8} | {:>5.1}%", model, success, total, rate);
+            println!(
+                "{:<20} | {:>8} | {:>8} | {:>5.1}%",
+                model, success, total, rate
+            );
         }
         println!();
 
@@ -600,7 +597,10 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
 
 fn show_capability_routing(config: &Config) {
     println!("Capability-Based Routing Rules:");
-    println!("{:<15} | {:<20} | {}", "Task Type", "Preferred Model", "Logic");
+    println!(
+        "{:<15} | {:<20} | {}",
+        "Task Type", "Preferred Model", "Logic"
+    );
     println!("{}", "-".repeat(70));
 
     let rules = vec![
@@ -654,56 +654,63 @@ mod tests {
     fn create_test_config() -> Config {
         let mut providers = HashMap::new();
 
-        providers.insert("kimi".to_string(), ProviderConfig {
-            base_url: "https://api.kimi.com/coding/v1".to_string(),
-            api_key: "test-key".to_string(),
-            models: vec![
-                ModelConfig {
+        providers.insert(
+            "kimi".to_string(),
+            ProviderConfig {
+                base_url: "https://api.kimi.com/coding/v1".to_string(),
+                api_key: "test-key".to_string(),
+                models: vec![ModelConfig {
                     name: "kimi-k2.6".to_string(),
                     context_length: 128000,
                     cost_per_1k_input: 0.01,
                     cost_per_1k_output: 0.02,
-                    capabilities: vec!["code".to_string(), "chat".to_string(), "analysis".to_string()],
-                },
-            ],
-            kind: crate::config::ProviderKind::OpenAiCompatible,
-            headers: std::collections::HashMap::new(),
-            env_file: None,
-        });
+                    capabilities: vec![
+                        "code".to_string(),
+                        "chat".to_string(),
+                        "analysis".to_string(),
+                    ],
+                }],
+                kind: crate::config::ProviderKind::OpenAiCompatible,
+                headers: std::collections::HashMap::new(),
+                env_file: None,
+            },
+        );
 
-        providers.insert("opencode".to_string(), ProviderConfig {
-            base_url: "https://api.opencode.ai/v1".to_string(),
-            api_key: "test-key".to_string(),
-            models: vec![
-                ModelConfig {
+        providers.insert(
+            "opencode".to_string(),
+            ProviderConfig {
+                base_url: "https://api.opencode.ai/v1".to_string(),
+                api_key: "test-key".to_string(),
+                models: vec![ModelConfig {
                     name: "deepseek-v4-flash-free".to_string(),
                     context_length: 128000,
                     cost_per_1k_input: 0.0,
                     cost_per_1k_output: 0.0,
                     capabilities: vec!["code".to_string(), "chat".to_string()],
-                },
-            ],
-            kind: crate::config::ProviderKind::OpenAiCompatible,
-            headers: std::collections::HashMap::new(),
-            env_file: None,
-        });
+                }],
+                kind: crate::config::ProviderKind::OpenAiCompatible,
+                headers: std::collections::HashMap::new(),
+                env_file: None,
+            },
+        );
 
-        providers.insert("budget".to_string(), ProviderConfig {
-            base_url: "https://api.budget.ai/v1".to_string(),
-            api_key: "test-key".to_string(),
-            models: vec![
-                ModelConfig {
+        providers.insert(
+            "budget".to_string(),
+            ProviderConfig {
+                base_url: "https://api.budget.ai/v1".to_string(),
+                api_key: "test-key".to_string(),
+                models: vec![ModelConfig {
                     name: "budget-model".to_string(),
                     context_length: 32000,
                     cost_per_1k_input: 0.001,
                     cost_per_1k_output: 0.002,
                     capabilities: vec!["chat".to_string()],
-                },
-            ],
-            kind: crate::config::ProviderKind::OpenAiCompatible,
-            headers: std::collections::HashMap::new(),
-            env_file: None,
-        });
+                }],
+                kind: crate::config::ProviderKind::OpenAiCompatible,
+                headers: std::collections::HashMap::new(),
+                env_file: None,
+            },
+        );
 
         Config {
             version: crate::VERSION.to_string(),
@@ -726,22 +733,23 @@ mod tests {
     fn create_test_config_with_small_context() -> Config {
         let mut providers = HashMap::new();
 
-        providers.insert("tiny".to_string(), ProviderConfig {
-            base_url: "https://api.tiny.ai/v1".to_string(),
-            api_key: "test-key".to_string(),
-            models: vec![
-                ModelConfig {
+        providers.insert(
+            "tiny".to_string(),
+            ProviderConfig {
+                base_url: "https://api.tiny.ai/v1".to_string(),
+                api_key: "test-key".to_string(),
+                models: vec![ModelConfig {
                     name: "tiny-model".to_string(),
                     context_length: 100,
                     cost_per_1k_input: 0.0,
                     cost_per_1k_output: 0.0,
                     capabilities: vec!["code".to_string()],
-                },
-            ],
-            kind: crate::config::ProviderKind::OpenAiCompatible,
-            headers: std::collections::HashMap::new(),
-            env_file: None,
-        });
+                }],
+                kind: crate::config::ProviderKind::OpenAiCompatible,
+                headers: std::collections::HashMap::new(),
+                env_file: None,
+            },
+        );
 
         Config {
             version: crate::VERSION.to_string(),
@@ -784,7 +792,10 @@ mod tests {
     fn test_find_provider_for_model() {
         let config = create_test_config();
         assert_eq!(find_provider_for_model(&config, "kimi-k2.6"), "kimi");
-        assert_eq!(find_provider_for_model(&config, "deepseek-v4-flash-free"), "opencode");
+        assert_eq!(
+            find_provider_for_model(&config, "deepseek-v4-flash-free"),
+            "opencode"
+        );
         assert_eq!(find_provider_for_model(&config, "nonexistent"), "local");
     }
 
@@ -878,7 +889,8 @@ mod tests {
             cost_per_1k_output: 0.2,
             capabilities: vec![],
         };
-        let all_models: Vec<(&ModelConfig, &str)> = vec![(&model_free, "p1"), (&model_expensive, "p2")];
+        let all_models: Vec<(&ModelConfig, &str)> =
+            vec![(&model_free, "p1"), (&model_expensive, "p2")];
 
         let free_score = compute_cost_efficiency(&model_free, &all_models);
         let expensive_score = compute_cost_efficiency(&model_expensive, &all_models);
@@ -918,15 +930,13 @@ mod tests {
 
     #[test]
     fn test_compute_success_rate_full_trust_router() {
-        let sessions = vec![
-            Session {
-                id: "s1".to_string(),
-                started_at: chrono::Utc::now(),
-                model: "model-a".to_string(),
-                task_type: "code".to_string(),
-                project_path: None,
-            },
-        ];
+        let sessions = vec![Session {
+            id: "s1".to_string(),
+            started_at: chrono::Utc::now(),
+            model: "model-a".to_string(),
+            task_type: "code".to_string(),
+            project_path: None,
+        }];
         let mut tool_calls: HashMap<String, Vec<ToolCall>> = HashMap::new();
         // Need 5+ samples for full trust
         let mut calls = Vec::new();
@@ -942,12 +952,9 @@ mod tests {
             });
         }
         tool_calls.insert("s1".to_string(), calls);
-        let rate = compute_success_rate(
-            &sessions, &tool_calls, "model-a", None);
+        let rate = compute_success_rate(&sessions, &tool_calls, "model-a", None);
         assert!((rate - 1.0).abs() < 0.001);
     }
-
-
 
     #[test]
     fn test_provider_health() {
@@ -992,15 +999,9 @@ mod tests {
         let mut health = ProviderHealth::new();
         health.mark_unhealthy("opencode");
 
-        let decision = find_best_model_with_data(
-            &config,
-            "code",
-            "",
-            &sessions,
-            &tool_calls,
-            &health,
-        )
-        .unwrap();
+        let decision =
+            find_best_model_with_data(&config, "code", "", &sessions, &tool_calls, &health)
+                .unwrap();
 
         // opencode is unhealthy, so should fall back to another provider
         assert_ne!(decision.provider, "opencode");
@@ -1014,15 +1015,9 @@ mod tests {
         let health = ProviderHealth::new();
 
         let long_desc = "word ".repeat(200);
-        let decision = find_best_model_with_data(
-            &config,
-            "code",
-            &long_desc,
-            &sessions,
-            &tool_calls,
-            &health,
-        )
-        .unwrap();
+        let decision =
+            find_best_model_with_data(&config, "code", &long_desc, &sessions, &tool_calls, &health)
+                .unwrap();
 
         // tiny-model has only 100 context length, so it should be flagged
         assert_eq!(decision.model, "tiny-model"); // Only model available
@@ -1032,10 +1027,12 @@ mod tests {
     #[tokio::test]
     async fn test_route_task_chat() {
         let mut config = create_test_config();
-        config.memory_db_path = std::path::PathBuf::from(format!("/tmp/openshark_router_test_chat_{}.db", std::process::id()));
+        config.memory_db_path = std::path::PathBuf::from(format!(
+            "/tmp/openshark_router_test_chat_{}.db",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&config.memory_db_path);
-        let decision = route_task(
-            &config, "Hello, how is Rust?").await.unwrap();
+        let decision = route_task(&config, "Hello, how is Rust?").await.unwrap();
         assert_eq!(decision.task_type, "chat");
         assert!(!decision.model.is_empty());
     }
@@ -1043,9 +1040,14 @@ mod tests {
     #[tokio::test]
     async fn test_route_task_analysis() {
         let mut config = create_test_config();
-        config.memory_db_path = std::path::PathBuf::from(format!("/tmp/openshark_router_test_analysis_{}.db", std::process::id()));
+        config.memory_db_path = std::path::PathBuf::from(format!(
+            "/tmp/openshark_router_test_analysis_{}.db",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&config.memory_db_path);
-        let decision = route_task(&config, "Analyze the system architecture").await.unwrap();
+        let decision = route_task(&config, "Analyze the system architecture")
+            .await
+            .unwrap();
         assert_eq!(decision.task_type, "analysis");
         assert!(!decision.model.is_empty());
     }
@@ -1104,14 +1106,8 @@ mod tests {
         let tool_calls: HashMap<String, Vec<ToolCall>> = HashMap::new();
         let health = ProviderHealth::new();
 
-        let result = find_best_model_with_data(
-            &config,
-            "code",
-            "",
-            &sessions,
-            &tool_calls,
-            &health,
-        );
+        let result =
+            find_best_model_with_data(&config, "code", "", &sessions, &tool_calls, &health);
         assert!(result.is_err());
     }
 
@@ -1123,15 +1119,9 @@ mod tests {
         let tool_calls: HashMap<String, Vec<ToolCall>> = HashMap::new();
         let health = ProviderHealth::new();
 
-        let decision = find_best_model_with_data(
-            &config,
-            "code",
-            "",
-            &sessions,
-            &tool_calls,
-            &health,
-        )
-        .unwrap();
+        let decision =
+            find_best_model_with_data(&config, "code", "", &sessions, &tool_calls, &health)
+                .unwrap();
 
         assert_eq!(decision.model, "deepseek-v4-flash-free");
     }
@@ -1222,9 +1212,14 @@ mod tests {
     #[tokio::test]
     async fn test_route_task_code() {
         let mut config = create_test_config();
-        config.memory_db_path = std::path::PathBuf::from(format!("/tmp/openshark_router_test_code_{}.db", std::process::id()));
+        config.memory_db_path = std::path::PathBuf::from(format!(
+            "/tmp/openshark_router_test_code_{}.db",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&config.memory_db_path);
-        let decision = route_task(&config, "Refactor the auth module").await.unwrap();
+        let decision = route_task(&config, "Refactor the auth module")
+            .await
+            .unwrap();
         assert_eq!(decision.task_type, "code");
         assert!(!decision.model.is_empty());
     }

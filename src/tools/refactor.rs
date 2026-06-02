@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::fs;
 use super::Tool;
 use crate::lsp::LspClient;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::fs;
 
 pub struct RefactorTool;
 
@@ -82,7 +82,11 @@ impl Tool for RefactorTool {
             "extract_function" => self.extract_function(&request),
             "rename_symbol" => self.rename_symbol(&request),
             "inline_variable" => self.inline_variable(&request),
-            _ => Ok(format!("Unknown refactor operation: {}\n{}", operation, self.usage())),
+            _ => Ok(format!(
+                "Unknown refactor operation: {}\n{}",
+                operation,
+                self.usage()
+            )),
         }
     }
 }
@@ -96,9 +100,7 @@ impl RefactorTool {
             .to_string()
     }
 
-    fn extract_function(&self,
-        request: &RefactorRequest,
-    ) -> Result<String> {
+    fn extract_function(&self, request: &RefactorRequest) -> Result<String> {
         let (lsp_cmd, lsp_args, lang_id) = detect_lsp_server(&request.file_path);
 
         let client = LspClient::start(lsp_cmd, lsp_args, ".")?;
@@ -126,9 +128,7 @@ impl RefactorTool {
 
         let result = client.send_request_sync("textDocument/codeAction", params)?;
 
-        let changes = parse_workspace_edit(&result,
-            &request.file_path,
-        )?;
+        let changes = parse_workspace_edit(&result, &request.file_path)?;
 
         let refactor_result = RefactorResult {
             success: !changes.is_empty(),
@@ -144,10 +144,10 @@ impl RefactorTool {
         Ok(serde_json::to_string_pretty(&refactor_result)?)
     }
 
-    fn rename_symbol(&self,
-        request: &RefactorRequest,
-    ) -> Result<String> {
-        let new_name = request.new_name.as_ref()
+    fn rename_symbol(&self, request: &RefactorRequest) -> Result<String> {
+        let new_name = request
+            .new_name
+            .as_ref()
             .context("rename_symbol requires a new_name argument")?;
 
         let (lsp_cmd, lsp_args, lang_id) = detect_lsp_server(&request.file_path);
@@ -171,9 +171,7 @@ impl RefactorTool {
 
         let result = client.send_request_sync("textDocument/rename", params)?;
 
-        let changes = parse_workspace_edit(&result,
-            &request.file_path,
-        )?;
+        let changes = parse_workspace_edit(&result, &request.file_path)?;
 
         let refactor_result = RefactorResult {
             success: !changes.is_empty(),
@@ -185,9 +183,7 @@ impl RefactorTool {
         Ok(serde_json::to_string_pretty(&refactor_result)?)
     }
 
-    fn inline_variable(&self,
-        request: &RefactorRequest,
-    ) -> Result<String> {
+    fn inline_variable(&self, request: &RefactorRequest) -> Result<String> {
         let (lsp_cmd, lsp_args, lang_id) = detect_lsp_server(&request.file_path);
 
         let client = LspClient::start(lsp_cmd, lsp_args, ".")?;
@@ -215,10 +211,7 @@ impl RefactorTool {
 
         let result = client.send_request_sync("textDocument/codeAction", params)?;
 
-        let changes = parse_workspace_edit(
-            &result,
-            &request.file_path,
-        )?;
+        let changes = parse_workspace_edit(&result, &request.file_path)?;
 
         let refactor_result = RefactorResult {
             success: !changes.is_empty(),
@@ -244,17 +237,15 @@ fn detect_lsp_server(file_path: &str) -> (&'static str, &'static [&'static str],
         ("typescript-language-server", &["--stdio"], "typescript")
     } else if file_path.ends_with(".go") {
         ("gopls", &[], "go")
-    } else if file_path.ends_with(".c") || file_path.ends_with(".cpp") || file_path.ends_with(".h") {
+    } else if file_path.ends_with(".c") || file_path.ends_with(".cpp") || file_path.ends_with(".h")
+    {
         ("clangd", &[], "cpp")
     } else {
         ("rust-analyzer", &[], "rust")
     }
 }
 
-fn parse_workspace_edit(
-    result: &Value,
-    default_file: &str,
-) -> Result<Vec<FileChange>> {
+fn parse_workspace_edit(result: &Value, default_file: &str) -> Result<Vec<FileChange>> {
     let mut changes = Vec::new();
 
     if let Some(document_changes) = result.get("documentChanges").and_then(|v| v.as_array()) {
@@ -297,10 +288,7 @@ fn parse_workspace_edit(
         }
     } else if let Some(changes_map) = result.get("changes").and_then(|v| v.as_object()) {
         for (uri, edits) in changes_map {
-            let file_path = uri
-                .strip_prefix("file://")
-                .unwrap_or(uri)
-                .to_string();
+            let file_path = uri.strip_prefix("file://").unwrap_or(uri).to_string();
 
             let text_edits: Vec<TextEdit> = edits
                 .as_array()
@@ -465,20 +453,16 @@ mod tests {
         let result = RefactorResult {
             success: true,
             operation: "rename_symbol".to_string(),
-            changes: vec![
-                FileChange {
-                    file_path: "/tmp/test.rs".to_string(),
-                    edits: vec![
-                        TextEdit {
-                            start_line: 0,
-                            start_character: 0,
-                            end_line: 0,
-                            end_character: 5,
-                            new_text: "new_name".to_string(),
-                        },
-                    ],
-                },
-            ],
+            changes: vec![FileChange {
+                file_path: "/tmp/test.rs".to_string(),
+                edits: vec![TextEdit {
+                    start_line: 0,
+                    start_character: 0,
+                    end_line: 0,
+                    end_character: 5,
+                    new_text: "new_name".to_string(),
+                }],
+            }],
             message: "Renamed successfully".to_string(),
         };
 
