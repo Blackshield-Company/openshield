@@ -1,7 +1,38 @@
+use super::Tool;
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::Path;
-use super::Tool;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+/// Global undo stack — stores (original_path, backup_path) for last edit
+static LAST_BACKUP: std::sync::OnceLock<Arc<Mutex<Option<(PathBuf, PathBuf)>>>> = std::sync::OnceLock::new();
+
+fn get_backup_store() -> Arc<Mutex<Option<(PathBuf, PathBuf)>>> {
+    LAST_BACKUP.get_or_init(|| Arc::new(Mutex::new(None))).clone()
+}
+
+/// Perform a backup before editing and store it for potential undo.
+fn backup_before_edit(path: &Path) -> Result<PathBuf> {
+    let backup_path = path.with_extension("openshark_backup");
+    fs::copy(path, &backup_path)
+        .with_context(|| format!("Failed to create backup of {}", path.display()))?;
+    *get_backup_store().lock().unwrap() = Some((path.to_path_buf(), backup_path.clone()));
+    Ok(backup_path)
+}
+
+/// Undo the last edit by restoring from backup.
+pub fn undo_last_edit() -> Result<String> {
+    let store = get_backup_store();
+    let mut guard = store.lock().unwrap();
+    if let Some((original, backup)) = guard.take() {
+        fs::copy(&backup, &original)
+            .with_context(|| format!("Failed to restore backup to {}", original.display()))?;
+        let _ = fs::remove_file(&backup);
+        Ok(format!("Undo successful: restored {}", original.display()))
+    } else {
+        Ok("Nothing to undo".to_string())
+    }
+}
 
 pub struct EditTool;
 
@@ -35,8 +66,8 @@ impl Tool for EditTool {
 
 impl EditTool {
     fn read_file(&self, path: &str) -> Result<String> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path))?;
+        let content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
 
         // Add line numbers for easier reference
         let numbered: Vec<String> = content
@@ -63,8 +94,12 @@ impl EditTool {
                 .with_context(|| format!("Failed to create directory for {}", path))?;
         }
 
-        fs::write(path, content)
-            .with_context(|| format!("Failed to write {}", path))?;
+        // Backup existing file before overwriting
+        if Path::new(path).exists() {
+            backup_before_edit(Path::new(path))?;
+        }
+
+        fs::write(path, content).with_context(|| format!("Failed to write {}", path))?;
 
         Ok(format!("Written {} bytes to {}", content.len(), path))
     }
@@ -91,8 +126,8 @@ impl EditTool {
         let old_str = path_parts[1];
         let new_str = parts[1];
 
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path))?;
+        let content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
 
         if !content.contains(old_str) {
             return Ok(format!(
@@ -101,9 +136,10 @@ impl EditTool {
             ));
         }
 
+        backup_before_edit(Path::new(path))?;
+
         let new_content = content.replacen(old_str, new_str, 1);
-        fs::write(path, new_content)
-            .with_context(|| format!("Failed to write {}", path))?;
+        fs::write(path, new_content).with_context(|| format!("Failed to write {}", path))?;
 
         Ok(format!("Replaced in {}", path))
     }
@@ -129,8 +165,8 @@ impl EditTool {
         let old_lines = path_parts[1];
         let new_lines = parts[1];
 
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path))?;
+        let content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
 
         if !content.contains(old_lines) {
             return Ok(format!(
@@ -139,9 +175,10 @@ impl EditTool {
             ));
         }
 
+        backup_before_edit(Path::new(path))?;
+
         let new_content = content.replacen(old_lines, new_lines, 1);
-        fs::write(path, new_content)
-            .with_context(|| format!("Failed to write {}", path))?;
+        fs::write(path, new_content).with_context(|| format!("Failed to write {}", path))?;
 
         Ok(format!("Patched {}", path))
     }
@@ -196,7 +233,9 @@ mod tests {
         let path = format!("{}/test_write.txt", dir);
 
         let tool = EditTool;
-        let result = tool.execute(&format!("write {} Hello World", path)).unwrap();
+        let result = tool
+            .execute(&format!("write {} Hello World", path))
+            .unwrap();
 
         assert!(result.contains("Written"));
         let content = fs::read_to_string(&path).unwrap();
@@ -225,7 +264,9 @@ mod tests {
         fs::write(&path, "Hello old world").unwrap();
 
         let tool = EditTool;
-        let result = tool.execute(&format!("replace {} old ||| new", path)).unwrap();
+        let result = tool
+            .execute(&format!("replace {} old ||| new", path))
+            .unwrap();
 
         assert!(result.contains("Replaced"));
         let content = fs::read_to_string(&path).unwrap();
@@ -240,7 +281,9 @@ mod tests {
         fs::write(&path, "Hello world").unwrap();
 
         let tool = EditTool;
-        let result = tool.execute(&format!("replace {} nonexistent ||| new", path)).unwrap();
+        let result = tool
+            .execute(&format!("replace {} nonexistent ||| new", path))
+            .unwrap();
 
         assert!(result.contains("not found"));
         cleanup(&dir);
@@ -253,7 +296,12 @@ mod tests {
         fs::write(&path, "line1\nline2\nline3").unwrap();
 
         let tool = EditTool;
-        let result = tool.execute(&format!("patch {} line2\nline3 ||| line2_new\nline3_new", path)).unwrap();
+        let result = tool
+            .execute(&format!(
+                "patch {} line2\nline3 ||| line2_new\nline3_new",
+                path
+            ))
+            .unwrap();
 
         assert!(result.contains("Patched"));
         let content = fs::read_to_string(&path).unwrap();
@@ -268,7 +316,9 @@ mod tests {
         fs::write(&path, "Hello world").unwrap();
 
         let tool = EditTool;
-        let result = tool.execute(&format!("patch {} nonexistent ||| new", path)).unwrap();
+        let result = tool
+            .execute(&format!("patch {} nonexistent ||| new", path))
+            .unwrap();
 
         assert!(result.contains("not found"));
         cleanup(&dir);
