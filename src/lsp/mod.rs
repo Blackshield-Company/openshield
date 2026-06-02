@@ -289,7 +289,7 @@ impl LspClient {
 
     pub fn shutdown(&mut self) -> Result<()> {
         let _ = self.send_request("shutdown", json!({}))?;
-        let _ = self.send_notification("exit", json!({}))?;
+        self.send_notification("exit", json!({}))?;
         let _ = self.server.wait();
         Ok(())
     }

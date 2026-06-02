@@ -145,6 +145,6 @@ pub fn list_exports() -> Result<Vec<(std::path::PathBuf, SessionExport)>> {
     }
 
     // Sort by export time, newest first
-    exports.sort_by(|a, b| b.1.exported_at.cmp(&a.1.exported_at));
+    exports.sort_by_key(|(_, e)| std::cmp::Reverse(e.exported_at));
     Ok(exports)
 }

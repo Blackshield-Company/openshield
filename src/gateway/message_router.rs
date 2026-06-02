@@ -131,7 +131,7 @@ impl MessageRouter {
             .map(|r| r.find_triggered(&content))
             .unwrap_or_default();
         let skills_prompt = if !triggered_skills.is_empty() {
-            let skill_refs: Vec<_> = triggered_skills.iter().map(|s| *s).collect();
+            let skill_refs: Vec<_> = triggered_skills.iter().copied().collect();
             format_skills_prompt(&skill_refs)
         } else {
             String::new()
@@ -1051,11 +1051,7 @@ Use `/help` for the full slash command list.
         let tool_line = &response[tool_start..];
         let tool_line = tool_line.lines().next()?;
         // Strip prefix (either "TOOL:" or "TOOL.")
-        let rest = if tool_line.starts_with("TOOL:") {
-            &tool_line[5..]
-        } else {
-            &tool_line[5..]
-        };
+        let rest = &tool_line[5..];
         let parts: Vec<&str> = rest.splitn(2, ' ').collect();
         if parts.is_empty() {
             return None;

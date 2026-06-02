@@ -5,18 +5,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
+    #[default]
     OpenAiCompatible,
     Anthropic,
     Gemini,
-}
-
-impl Default for ProviderKind {
-    fn default() -> Self {
-        ProviderKind::OpenAiCompatible
-    }
 }
 
 impl std::fmt::Display for ProviderKind {

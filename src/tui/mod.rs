@@ -931,7 +931,7 @@ impl App {
                         });
                     }
                 } else if content.starts_with("TOOL:") || content.starts_with("TOOL.") {
-                    let rest = if content.starts_with("TOOL:") { &content[5..] } else { &content[5..] };
+                    let rest = &content[5..];
                     let parts: Vec<&str> = rest.splitn(2, ' ').collect();
                     if !parts.is_empty() {
                         let tool_name = parts[0].trim().to_string();
@@ -2033,7 +2033,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input.starts_with("/model ") {
-        let model_name = input[7..].trim();
+        let model_name = input.strip_prefix("/model ").unwrap_or("").trim();
         if let Err(e) = app.switch_model(model_name) {
             app.add_system_message(format!("Error: {}", e));
         }
@@ -2041,7 +2041,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input.starts_with("/branch ") {
-        let name = input[8..].trim();
+        let name = input.strip_prefix("/branch ").unwrap_or("").trim();
         app.create_branch(name);
         return Ok(());
     }
@@ -2224,7 +2224,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     // ── Session Import ──────────────────────────────────────────────────────
     if input.starts_with("/import ") {
-        let path = input[8..].trim();
+        let path = input.strip_prefix("/import ").unwrap_or("").trim();
         match SessionExport::load_from_file(path) {
             Ok(export) => {
                 // Convert export messages to ChatMessages
@@ -2318,7 +2318,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         app.tokens_used += input.len() as u64 / 4;
 
         let parts: Vec<&str> = input.split_whitespace().collect();
-        let cmd = parts.get(1).map(|s| *s).unwrap_or("status");
+        let cmd = parts.get(1).copied().unwrap_or("status");
         let prompt = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
 
         match cmd {
@@ -2405,7 +2405,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     // ── Image Attachment Command ────────────────────────────────────────────
     if input.starts_with("/image ") {
-        let path_str = input[7..].trim();
+        let path_str = input.strip_prefix("/image ").unwrap_or("").trim();
         let path = std::path::Path::new(path_str);
         match crate::image_utils::encode_image_to_data_url(path) {
             Ok(data_url) => {
@@ -2773,7 +2773,7 @@ fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
 /// 2. tool_name:0>{"key": "value", ...}  (numeric-indexed)
 fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
     // Try bare JSON format first: tool_name {"key": "value"}
-    if let Some(space_pos) = rest.find(|c: char| c == '{' || c == ':') {
+    if let Some(space_pos) = rest.find(['{', ':']) {
         if rest.as_bytes().get(space_pos) == Some(&b'{') {
             let tool_name = rest[..space_pos].trim().to_string();
             if tool_name.is_empty() {
@@ -4950,7 +4950,7 @@ fn input_bar_height(app: &App, area_width: u16) -> u16 {
         app.input.len()
     };
     let explicit_lines = app.input.matches('\n').count() + 1;
-    let wrapped_lines = (text + available_width - 1) / available_width; // ceil division
+    let wrapped_lines = text.div_ceil(available_width); // ceil division
     let lines = explicit_lines.max(wrapped_lines);
     let lines = lines.max(1);
     // Cap at 8 lines so it doesn't eat the whole chat area
@@ -5272,8 +5272,6 @@ fn draw_comparison_overlay(f: &mut Frame, app: &App) {
     f.render_widget(paragraph, inner);
 }
 
-#[allow(dead_code)]
-#[allow(dead_code)]
 #[allow(dead_code)]
 fn draw_chat_header(_f: &mut Frame, _area: Rect) {
     // Removed — welcome message is now in chat history

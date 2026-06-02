@@ -416,7 +416,7 @@ impl Agent {
         let expected_keywords: Vec<&str> = expected_lower.split_whitespace().collect();
         let has_expected = expected_keywords.iter().any(|kw| result_lower.contains(kw));
 
-        Ok(!has_negation && (has_expected || result.len() > 0))
+        Ok(!has_negation && (has_expected || !result.is_empty()))
     }
 
     /// Create a recovery plan when a step fails.

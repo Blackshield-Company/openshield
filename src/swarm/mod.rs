@@ -245,7 +245,7 @@ impl SwarmEngine {
                 break;
             }
 
-            let role = RoleTemplate::get(role_name).unwrap_or_else(|| RoleTemplate::default_role());
+            let role = RoleTemplate::get(role_name).unwrap_or_else(RoleTemplate::default_role);
             let agent_id = format!("{}-{}", role.short_name(), i + 1);
             let model = global_config.default_model.clone();
 

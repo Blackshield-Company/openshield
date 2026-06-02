@@ -81,8 +81,8 @@ impl DoctorReport {
     }
 
     pub fn print(&self) {
-        println!("\n{}🦈 OpenShark Doctor{}", format!("{}{}", BOLD, CYAN), RESET);
-        println!("{}{}{}", CYAN, "═".repeat(60), RESET);
+        println!("\n{BOLD}{CYAN}🦈 OpenShark Doctor{RESET}");
+        println!("{CYAN}{}{RESET}", "═".repeat(60));
 
         for check in &self.checks {
             let (icon, status_str, status_color) = match check.status {
@@ -91,25 +91,20 @@ impl DoctorReport {
                 CheckStatus::Critical => ("❌", "CRITICAL", RED),
             };
             println!(
-                "{} {}{:<20}{} [{}] {}",
+                "{} {BOLD}{:<20}{RESET} [{status_color}{}{RESET}] {}",
                 icon,
-                BOLD,
                 check.component,
-                RESET,
-                format!("{}{}{}", status_color, status_str, RESET),
+                status_str,
                 check.message
             );
         }
 
-        println!("{}{}{}", CYAN, "─".repeat(60), RESET);
+        println!("{CYAN}{}{RESET}", "─".repeat(60));
         println!(
-            "Summary: {} {} | {} {} | {} {}",
-            format!("{}{}{}", GREEN, self.healthy_count(), RESET),
-            format!("{}{}{}", GREEN, "healthy", RESET),
-            format!("{}{}{}", YELLOW, self.warning_count(), RESET),
-            format!("{}{}{}", YELLOW, "warnings", RESET),
-            format!("{}{}{}", RED, self.critical_count(), RESET),
-            format!("{}{}{}", RED, "critical", RESET),
+            "Summary: {GREEN}{}{RESET} {GREEN}healthy{RESET} | {YELLOW}{}{RESET} {YELLOW}warnings{RESET} | {RED}{}{RESET} {RED}critical{RESET}",
+            self.healthy_count(),
+            self.warning_count(),
+            self.critical_count(),
         );
 
         if !self.fixes_applied.is_empty() {
@@ -120,11 +115,11 @@ impl DoctorReport {
         }
 
         if self.critical_count() > 0 {
-            println!("\n{}⚠️  Critical issues found. Run `openshark doctor --fix` to auto-repair.{}", format!("{}{}", BOLD, RED), RESET);
+            println!("\n{BOLD}{RED}⚠️  Critical issues found. Run `openshark doctor --fix` to auto-repair.{RESET}");
         } else if self.warning_count() > 0 {
-            println!("\n{}💡 Warnings found. Run `openshark doctor --fix` to auto-repair.{}", format!("{}", YELLOW), RESET);
+            println!("\n{YELLOW}💡 Warnings found. Run `openshark doctor --fix` to auto-repair.{RESET}");
         } else {
-            println!("\n{}🎉 All systems healthy!{}", format!("{}{}", BOLD, GREEN), RESET);
+            println!("\n{BOLD}{GREEN}🎉 All systems healthy!{RESET}");
         }
     }
 }
