@@ -166,11 +166,15 @@ pub struct SseTransport {
 
 impl SseTransport {
     pub fn new(url: String, headers: HashMap<String, String>) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            url,
-            headers,
-        }
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(5)
+            .pool_idle_timeout(std::time::Duration::from_secs(60))
+            .tcp_keepalive(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { client, url, headers }
     }
 }
 

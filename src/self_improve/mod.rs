@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::config::Config;
 use crate::memory::{MemoryStore, ModelTrendData, Session, SessionQualityMetrics};
 use anyhow::Result;

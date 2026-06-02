@@ -27,7 +27,7 @@ impl Tool for CodeExecutionTool {
 
         // Extract timeout
         let mut code = trimmed;
-        let mut timeout_secs = 30;
+        let mut _timeout_secs = 30;
         let mut _venv = None;
 
         if let Some(pos) = code.rfind("--timeout") {
@@ -35,7 +35,7 @@ impl Tool for CodeExecutionTool {
             let after = &code[pos + 9..];
             if let Some(secs) = after.trim().split_whitespace().next() {
                 if let Ok(s) = secs.parse::<u64>() {
-                    timeout_secs = s;
+                    _timeout_secs = s;
                 }
             }
             code = before.trim();

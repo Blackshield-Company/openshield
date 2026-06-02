@@ -102,6 +102,7 @@ impl ResponseCache {
     }
 
     /// Store a response in the cache with a TTL in seconds.
+    /// Persistence is done asynchronously to avoid blocking the caller.
     pub fn set(&self, key: &str, response: &str, ttl_secs: u64) -> Result<()> {
         let expires_at = current_timestamp_secs().saturating_add(ttl_secs);
         let entry = CachedResponse {
@@ -118,7 +119,30 @@ impl ResponseCache {
         if let Ok(mut stats) = self.stats.lock() {
             stats.sets += 1;
         }
-        self.persist()
+        // Persist asynchronously to avoid blocking the hot path
+        let cache_file = self.cache_file.clone();
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move {
+            let _ = Self::persist_sync(&inner, &cache_file);
+        });
+        Ok(())
+    }
+
+    /// Synchronous persist helper (called from async context).
+    fn persist_sync(
+        inner: &Arc<Mutex<HashMap<String, CachedResponse>>>,
+        cache_file: &std::path::Path,
+    ) -> Result<()> {
+        let map = inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Cache lock poisoned: {}", e))?;
+        let json =
+            serde_json::to_string_pretty(&*map).with_context(|| "Failed to serialize cache")?;
+        let cache_file = cache_file.to_path_buf();
+        drop(map);
+        fs::write(&cache_file, json)
+            .with_context(|| format!("Failed to write cache file: {:?}", cache_file))?;
+        Ok(())
     }
 
     /// Remove a single entry from the cache.
@@ -131,7 +155,13 @@ impl ResponseCache {
                 .map_err(|e| anyhow::anyhow!("Cache lock poisoned: {}", e))?;
             map.remove(key);
         }
-        self.persist()
+        // Async persist
+        let cache_file = self.cache_file.clone();
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move {
+            let _ = Self::persist_sync(&inner, &cache_file);
+        });
+        Ok(())
     }
 
     /// Clear all cached entries.
@@ -147,7 +177,13 @@ impl ResponseCache {
         if let Ok(mut stats) = self.stats.lock() {
             *stats = CacheStats::default();
         }
-        self.persist()
+        // Async persist
+        let cache_file = self.cache_file.clone();
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move {
+            let _ = Self::persist_sync(&inner, &cache_file);
+        });
+        Ok(())
     }
 
     /// Get cache statistics.
@@ -167,21 +203,6 @@ impl ResponseCache {
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Persist the current cache state to disk.
-    fn persist(&self) -> Result<()> {
-        let map = self
-            .inner
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Cache lock poisoned: {}", e))?;
-        let json =
-            serde_json::to_string_pretty(&*map).with_context(|| "Failed to serialize cache")?;
-        let cache_file = self.cache_file.clone();
-        drop(map);
-        fs::write(&cache_file, json)
-            .with_context(|| format!("Failed to write cache file: {:?}", cache_file))?;
-        Ok(())
     }
 }
 

@@ -2,6 +2,8 @@
 //!
 //! This module wires together memory, skills, routing, and self-improvement
 //! to create an agent that learns from every interaction and adapts its behavior.
+
+#![allow(dead_code)]
 //!
 //! ## Architecture
 //!

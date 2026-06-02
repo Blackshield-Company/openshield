@@ -18,9 +18,9 @@ use anyhow::Result;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
+#[allow(dead_code)]
 /// Tool definition for schema-based tools (e.g., MCP tools).
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ToolDef {
     pub name: String,
     pub description: String,
@@ -272,6 +272,7 @@ pub fn get_capability_tools() -> Vec<Arc<dyn Tool>> {
 }
 
 /// Get all tool names and descriptions for system prompts.
+#[allow(dead_code)]
 pub fn get_all_tool_descriptions() -> Vec<(String, String)> {
     get_tools()
         .iter()

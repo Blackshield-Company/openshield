@@ -1,5 +1,7 @@
 //! Agentic capabilities — Mixture of Agents, delegation, clarifying questions.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 
 use crate::tools::Tool;

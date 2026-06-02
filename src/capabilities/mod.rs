@@ -15,6 +15,8 @@
 //! - **agentic**: Mixture of Agents, delegation, clarifying questions
 //! - **execution**: Python code execution
 
+#![allow(dead_code)]
+
 pub mod agentic;
 pub mod communication;
 pub mod execution;
