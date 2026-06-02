@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-02
+
+### Added
+
+- **Command Palette** — Fuzzy-searchable command overlay triggered by `Ctrl+P` or typing `/` in input. 16 commands with keyboard navigation (↑/↓, Enter to execute, Esc to close, Backspace to filter).
+- **Session Bookmarks / Checkpoints** — Save and restore named session checkpoints. `Ctrl+Shift+B` toggles the bookmark manager. Ctrl+N to create, Enter to load, Esc to close. Persistent per-session JSON storage.
+- **Inline Image Display** — Rich metadata indicators for pasted/attached images: format (PNG/JPEG/GIF/WebP/BMP), dimensions, file size. ASCII art placeholder boxes rendered in chat area.
+- **Streaming Markdown Renderer** — Inline markdown parsing for assistant messages: **bold**, *italic*, `code`, [links](url), ~~strikethrough~~. Applied to all non-code-block content in real-time.
+- **Connection Pooling** — `reqwest` client with `pool_max_idle_per_host(10)`, TCP keepalive, 15s connect timeout, HTTP/2 support. Reduces connection overhead for repeated API calls.
+- **Async Cache Persistence** — Cache `set()` now spawns disk write via `tokio::spawn`, eliminating synchronous fs blocking on the hot path.
+- **Cache Key Optimization** — Eliminated double JSON serialization in `chat_stream` by reusing `build_chat_body()` output for cache keys.
+
+### Changed
+
+- **Compiler warnings** — 40 → 0. Systematic cleanup across all modules.
+- **Test count** — 337 → 363 tests (added image_display dimension detection, format indicator, ASCII placeholder, human_size tests).
+
+### Fixed
+
+- **Test compilation** — Added missing `keybindings` field to all test `Config` struct initializers (config, router, self_improve modules).
+
 ## [1.0.0] - 2026-06-01
 
 ### Added

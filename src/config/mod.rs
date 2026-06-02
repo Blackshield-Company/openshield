@@ -470,7 +470,7 @@ impl Default for Config {
                 headers: {
                     let mut h = HashMap::new();
                     h.insert("x-kimi-agent-name".to_string(), "OpenShark".to_string());
-                    h.insert("x-kimi-agent-version".to_string(), "1.0.0".to_string());
+                    h.insert("x-kimi-agent-version".to_string(), crate::VERSION.to_string());
                     h
                 },
                 env_file: Some("kimi.env".to_string()),
