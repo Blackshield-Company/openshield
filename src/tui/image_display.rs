@@ -202,3 +202,83 @@ fn detect_bmp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_human_size() {
+        assert_eq!(human_size(0), "0.0 B");
+        assert_eq!(human_size(512), "512.0 B");
+        assert_eq!(human_size(1024), "1.0 KB");
+        assert_eq!(human_size(1536), "1.5 KB");
+        assert_eq!(human_size(1024 * 1024), "1.0 MB");
+        assert_eq!(human_size(1024 * 1024 * 1024), "1.0 GB");
+    }
+
+    #[test]
+    fn test_image_info_format_indicator() {
+        let info = ImageInfo {
+            mime_type: "image/png".to_string(),
+            size_bytes: 1234,
+            size_human: "1.2 KB".to_string(),
+            width: 1920,
+            height: 1080,
+        };
+        let indicator = info.format_indicator();
+        assert!(indicator.contains("PNG"));
+        assert!(indicator.contains("1920x1080"));
+        assert!(indicator.contains("1.2 KB"));
+    }
+
+    #[test]
+    fn test_ascii_placeholder() {
+        let info = ImageInfo {
+            mime_type: "image/png".to_string(),
+            size_bytes: 0,
+            size_human: "0 B".to_string(),
+            width: 100,
+            height: 100,
+        };
+        let placeholder = info.ascii_placeholder();
+        assert!(placeholder.len() >= 4); // top border, lines, bottom border, dimensions
+        assert!(placeholder[0].starts_with('┌'));
+        assert!(placeholder[placeholder.len() - 2].starts_with('└'));
+        assert!(placeholder[placeholder.len() - 1].contains("100x100"));
+    }
+
+    #[test]
+    fn test_png_dimension_detection() {
+        // Minimal valid PNG header with 2x3 dimensions
+        let mut png = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
+            0x00, 0x00, 0x00, 0x0D, // IHDR length
+            0x49, 0x48, 0x44, 0x52, // IHDR
+        ];
+        png.extend_from_slice(&2u32.to_be_bytes()); // width = 2
+        png.extend_from_slice(&3u32.to_be_bytes()); // height = 3
+        let dims = detect_png_dimensions(&png);
+        assert_eq!(dims, Some((2, 3)));
+    }
+
+    #[test]
+    fn test_gif_dimension_detection() {
+        let gif = b"GIF89a\x02\x00\x03\x00"; // 2x3 GIF
+        let dims = detect_gif_dimensions(gif);
+        assert_eq!(dims, Some((2, 3)));
+    }
+
+    #[test]
+    fn test_bmp_dimension_detection() {
+        let mut bmp = vec![b'B', b'M'];
+        bmp.extend_from_slice(&54u32.to_le_bytes()); // file size
+        bmp.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        bmp.extend_from_slice(&54u32.to_le_bytes()); // data offset
+        bmp.extend_from_slice(&40u32.to_le_bytes()); // header size
+        bmp.extend_from_slice(&5u32.to_le_bytes()); // width = 5
+        bmp.extend_from_slice(&7u32.to_le_bytes()); // height = 7
+        let dims = detect_bmp_dimensions(&bmp);
+        assert_eq!(dims, Some((5, 7)));
+    }
+}

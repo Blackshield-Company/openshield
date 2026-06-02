@@ -727,6 +727,7 @@ mod tests {
             filesystem: crate::config::FilesystemConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
+            keybindings: crate::config::KeybindingsConfig::default(),
         }
     }
 
@@ -766,6 +767,7 @@ mod tests {
             filesystem: crate::config::FilesystemConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
+            keybindings: crate::config::KeybindingsConfig::default(),
         }
     }
 
