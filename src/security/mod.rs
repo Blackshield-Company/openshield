@@ -121,7 +121,7 @@ impl Default for SecurityConfig {
         tool_permissions.insert("test".to_string(), PermissionLevel::Allow);
 
         Self {
-            version: "1.0.0".to_string(),
+            version: crate::VERSION.to_string(),
             working_directory: None,
             allow_escape_working_dir: false,
             sudo: SudoConfig {
@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn test_security_config_default() {
         let config = SecurityConfig::default();
-        assert_eq!(config.version, "1.0.0");
+        assert_eq!(config.version, crate::VERSION);
         assert!(config.pii_redaction_enabled);
         assert!(config.prompt_injection_detection_enabled);
     }
