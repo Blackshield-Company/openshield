@@ -69,6 +69,7 @@ pub struct ToolCallFunction {
 }
 
 impl Message {
+    #[allow(dead_code)]
     /// Create a simple text message.
     pub fn text(role: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
@@ -204,13 +205,22 @@ impl Provider {
         kind: ProviderKind,
         headers: HashMap<String, String>,
     ) -> Self {
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(std::time::Duration::from_secs(60))
+            .tcp_keepalive(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .http2_prior_knowledge()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             name,
             base_url,
             api_key,
             kind,
             headers,
-            client: reqwest::Client::new(),
+            client,
             cache: ResponseCache::new().ok(),
         }
     }
@@ -223,13 +233,22 @@ impl Provider {
         kind: ProviderKind,
         headers: HashMap<String, String>,
     ) -> Self {
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(std::time::Duration::from_secs(60))
+            .tcp_keepalive(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .http2_prior_knowledge()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             name,
             base_url,
             api_key,
             kind,
             headers,
-            client: reqwest::Client::new(),
+            client,
             cache: None,
         }
     }
@@ -557,7 +576,8 @@ impl Provider {
 
     pub async fn chat_stream(&self, request: ChatRequest) -> Result<(Vec<String>, StreamMetrics)> {
         let start_time = Instant::now();
-        let messages_json = serde_json::to_string(&request.messages)
+        let body = self.build_chat_body(&request);
+        let messages_json = serde_json::to_string(&body.get("messages").unwrap_or(&json!([])))
             .with_context(|| "Failed to serialize messages for cache key")?;
         let cache_key = compute_cache_key(&request.model, &messages_json);
 
@@ -843,7 +863,7 @@ impl Provider {
                                     if let Some(fr) = finish_reason {
                                         if fr == "tool_calls" {
                                             // Flush all accumulated tool calls
-                                            for (idx, mut tc) in pending_tool_calls.drain() {
+                                            for (_idx, tc) in pending_tool_calls.drain() {
                                                 let _ = tx.send(StreamChunk::ToolCall {
                                                     id: tc.id,
                                                     name: tc.name,

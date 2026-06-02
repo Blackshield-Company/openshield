@@ -1,4 +1,6 @@
 //! Async tool executor for non-blocking tool calls.
+#![allow(dead_code)]
+
 use anyhow::Result;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
