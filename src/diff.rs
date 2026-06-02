@@ -51,14 +51,13 @@ pub fn generate_diff(old: &str, new: &str, path: &str) -> String {
                 }
             }
 
-            if let Some(new) = new_line {
-                if !old_lines.contains(new) {
+            if let Some(new) = new_line
+                && !old_lines.contains(new) {
                     result.push_str(&format!("+{}", new));
                     if !new.ends_with('\n') {
                         result.push('\n');
                     }
                 }
-            }
         } else if in_hunk {
             // Context line within hunk
             if let Some(line) = old_line {

@@ -143,6 +143,18 @@ enum Commands {
         #[arg(default_value = "")]
         name: String,
     },
+    /// Delegate a task to an external agent (claw, opencode, claude)
+    Delegate {
+        #[arg(default_value = "")]
+        agent: String,
+        #[arg(default_value = "")]
+        task: String,
+    },
+    /// Hermes bridge commands
+    Hermes {
+        #[arg(default_value = "status")]
+        cmd: String,
+    },
 }
 
 #[tokio::main]
@@ -1094,6 +1106,67 @@ async fn main() -> anyhow::Result<()> {
                 println!("  openshark plugins create <name>  - Create plugin scaffold");
                 println!("  openshark plugins enable <name>  - Enable a plugin");
                 println!("  openshark plugins disable <name> - Disable a plugin");
+            }
+        },
+        Some(Commands::Delegate { agent, task }) => {
+            if agent.is_empty() || task.is_empty() {
+                println!("🦈 Delegate — Route tasks to external agents");
+                println!();
+                println!("Usage: openshark delegate <agent> <task>");
+                println!("       openshark delegate claw 'refactor auth module'");
+                println!("       openshark delegate opencode 'fix bug #42'");
+                println!("       openshark delegate claude 'write tests for src/lib.rs'");
+                println!();
+                println!("Available agents:");
+                for a in integrations::registry::available() {
+                    println!("  • {}", a);
+                }
+                if integrations::registry::available().is_empty() {
+                    println!("  (none detected — install claw, opencode, or claude-code)");
+                }
+            } else {
+                match agent.parse::<integrations::registry::Agent>() {
+                    Ok(a) => {
+                        println!("🦈 Delegating to {}: {}", a, task);
+                        match integrations::registry::delegate(a, &task, 300) {
+                            Ok(result) => println!("{}", result),
+                            Err(e) => println!("❌ Delegation failed: {}", e),
+                        }
+                    }
+                    Err(e) => println!("❌ Unknown agent: {}", e),
+                }
+            }
+        }
+        Some(Commands::Hermes { cmd }) => match cmd.as_str() {
+            "status" => {
+                println!("🦈 Hermes Bridge");
+                println!("{}", "─".repeat(50));
+                let detected = integrations::hermes::detect();
+                println!("  Hermes detected: {}", if detected { "✅" } else { "❌" });
+                if detected {
+                    println!("  Run `openshark hermes sync` to pull memories.");
+                    println!("  Run `openshark hermes push` to push skills.");
+                } else {
+                    println!("  Install Hermes Agent to enable bridge.");
+                }
+            }
+            "sync" => {
+                match integrations::hermes::sync_pull("~/.hermes") {
+                    Ok(result) => println!("✅ {}", result),
+                    Err(e) => println!("❌ Sync failed: {}", e),
+                }
+            }
+            "push" => {
+                match integrations::hermes::sync_push("~/.hermes") {
+                    Ok(result) => println!("✅ {}", result),
+                    Err(e) => println!("❌ Push failed: {}", e),
+                }
+            }
+            _ => {
+                println!("🦈 Hermes Commands");
+                println!("  openshark hermes status - Show bridge status");
+                println!("  openshark hermes sync   - Pull memories from Hermes");
+                println!("  openshark hermes push   - Push skills to Hermes");
             }
         },
     }

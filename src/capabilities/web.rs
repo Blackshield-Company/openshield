@@ -119,11 +119,10 @@ fn parse_duckduckgo_results(query: &str, body: &str) -> Result<String> {
     let mut lines = vec![format!("Search results for '{}':", query)];
     for (i, title) in titles.iter().enumerate().take(max) {
         lines.push(format!("{}. {}\n   {}", i + 1, title.0, title.1));
-        if let Some(snippet) = snippets.get(i) {
-            if !snippet.is_empty() {
+        if let Some(snippet) = snippets.get(i)
+            && !snippet.is_empty() {
                 lines.push(format!("   {}", snippet));
             }
-        }
     }
 
     Ok(lines.join("\n"))
@@ -180,11 +179,10 @@ impl CdpSession {
             if let WsMsg::Text(text) = resp {
                 let v: serde_json::Value =
                     serde_json::from_str(&text).context("CDP parse failed")?;
-                if let Some(msg_id) = v.get("id").and_then(|i| i.as_u64()) {
-                    if msg_id == id {
+                if let Some(msg_id) = v.get("id").and_then(|i| i.as_u64())
+                    && msg_id == id {
                         return Ok(v);
                     }
-                }
             }
         }
     }

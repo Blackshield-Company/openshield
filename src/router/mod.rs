@@ -129,11 +129,10 @@ fn compute_success_rate(
         if session.model != model {
             continue;
         }
-        if let Some(tt) = task_type {
-            if session.task_type != tt {
+        if let Some(tt) = task_type
+            && session.task_type != tt {
                 continue;
             }
-        }
 
         if let Some(calls) = tool_calls.get(&session.id) {
             let success_count = calls.iter().filter(|tc| tc.success).count();

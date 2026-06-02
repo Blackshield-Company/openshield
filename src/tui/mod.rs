@@ -1203,15 +1203,14 @@ impl App {
             }
             StreamEvent::SetPendingSuggestion(suggestion) => {
                 // For edit tool suggestions, show diff preview first
-                if suggestion.tool_name == "edit" {
-                    if let Some(diff) = generate_edit_diff(&suggestion.args) {
+                if suggestion.tool_name == "edit"
+                    && let Some(diff) = generate_edit_diff(&suggestion.args) {
                         self.pending_diff = Some(diff);
                         self.pending_suggestion = Some(suggestion);
                         self.mode = AppMode::DiffPreview;
                         self.diff_scroll = 0;
                         return;
                     }
-                }
                 self.pending_suggestion = Some(suggestion);
                 self.mode = AppMode::ToolApproval;
                 self.tool_approval_shown_at = Some(Instant::now());
@@ -1225,12 +1224,11 @@ impl App {
                 // In-place progress updates: replace the previous progress
                 // message instead of accumulating new ones.
                 if msg.starts_with("🔧 Tool") {
-                    if let Some(idx) = self.last_progress_msg_idx {
-                        if idx < self.messages.len() {
+                    if let Some(idx) = self.last_progress_msg_idx
+                        && idx < self.messages.len() {
                             self.messages[idx].content = msg;
                             return;
                         }
-                    }
                     // First progress message — store its index
                     self.add_system_message(msg);
                     self.last_progress_msg_idx = Some(self.messages.len() - 1);
@@ -1351,13 +1349,11 @@ async fn run_app(
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
 
-        if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if handle_input(app, key).await? {
+        if crossterm::event::poll(timeout)?
+            && let Event::Key(key) = event::read()?
+                && handle_input(app, key).await? {
                     break;
                 }
-            }
-        }
 
         if last_tick.elapsed() >= TICK_RATE {
             *last_tick = Instant::now();
@@ -1438,25 +1434,23 @@ async fn run_app(
                     if let Some(prev) = app.swarm_agents.iter().find(|a| a.id == agent.id) {
                         // Status changed from working to completed
                         if matches!(prev.status, crate::swarm::AgentStatus::Working { .. })
-                            && matches!(agent.status, crate::swarm::AgentStatus::Completed { .. }) {
-                            if let crate::swarm::AgentStatus::Completed { ref result } = agent.status {
+                            && matches!(agent.status, crate::swarm::AgentStatus::Completed { .. })
+                            && let crate::swarm::AgentStatus::Completed { ref result } = agent.status {
                                 updates.push(format!(
                                     "🐝 **{}** completed:\n{}",
                                     agent.name,
                                     &result[..result.len().min(500)]
                                 ));
                             }
-                        }
                         // Agent hit an error
                         if matches!(agent.status, crate::swarm::AgentStatus::Error { .. })
-                            && !matches!(prev.status, crate::swarm::AgentStatus::Error { .. }) {
-                            if let crate::swarm::AgentStatus::Error { ref message } = agent.status {
+                            && !matches!(prev.status, crate::swarm::AgentStatus::Error { .. })
+                            && let crate::swarm::AgentStatus::Error { ref message } = agent.status {
                                 updates.push(format!(
                                     "🐝 **{}** error: {}",
                                     agent.name, message
                                 ));
                             }
-                        }
                     }
                 }
                 
@@ -1478,9 +1472,9 @@ async fn run_app(
                 }
             }
         }
-        if app.mode == AppMode::ToolApproval {
-            if let Some(shown_at) = app.tool_approval_shown_at {
-                if shown_at.elapsed() >= Duration::from_secs(60) {
+        if app.mode == AppMode::ToolApproval
+            && let Some(shown_at) = app.tool_approval_shown_at
+                && shown_at.elapsed() >= Duration::from_secs(60) {
                     let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
                     app.pending_suggestion = None;
                     app.mode = AppMode::Normal;
@@ -1490,8 +1484,6 @@ async fn run_app(
                         if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
                     ));
                 }
-            }
-        }
 
         if app.should_exit {
             break;
@@ -2095,6 +2087,112 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         app.add_system_message("💡 Diff preview is shown automatically when file edits are suggested.".to_string());
         app.add_system_message("   When a write/replace/patch is proposed, you'll see the diff first.".to_string());
         app.add_system_message("   Press 'y' to apply, 'n' to skip.".to_string());
+        return Ok(());
+    }
+
+    // === Git Agent Commands (Tier 1) ===
+    if input == "/commit" || input.starts_with("/commit ") {
+        let msg = input.strip_prefix("/commit").unwrap_or("").trim();
+        let git_tool = crate::tools::GitTool;
+
+        // Show diff first
+        match git_tool.execute("diff") {
+            Ok(diff) => {
+                if diff.trim().is_empty() {
+                    app.add_system_message("No unstaged changes to commit.".to_string());
+                } else {
+                    app.add_system_message(format!("📋 Unstaged diff:\n```\n{}\n```", diff.trim()));
+                }
+            }
+            Err(e) => app.add_system_message(format!("⚠️ Could not get diff: {}", e)),
+        }
+
+        // Stage all
+        match git_tool.execute("stage-all") {
+            Ok(_) => app.add_system_message("✅ Staged all changes.".to_string()),
+            Err(e) => {
+                app.add_system_message(format!("❌ Stage failed: {}", e));
+                return Ok(());
+            }
+        }
+
+        // Generate or use provided message
+        let commit_msg = if msg.is_empty() {
+            // TODO: Generate with LLM in future
+            format!("wip: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+        } else {
+            msg.to_string()
+        };
+
+        match git_tool.execute(&format!("commit {}", commit_msg)) {
+            Ok(output) => {
+                app.add_system_message(format!("✅ Committed: {}\n```\n{}\n```", commit_msg, output.trim()));
+            }
+            Err(e) => app.add_system_message(format!("❌ Commit failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/pr" || input.starts_with("/pr ") {
+        let title = input.strip_prefix("/pr").unwrap_or("").trim();
+        let git_tool = crate::tools::GitTool;
+
+        // Get current branch
+        let current_branch = match git_tool.execute("branch") {
+            Ok(out) => out.lines().find(|l| l.starts_with('*')).map(|l| l[2..].trim().to_string()),
+            Err(_) => None,
+        }.unwrap_or_else(|| "feature/auto".to_string());
+
+        let branch_name = if title.is_empty() {
+            format!("auto/{}-{}", current_branch.replace('/', "-"), &uuid::Uuid::new_v4().to_string()[..8])
+        } else {
+            format!("auto/{}", title.to_lowercase().replace([' ', '/'], "-"))
+        };
+
+        // Create branch
+        match git_tool.execute(&format!("branch-create {}", branch_name)) {
+            Ok(_) => app.add_system_message(format!("🌿 Created branch: {}", branch_name)),
+            Err(e) => {
+                app.add_system_message(format!("❌ Branch creation failed: {}", e));
+                return Ok(());
+            }
+        }
+
+        // Stage, commit, push
+        let _ = git_tool.execute("stage-all");
+        let commit_msg = if title.is_empty() {
+            "Auto-commit for PR".to_string()
+        } else {
+            title.to_string()
+        };
+        match git_tool.execute(&format!("commit {}", commit_msg)) {
+            Ok(_) => app.add_system_message(format!("✅ Committed: {}", commit_msg)),
+            Err(e) => app.add_system_message(format!("⚠️ Commit: {}", e)),
+        }
+
+        match git_tool.execute("push") {
+            Ok(out) => app.add_system_message(format!("🚀 Pushed:\n```\n{}\n```", out.trim())),
+            Err(e) => app.add_system_message(format!("⚠️ Push: {}", e)),
+        }
+
+        // Suggest gh pr create if available
+        app.add_system_message(format!("💡 Run `gh pr create --title \"{}\" --body \"Auto-generated PR\"` to open PR", commit_msg));
+        return Ok(());
+    }
+
+    if input == "/review" {
+        let git_tool = crate::tools::GitTool;
+        match git_tool.execute("diff-staged") {
+            Ok(diff) => {
+                if diff.trim().is_empty() {
+                    app.add_system_message("No staged changes to review.".to_string());
+                } else {
+                    app.add_system_message(format!("📋 Staged diff for review:\n```\n{}\n```", diff.trim()));
+                    app.add_system_message("💡 LLM-powered review coming soon. For now, review the diff above.".to_string());
+                }
+            }
+            Err(e) => app.add_system_message(format!("❌ Diff failed: {}", e)),
+        }
         return Ok(());
     }
 
@@ -2773,8 +2871,8 @@ fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
 /// 2. tool_name:0>{"key": "value", ...}  (numeric-indexed)
 fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
     // Try bare JSON format first: tool_name {"key": "value"}
-    if let Some(space_pos) = rest.find(['{', ':']) {
-        if rest.as_bytes().get(space_pos) == Some(&b'{') {
+    if let Some(space_pos) = rest.find(['{', ':'])
+        && rest.as_bytes().get(space_pos) == Some(&b'{') {
             let tool_name = rest[..space_pos].trim().to_string();
             if tool_name.is_empty() {
                 return None;
@@ -2782,7 +2880,6 @@ fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
             let json_str = find_balanced_json(&rest[space_pos..])?;
             return extract_args_from_json(json_str, &tool_name);
         }
-    }
 
     // Try numeric-indexed format: tool_name:0>{"key": "value"}
     let colon_pos = rest.find(':')?;
@@ -4667,8 +4764,8 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
         // Render content with syntax highlighting for assistant messages
         if msg.role == "assistant" {
             // Render persistent reasoning first, if present
-            if let Some(ref reasoning) = msg.reasoning {
-                if !reasoning.is_empty() {
+            if let Some(ref reasoning) = msg.reasoning
+                && !reasoning.is_empty() {
                     lines.push(Line::from(vec![
                         Span::styled("  💭 ", reasoning_style()),
                         Span::styled("Thinking", reasoning_style().add_modifier(Modifier::BOLD | Modifier::ITALIC)),
@@ -4680,7 +4777,6 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                     }
                     lines.push(Line::from(""));
                 }
-            }
 
             // Render assistant messages with syntax highlighting + inline markdown
             let highlighted = syntax_highlight::extract_and_highlight(&msg.content);

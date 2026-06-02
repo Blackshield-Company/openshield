@@ -33,11 +33,10 @@ impl Tool for CodeExecutionTool {
         if let Some(pos) = code.rfind("--timeout") {
             let before = &code[..pos];
             let after = &code[pos + 9..];
-            if let Some(secs) = after.split_whitespace().next() {
-                if let Ok(s) = secs.parse::<u64>() {
+            if let Some(secs) = after.split_whitespace().next()
+                && let Ok(s) = secs.parse::<u64>() {
                     _timeout_secs = s;
                 }
-            }
             code = before.trim();
         }
 

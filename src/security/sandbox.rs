@@ -26,14 +26,13 @@ impl Sandbox {
             PathBuf::from(expanded)
         });
 
-        if let Some(ref dir) = wd {
-            if !dir.exists() {
+        if let Some(ref dir) = wd
+            && !dir.exists() {
                 std::fs::create_dir_all(dir).with_context(|| {
                     format!("Failed to create sandbox directory: {}", dir.display())
                 })?;
                 info!("Created sandbox directory: {}", dir.display());
             }
-        }
 
         Ok(Self {
             working_dir: wd,

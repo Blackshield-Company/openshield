@@ -12,11 +12,10 @@ fn prompt(question: &str, default: Option<&str>) -> Result<String> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     let trimmed = input.trim().to_string();
-    if trimmed.is_empty() {
-        if let Some(d) = default {
+    if trimmed.is_empty()
+        && let Some(d) = default {
             return Ok(d.to_string());
         }
-    }
     Ok(trimmed)
 }
 
@@ -154,11 +153,10 @@ pub async fn run() -> Result<()> {
             "OpenAI API key (or leave blank to use env OPENAI_API_KEY):",
             None,
         )?;
-        if !openai_key.is_empty() {
-            if let Some(provider) = config.providers.get_mut("openai") {
+        if !openai_key.is_empty()
+            && let Some(provider) = config.providers.get_mut("openai") {
                 provider.api_key = openai_key;
             }
-        }
         if config.default_model != "kimi-k2.6" {
             config.default_model = "gpt-4o".to_string();
         }
@@ -230,11 +228,10 @@ pub async fn run() -> Result<()> {
             "Anthropic API key (or leave blank to use env ANTHROPIC_API_KEY):",
             None,
         )?;
-        if let Some(provider) = config.providers.get_mut("anthropic") {
-            if !anthropic_key.is_empty() {
+        if let Some(provider) = config.providers.get_mut("anthropic")
+            && !anthropic_key.is_empty() {
                 provider.api_key = anthropic_key;
             }
-        }
         println!("✅ Anthropic configured");
     } else {
         config.providers.remove("anthropic");
@@ -247,11 +244,10 @@ pub async fn run() -> Result<()> {
             "Gemini API key (or leave blank to use env GEMINI_API_KEY):",
             None,
         )?;
-        if let Some(provider) = config.providers.get_mut("gemini") {
-            if !gemini_key.is_empty() {
+        if let Some(provider) = config.providers.get_mut("gemini")
+            && !gemini_key.is_empty() {
                 provider.api_key = gemini_key;
             }
-        }
         println!("✅ Gemini configured");
     } else {
         config.providers.remove("gemini");
@@ -383,11 +379,10 @@ pub async fn run() -> Result<()> {
             println!("  {} {}: {}", marker, i, model);
         }
         let default_idx = prompt("Select default model (number):", Some("0"))?;
-        if let Ok(idx) = default_idx.parse::<usize>() {
-            if let Some(model) = available_models.get(idx) {
+        if let Ok(idx) = default_idx.parse::<usize>()
+            && let Some(model) = available_models.get(idx) {
                 config.default_model = model.clone();
             }
-        }
     }
     println!();
 

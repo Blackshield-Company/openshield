@@ -319,11 +319,10 @@ impl Provider {
                         if let Some(ref tool_calls) = m.tool_calls {
                             msg["tool_calls"] = json!(tool_calls);
                         }
-                        if let Some(ref reasoning) = m.reasoning_content {
-                            if !reasoning.is_empty() {
+                        if let Some(ref reasoning) = m.reasoning_content
+                            && !reasoning.is_empty() {
                                 msg["reasoning_content"] = json!(reasoning);
                             }
-                        }
                         msg
                     })
                     .collect();
@@ -439,11 +438,9 @@ impl Provider {
 
                 // Extract reasoning_content if present (Kimi thinking)
                 if let Some(reasoning) = raw["choices"][0]["message"]["reasoning_content"].as_str()
-                {
-                    if !reasoning.is_empty() {
+                    && !reasoning.is_empty() {
                         content = format!("<think>\n{}\n</think>\n\n{}", reasoning, content);
                     }
-                }
 
                 let usage = raw.get("usage").map(|u| Usage {
                     prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
@@ -538,12 +535,11 @@ impl Provider {
             .with_context(|| "Failed to serialize messages for cache key")?;
         let cache_key = compute_cache_key(&request.model, &messages_json);
 
-        if let Some(ref cache) = self.cache {
-            if let Some(cached) = cache.get(&cache_key) {
+        if let Some(ref cache) = self.cache
+            && let Some(cached) = cache.get(&cache_key) {
                 let chat_response = self.parse_chat_response(&cached.response)?;
                 return Ok(chat_response);
             }
-        }
 
         let body = self.build_chat_body(&request);
         let response = self
@@ -581,8 +577,8 @@ impl Provider {
             .with_context(|| "Failed to serialize messages for cache key")?;
         let cache_key = compute_cache_key(&request.model, &messages_json);
 
-        if let Some(ref cache) = self.cache {
-            if let Some(cached) = cache.get(&cache_key) {
+        if let Some(ref cache) = self.cache
+            && let Some(cached) = cache.get(&cache_key) {
                 let chunks: Vec<String> = serde_json::from_str(&cached.response)
                     .with_context(|| "Failed to parse cached stream response")?;
                 let token_count = chunks.len() as u32;
@@ -596,7 +592,6 @@ impl Provider {
                     },
                 ));
             }
-        }
 
         let body = self.build_chat_body(&request);
         let response = self
@@ -650,12 +645,11 @@ impl Provider {
                                     .and_then(|d| d.get("reasoning_content"))
                                     .and_then(|c| c.as_str());
                                 // If we have reasoning content, emit it as a special marker
-                                if let Some(r) = reasoning {
-                                    if !r.is_empty() {
+                                if let Some(r) = reasoning
+                                    && !r.is_empty() {
                                         // Emit reasoning content wrapped in think tags so the TUI can display it
                                         chunks.push(format!("<think>{}</think>", r));
                                     }
-                                }
                                 content
                             }
                             ProviderKind::Anthropic => event
@@ -730,9 +724,9 @@ impl Provider {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<StreamChunk>();
 
         // Check cache first — if cached, replay all chunks then return metrics
-        if let Some(ref cache) = self.cache {
-            if let Some(cached) = cache.get(&cache_key) {
-                if let Ok(chunks) = serde_json::from_str::<Vec<String>>(&cached.response) {
+        if let Some(ref cache) = self.cache
+            && let Some(cached) = cache.get(&cache_key)
+                && let Ok(chunks) = serde_json::from_str::<Vec<String>>(&cached.response) {
                     for chunk in chunks {
                         let _ = tx.send(StreamChunk::Content(chunk));
                     }
@@ -746,8 +740,6 @@ impl Provider {
                         },
                     ));
                 }
-            }
-        }
 
         let body = self.build_chat_body(&request);
         let client = self.client.clone();
@@ -888,20 +880,16 @@ impl Provider {
                                                 pending_tool_calls.entry(index).or_default();
 
                                             if let Some(id) = tc.get("id").and_then(|i| i.as_str())
-                                            {
-                                                if !id.is_empty() {
+                                                && !id.is_empty() {
                                                     entry.id.push_str(id);
                                                 }
-                                            }
                                             if let Some(name) = tc
                                                 .get("function")
                                                 .and_then(|f| f.get("name"))
                                                 .and_then(|n| n.as_str())
-                                            {
-                                                if !name.is_empty() {
+                                                && !name.is_empty() {
                                                     entry.name.push_str(name);
                                                 }
-                                            }
                                             if let Some(args) = tc
                                                 .get("function")
                                                 .and_then(|f| f.get("arguments"))
@@ -912,19 +900,17 @@ impl Provider {
                                         }
                                     }
 
-                                    if let Some(r) = reasoning {
-                                        if !r.is_empty() {
+                                    if let Some(r) = reasoning
+                                        && !r.is_empty() {
                                             let _ = tx.send(StreamChunk::Reasoning(r.to_string()));
                                         }
-                                    }
-                                    if let Some(c) = content {
-                                        if !c.is_empty() {
+                                    if let Some(c) = content
+                                        && !c.is_empty() {
                                             if first_token_time.is_none() {
                                                 first_token_time = Some(Instant::now());
                                             }
                                             let _ = tx.send(StreamChunk::Content(c.to_string()));
                                         }
-                                    }
                                 }
                                 ProviderKind::Anthropic => {
                                     let text = event
@@ -937,14 +923,13 @@ impl Provider {
                                                 .and_then(|c| c.get("text"))
                                                 .and_then(|t| t.as_str())
                                         });
-                                    if let Some(t) = text {
-                                        if !t.is_empty() {
+                                    if let Some(t) = text
+                                        && !t.is_empty() {
                                             if first_token_time.is_none() {
                                                 first_token_time = Some(Instant::now());
                                             }
                                             let _ = tx.send(StreamChunk::Content(t.to_string()));
                                         }
-                                    }
                                 }
                                 ProviderKind::Gemini => {
                                     let text = event
@@ -955,14 +940,13 @@ impl Provider {
                                         .and_then(|p| p.get(0))
                                         .and_then(|p| p.get("text"))
                                         .and_then(|t| t.as_str());
-                                    if let Some(t) = text {
-                                        if !t.is_empty() {
+                                    if let Some(t) = text
+                                        && !t.is_empty() {
                                             if first_token_time.is_none() {
                                                 first_token_time = Some(Instant::now());
                                             }
                                             let _ = tx.send(StreamChunk::Content(t.to_string()));
                                         }
-                                    }
                                 }
                             }
                         }
