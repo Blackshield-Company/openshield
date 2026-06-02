@@ -117,11 +117,10 @@ impl LspClient {
             if header == "\r\n" {
                 break;
             }
-            if let Some(len_str) = header.strip_prefix("Content-Length: ") {
-                if let Ok(len) = len_str.trim().parse::<usize>() {
+            if let Some(len_str) = header.strip_prefix("Content-Length: ")
+                && let Ok(len) = len_str.trim().parse::<usize>() {
                     content_length = Some(len);
                 }
-            }
         }
 
         let len = content_length.context("Missing Content-Length header in LSP response")?;

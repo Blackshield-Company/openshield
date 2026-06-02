@@ -209,15 +209,12 @@ impl SecurityConfig {
 
         // Sync allowed_paths from main config.toml
         let main_config_path = config_dir.join("config.toml");
-        if main_config_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&main_config_path) {
-                if let Ok(main_config) = toml::from_str::<crate::config::Config>(&content) {
-                    if !main_config.filesystem.allowed_paths.is_empty() {
+        if main_config_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&main_config_path)
+                && let Ok(main_config) = toml::from_str::<crate::config::Config>(&content)
+                    && !main_config.filesystem.allowed_paths.is_empty() {
                         config.allowed_paths = main_config.filesystem.allowed_paths.clone();
                     }
-                }
-            }
-        }
 
         Ok(config)
     }
@@ -486,13 +483,11 @@ impl SecurityEngine {
         }
 
         // Check for active sudo session
-        if let Ok(sessions) = self.sudo_sessions.lock() {
-            if let Some(expiry) = sessions.get(args) {
-                if std::time::Instant::now() < *expiry {
+        if let Ok(sessions) = self.sudo_sessions.lock()
+            && let Some(expiry) = sessions.get(args)
+                && std::time::Instant::now() < *expiry {
                     return None; // Session still valid
                 }
-            }
-        }
 
         Some(SecurityDecision::RequireApproval {
             reason: "Sudo command requires approval".to_string(),

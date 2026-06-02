@@ -152,11 +152,10 @@ pub async fn run_checks(auto_fix: bool) -> Result<DoctorReport> {
     // Auto-fix if requested
     if auto_fix {
         for check in &report.checks {
-            if check.fixable && (check.status == CheckStatus::Warning || check.status == CheckStatus::Critical) {
-                if let Ok(fix_msg) = try_fix(&check.component).await {
+            if check.fixable && (check.status == CheckStatus::Warning || check.status == CheckStatus::Critical)
+                && let Ok(fix_msg) = try_fix(&check.component).await {
                     report.fixes_applied.push(fix_msg);
                 }
-            }
         }
     }
 

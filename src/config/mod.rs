@@ -698,14 +698,13 @@ fn env_or_placeholder(key: &str) -> String {
 
 /// Resolve a gateway token from env var if it uses ${VAR} syntax.
 fn resolve_gateway_token(token: &mut Option<String>) {
-    if let Some(t) = token {
-        if t.starts_with("${") && t.ends_with("}") {
+    if let Some(t) = token
+        && t.starts_with("${") && t.ends_with("}") {
             let var_name = &t[2..t.len() - 1];
             if let Ok(val) = std::env::var(var_name) {
                 *token = Some(val);
             }
         }
-    }
 }
 
 #[cfg(test)]
