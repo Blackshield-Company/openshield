@@ -499,7 +499,7 @@ async fn main() -> anyhow::Result<()> {
             println!("💰 Cost Tracking");
             println!("{}", "─".repeat(50));
             let mut total_estimated_cost = 0.0;
-            for (_, provider) in &config.providers {
+            for provider in config.providers.values() {
                 for model in &provider.models {
                     let cost_per_1k = model.cost_per_1k_input + model.cost_per_1k_output;
                     if cost_per_1k > 0.0 {

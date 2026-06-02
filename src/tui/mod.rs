@@ -992,8 +992,7 @@ impl App {
                     if r.success { entry.0 += 1; } else { entry.1 += 1; }
                 }
                 let total = results.len();
-                let mut summary = String::from(format!("📊 Tool results ({} total):
-", total));
+                let mut summary = format!("📊 Tool results ({} total):\n", total);
                 let mut names: Vec<&String> = groups.keys().collect();
                 names.sort();
                 for name in names {
@@ -2052,7 +2051,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input.starts_with("/switch ") {
-        if let Ok(index) = input[8..].trim().parse::<usize>() {
+        let rest = input.strip_prefix("/switch ").unwrap_or("");
+        if let Ok(index) = rest.trim().parse::<usize>() {
             if let Err(e) = app.switch_branch(index) {
                 app.add_system_message(format!("Error: {}", e));
             }
@@ -2550,7 +2550,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input.starts_with("agent:") {
-        let task = input[6..].trim();
+        let task = input.strip_prefix("agent:").unwrap_or("").trim();
         if task.is_empty() {
             app.add_system_message(
                 "Please provide a task after 'agent:'. Example: agent: fix the bug in src/main.rs"
@@ -2881,7 +2881,7 @@ fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<(String, St
         }
 
         if tool_name == "edit" && !parts.is_empty() {
-            let file = parts.get(0).cloned().unwrap_or_default();
+            let file = parts.first().cloned().unwrap_or_default();
             if file.is_empty() {
                 return None;
             }
@@ -4270,9 +4270,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
     // Session info — no inner border, just styled text with section header
     let ctx_used = app.context_used();
-    let ctx_pct = if app.model_context_length > 0 {
-        (ctx_used * 100 / app.model_context_length).min(100)
-    } else { 0 };
+    let ctx_pct = (ctx_used * 100)
+        .checked_div(app.model_context_length)
+        .unwrap_or(0)
+        .min(100);
     let ctx_color = if ctx_pct > 80 { error_style() } else if ctx_pct > 50 { accent_style() } else { text_style() };
 
     let session_info = vec![
