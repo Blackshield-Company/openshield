@@ -1,6 +1,6 @@
 [package]
 name = "openshark"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 authors = ["synth <synthalorian@gmail.com>"]
 description = "The harness that learns. The agent that decides."
