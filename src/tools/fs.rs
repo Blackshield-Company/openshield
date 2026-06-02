@@ -220,21 +220,18 @@ fn cmd_stat(path_str: &str) -> Result<String> {
         meta.len()
     ));
 
-    if let Ok(modified) = meta.modified() {
-        if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+    if let Ok(modified) = meta.modified()
+        && let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
             result.push_str(&format!("Modified: {}\n", format_time(dur.as_secs())));
         }
-    }
-    if let Ok(created) = meta.created() {
-        if let Ok(dur) = created.duration_since(std::time::UNIX_EPOCH) {
+    if let Ok(created) = meta.created()
+        && let Ok(dur) = created.duration_since(std::time::UNIX_EPOCH) {
             result.push_str(&format!("Created:  {}\n", format_time(dur.as_secs())));
         }
-    }
-    if let Ok(accessed) = meta.accessed() {
-        if let Ok(dur) = accessed.duration_since(std::time::UNIX_EPOCH) {
+    if let Ok(accessed) = meta.accessed()
+        && let Ok(dur) = accessed.duration_since(std::time::UNIX_EPOCH) {
             result.push_str(&format!("Accessed: {}\n", format_time(dur.as_secs())));
         }
-    }
 
     #[cfg(unix)]
     {

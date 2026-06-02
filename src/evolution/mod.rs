@@ -190,11 +190,10 @@ impl EvolutionEngine {
             }
             _ => {
                 // Fallback: try natural language query
-                if let Ok(answer) = injector.answer_natural_query(query) {
-                    if !answer.contains("couldn't find") {
+                if let Ok(answer) = injector.answer_natural_query(query)
+                    && !answer.contains("couldn't find") {
                         return format!("From past conversations:\n{}", answer);
                     }
-                }
                 String::new()
             }
         }

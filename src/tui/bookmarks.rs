@@ -188,11 +188,10 @@ impl BookmarkManager {
             Some(dir) => dir.join("openshark").join("bookmarks").join(format!("{}.json", session_id)),
             None => return, // Silently skip if config dir unavailable
         };
-        if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data) {
+        if let Ok(data) = std::fs::read_to_string(&path)
+            && let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data) {
                 self.bookmarks = bookmarks;
             }
-        }
     }
 
     /// Save bookmarks to the session file.

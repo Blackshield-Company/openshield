@@ -524,22 +524,19 @@ impl Agent {
 /// Extract JSON from text that may be wrapped in markdown code blocks.
 fn extract_json(text: &str) -> String {
     // Try to find JSON inside markdown code blocks
-    if let Some(start) = text.find("```json") {
-        if let Some(end) = text[start + 7..].find("```") {
+    if let Some(start) = text.find("```json")
+        && let Some(end) = text[start + 7..].find("```") {
             return text[start + 7..start + 7 + end].trim().to_string();
         }
-    }
-    if let Some(start) = text.find("```") {
-        if let Some(end) = text[start + 3..].find("```") {
+    if let Some(start) = text.find("```")
+        && let Some(end) = text[start + 3..].find("```") {
             return text[start + 3..start + 3 + end].trim().to_string();
         }
-    }
     // Try to find JSON object boundaries
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
+    if let Some(start) = text.find('{')
+        && let Some(end) = text.rfind('}') {
             return text[start..=end].to_string();
         }
-    }
     text.to_string()
 }
 

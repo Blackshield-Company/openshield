@@ -60,6 +60,21 @@ impl Tool for GitTool {
                 Command::new("git").args(["add", rest]).output()
             }
             "show" => Command::new("git").args(["show", "--stat", rest]).output(),
+            "stage-all" => Command::new("git").args(["add", "-A"]).output(),
+            "push" => {
+                let mut c = Command::new("git");
+                c.arg("push");
+                if !rest.is_empty() {
+                    c.args(rest.split_whitespace());
+                }
+                c.output()
+            }
+            "branch-create" => {
+                if rest.is_empty() {
+                    return Ok("Usage: git branch-create <name>".to_string());
+                }
+                Command::new("git").args(["checkout", "-b", rest]).output()
+            }
             _ => {
                 return Ok(format!("Unknown git command: {}\n{}", cmd, self.usage()));
             }
@@ -94,7 +109,10 @@ impl GitTool {
          git checkout <name>  - Switch branch\n\
          git add <path>       - Stage files\n\
          git commit <msg>     - Commit staged files\n\
-         git show <ref>       - Show commit details"
+         git show <ref>       - Show commit details\n\
+         git stage-all         - Stage all changes\n\
+         git push [remote]     - Push current branch\n\
+         git branch-create <n> - Create and switch to branch"
             .to_string()
     }
 }

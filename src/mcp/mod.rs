@@ -223,11 +223,10 @@ impl McpManager {
         for config in configs {
             match McpConnection::connect(config).await {
                 Ok(mut conn) => {
-                    if conn.supports_tools() {
-                        if let Err(e) = conn.discover_tools().await {
+                    if conn.supports_tools()
+                        && let Err(e) = conn.discover_tools().await {
                             warn!("Failed to discover tools for '{}': {}", config.name, e);
                         }
-                    }
                     let mut connections = self.connections.write().await;
                     connections.insert(config.name.clone(), conn);
                 }
