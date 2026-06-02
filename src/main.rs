@@ -11,7 +11,9 @@ mod config;
 mod diff;
 mod doctor;
 mod evolution;
+
 mod gateway;
+mod integrations;
 mod image_utils;
 mod lsp;
 mod mcp;
@@ -154,6 +156,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Tui) | None => {
             info!("Starting OpenShark TUI");
 
+            #[cfg(feature = "discord")]
             // Spawn Discord gateway if enabled
             if config.gateway.discord.enabled {
                 info!("Discord gateway enabled — spawning bot");
@@ -186,6 +189,7 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            #[cfg(feature = "telegram")]
             // Spawn Telegram gateway if enabled
             if config.gateway.telegram.enabled {
                 info!("Telegram gateway enabled — spawning bot");
@@ -228,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            #[cfg(feature = "slack")]
             // Spawn Slack gateway if enabled
             if config.gateway.slack.enabled {
                 info!("Slack gateway enabled — spawning bot");
@@ -270,6 +275,7 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            #[cfg(feature = "matrix")]
             // Spawn Matrix gateway if enabled
             if config.gateway.matrix.enabled {
                 info!("Matrix gateway enabled — spawning bot");
