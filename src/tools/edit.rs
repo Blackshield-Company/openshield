@@ -4,10 +4,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Global undo stack — stores (original_path, backup_path) for last edit
-static LAST_BACKUP: std::sync::OnceLock<Arc<Mutex<Option<(PathBuf, PathBuf)>>>> = std::sync::OnceLock::new();
+type BackupPair = (PathBuf, PathBuf);
 
-fn get_backup_store() -> Arc<Mutex<Option<(PathBuf, PathBuf)>>> {
+/// Global undo stack — stores (original_path, backup_path) for last edit
+static LAST_BACKUP: std::sync::OnceLock<Arc<Mutex<Option<BackupPair>>>> = std::sync::OnceLock::new();
+
+fn get_backup_store() -> Arc<Mutex<Option<BackupPair>>> {
     LAST_BACKUP.get_or_init(|| Arc::new(Mutex::new(None))).clone()
 }
 

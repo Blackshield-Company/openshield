@@ -524,14 +524,14 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
 
         println!("Task-Type Routing (with historical data):");
         println!(
-            "{:<15} | {:<20} | {:>6} | {}",
-            "Task Type", "Best Model", "Rate", "Reason"
+            "{:<15} | {:<20} | {:>6} | Reason",
+            "Task Type", "Best Model", "Rate"
         );
         println!("{}", "-".repeat(70));
         for (task_type, models) in &task_model {
             let best = models
                 .iter()
-                .max_by_key(|(_, (s, t))| if *t > 0 { (*s * 100) / *t } else { 0 })
+                .max_by_key(|(_, (s, t))| (*s * 100).checked_div(*t).unwrap_or(0))
                 .map(|(m, _)| m.clone())
                 .unwrap_or_else(|| config.default_model.clone());
 
@@ -574,8 +574,8 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
     // Show a sample routing decision for each task type
     println!("Sample Routing Decisions:");
     println!(
-        "{:<15} | {:<20} | {:<15} | {}",
-        "Task Type", "Model", "Provider", "Reason"
+        "{:<15} | {:<20} | {:<15} | Reason",
+        "Task Type", "Model", "Provider"
     );
     println!("{}", "-".repeat(90));
     let sample_tasks = vec![
@@ -598,8 +598,8 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
 fn show_capability_routing(config: &Config) {
     println!("Capability-Based Routing Rules:");
     println!(
-        "{:<15} | {:<20} | {}",
-        "Task Type", "Preferred Model", "Logic"
+        "{:<15} | {:<20} | Logic",
+        "Task Type", "Preferred Model"
     );
     println!("{}", "-".repeat(70));
 
@@ -629,15 +629,12 @@ fn find_provider_for_model(config: &Config, model_name: &str) -> String {
 fn classify_task(description: &str) -> String {
     let desc = description.to_lowercase();
 
-    if desc.contains("refactor") || desc.contains("rewrite") || desc.contains("restructure") {
+    if desc.contains("refactor") || desc.contains("rewrite") || desc.contains("restructure")
+        || desc.contains("debug") || desc.contains("fix") || desc.contains("error")
+        || desc.contains("test") || desc.contains("testing") {
         "code".to_string()
-    } else if desc.contains("debug") || desc.contains("fix") || desc.contains("error") {
-        "code".to_string()
-    } else if desc.contains("architect") || desc.contains("design") || desc.contains("structure") {
-        "analysis".to_string()
-    } else if desc.contains("test") || desc.contains("testing") {
-        "code".to_string()
-    } else if desc.contains("explain") || desc.contains("document") || desc.contains("analyze") {
+    } else if desc.contains("architect") || desc.contains("design") || desc.contains("structure")
+        || desc.contains("explain") || desc.contains("document") || desc.contains("analyze") {
         "analysis".to_string()
     } else {
         "chat".to_string()
