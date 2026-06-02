@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 use crate::gateway::McpServerConfig;
 
 use protocol::*;
-use transport::{parse_transport_message, StdioTransport, SseTransport, TransportMessage};
+use transport::{SseTransport, StdioTransport, TransportMessage, parse_transport_message};
 
 /// An active MCP server connection.
 pub struct McpConnection {
@@ -76,8 +76,11 @@ impl McpConnection {
         }
 
         let result: InitializeResult = serde_json::from_value(
-            response.result.context("Initialize response missing result")?
-        ).context("Failed to parse initialize result")?;
+            response
+                .result
+                .context("Initialize response missing result")?,
+        )
+        .context("Failed to parse initialize result")?;
 
         self.server_capabilities = Some(result.capabilities);
 
@@ -94,7 +97,9 @@ impl McpConnection {
         let raw = self.transport.send_request(request).await?;
 
         // Some stdio servers echo the request before the response; skip it
-        if raw.contains(&format!("\"method\":\"{}\"", request.method)) && !raw.contains("\"result\"") {
+        if raw.contains(&format!("\"method\":\"{}\"", request.method))
+            && !raw.contains("\"result\"")
+        {
             // Read the next line which should be the actual response
             debug!("Skipping echoed request, reading next line for response");
         }
@@ -128,8 +133,11 @@ impl McpConnection {
         }
 
         let result: ToolsListResult = serde_json::from_value(
-            response.result.context("tools/list response missing result")?
-        ).context("Failed to parse tools/list result")?;
+            response
+                .result
+                .context("tools/list response missing result")?,
+        )
+        .context("Failed to parse tools/list result")?;
 
         let mut tools = self.tools.write().await;
         *tools = result.tools.clone();
@@ -147,7 +155,11 @@ impl McpConnection {
     }
 
     /// Call a tool on the MCP server.
-    pub async fn call_tool(&mut self, name: &str, arguments: serde_json::Value) -> Result<CallToolResult> {
+    pub async fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<CallToolResult> {
         if !self.connected {
             anyhow::bail!("MCP connection not initialized");
         }
@@ -165,8 +177,11 @@ impl McpConnection {
         }
 
         let result: CallToolResult = serde_json::from_value(
-            response.result.context("tools/call response missing result")?
-        ).context("Failed to parse tools/call result")?;
+            response
+                .result
+                .context("tools/call response missing result")?,
+        )
+        .context("Failed to parse tools/call result")?;
 
         Ok(result)
     }
@@ -238,7 +253,11 @@ impl McpManager {
     }
 
     /// Call a tool by name. Tries all servers until one succeeds.
-    pub async fn call_tool(&self, tool_name: &str, arguments: serde_json::Value) -> Result<CallToolResult> {
+    pub async fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<CallToolResult> {
         let mut connections = self.connections.write().await;
 
         for (server_name, conn) in connections.iter_mut() {

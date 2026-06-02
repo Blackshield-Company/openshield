@@ -28,11 +28,7 @@ impl AsyncToolExecutor {
     /// Execute a single tool asynchronously.
     ///
     /// Returns a `JoinHandle` that can be awaited to get the result.
-    pub fn execute_async(
-        &self,
-        tool_name: String,
-        args: String,
-    ) -> JoinHandle<Result<String>> {
+    pub fn execute_async(&self, tool_name: String, args: String) -> JoinHandle<Result<String>> {
         tokio::spawn(async move {
             let tool = find_tool(&tool_name)
                 .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
@@ -44,10 +40,7 @@ impl AsyncToolExecutor {
     ///
     /// Returns a vector of results in the same order as the input tasks.
     #[allow(dead_code)]
-    pub async fn execute_parallel(
-        &self,
-        tasks: Vec<(String, String)>,
-    ) -> Vec<Result<String>> {
+    pub async fn execute_parallel(&self, tasks: Vec<(String, String)>) -> Vec<Result<String>> {
         let handles: Vec<JoinHandle<Result<String>>> = tasks
             .into_iter()
             .map(|(tool_name, args)| self.execute_async(tool_name, args))
@@ -106,7 +99,8 @@ impl AsyncToolExecutor {
                 Err(anyhow::anyhow!(
                     "Tool execution timed out after {}ms",
                     timeout_ms
-                )).map(|r: String| (r, metrics))
+                ))
+                .map(|r: String| (r, metrics))
             }
         }
     }

@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
-use serenity::async_trait;
-use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseFollowup, CreateInteractionResponseMessage};
-use serenity::client::{Context as SerenityContext, EventHandler};
 use serenity::all::Interaction;
+use serenity::async_trait;
+use serenity::builder::{
+    CreateInteractionResponse, CreateInteractionResponseFollowup, CreateInteractionResponseMessage,
+};
+use serenity::client::{Context as SerenityContext, EventHandler};
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::model::id::GuildId;
@@ -123,7 +125,9 @@ impl EventHandler for Handler {
 
         // Strip prefix if present (for commands like !shark status)
         let clean_content = if has_prefix {
-            content[discord_config.command_prefix.len()..].trim().to_string()
+            content[discord_config.command_prefix.len()..]
+                .trim()
+                .to_string()
         } else {
             content.clone()
         };
@@ -175,9 +179,8 @@ impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: SerenityContext, interaction: Interaction) {
         if let Some(command) = interaction.as_command() {
             // Defer the response immediately for slow operations
-            let deferred = CreateInteractionResponse::Defer(
-                CreateInteractionResponseMessage::new(),
-            );
+            let deferred =
+                CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new());
             if let Err(e) = command.create_response(&ctx.http, deferred).await {
                 error!("Failed to defer slash command: {}", e);
                 return;
@@ -216,14 +219,20 @@ impl EventHandler for Handler {
                     for (i, chunk) in chunks.iter().enumerate() {
                         if i == 0 {
                             if let Err(e) = command
-                                .create_followup(&ctx.http, CreateInteractionResponseFollowup::new().content(chunk))
+                                .create_followup(
+                                    &ctx.http,
+                                    CreateInteractionResponseFollowup::new().content(chunk),
+                                )
                                 .await
                             {
                                 error!("Failed to send followup: {}", e);
                             }
                         } else {
                             if let Err(e) = command
-                                .create_followup(&ctx.http, CreateInteractionResponseFollowup::new().content(chunk))
+                                .create_followup(
+                                    &ctx.http,
+                                    CreateInteractionResponseFollowup::new().content(chunk),
+                                )
                                 .await
                             {
                                 error!("Failed to send followup chunk: {}", e);
@@ -232,7 +241,10 @@ impl EventHandler for Handler {
                     }
                 } else {
                     if let Err(e) = command
-                        .create_followup(&ctx.http, CreateInteractionResponseFollowup::new().content(full_response))
+                        .create_followup(
+                            &ctx.http,
+                            CreateInteractionResponseFollowup::new().content(full_response),
+                        )
                         .await
                     {
                         error!("Failed to send slash command followup: {}", e);
@@ -267,9 +279,7 @@ impl EventHandler for Handler {
 }
 
 /// Spawn the Discord bot as a background task.
-pub fn spawn_bot(
-    config: Config,
-) -> mpsc::UnboundedReceiver<DiscordEvent> {
+pub fn spawn_bot(config: Config) -> mpsc::UnboundedReceiver<DiscordEvent> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
 
     let bot = DiscordBot::new(config, event_tx);

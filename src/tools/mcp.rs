@@ -6,8 +6,8 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::mcp::protocol::{CallToolResult, McpTool};
 use crate::mcp::McpManager;
+use crate::mcp::protocol::{CallToolResult, McpTool};
 
 use super::Tool;
 

@@ -5,7 +5,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::cache::{compute_cache_key, ResponseCache};
+use crate::cache::{ResponseCache, compute_cache_key};
 use crate::config::ProviderKind;
 
 /// A chunk from a streaming response, tagged as reasoning or content.
@@ -82,7 +82,11 @@ impl Message {
     }
 
     /// Create a message with text and an image attachment.
-    pub fn with_image(role: impl Into<String>, content: impl Into<String>, image_data_url: impl Into<String>) -> Self {
+    pub fn with_image(
+        role: impl Into<String>,
+        content: impl Into<String>,
+        image_data_url: impl Into<String>,
+    ) -> Self {
         Self {
             role: role.into(),
             content: content.into(),
@@ -97,9 +101,7 @@ impl Message {
     /// Returns a JSON value representing the content array.
     pub fn to_openai_content(&self) -> serde_json::Value {
         if let Some(ref images) = self.images {
-            let mut parts = vec![
-                json!({"type": "text", "text": self.content}),
-            ];
+            let mut parts = vec![json!({"type": "text", "text": self.content})];
             for img in images {
                 parts.push(json!({
                     "type": "image_url",
@@ -233,7 +235,11 @@ impl Provider {
     }
 
     /// Build the request builder with appropriate auth and headers for this provider kind.
-    fn build_request_builder(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+    fn build_request_builder(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+    ) -> reqwest::RequestBuilder {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
         let mut builder = self.client.request(method, &url);
 
@@ -259,11 +265,16 @@ impl Provider {
     fn build_chat_body(&self, request: &ChatRequest) -> serde_json::Value {
         match self.kind {
             ProviderKind::OpenAiCompatible => {
-                let messages: Vec<_> = request.messages.iter()
+                let messages: Vec<_> = request
+                    .messages
+                    .iter()
                     .filter(|m| {
                         // Filter out empty assistant/tool messages — they violate API requirements.
                         // Messages with tool_calls but empty content are fine (content becomes null).
-                        if (m.role == "assistant" || m.role == "tool") && m.content.trim().is_empty() && m.tool_calls.is_none() {
+                        if (m.role == "assistant" || m.role == "tool")
+                            && m.content.trim().is_empty()
+                            && m.tool_calls.is_none()
+                        {
                             return false;
                         }
                         true
@@ -271,7 +282,10 @@ impl Provider {
                     .map(|m| {
                         // For assistant messages with tool_calls but no content,
                         // the API requires content to be null (not empty string)
-                        let content = if m.role == "assistant" && m.content.is_empty() && m.tool_calls.is_some() {
+                        let content = if m.role == "assistant"
+                            && m.content.is_empty()
+                            && m.tool_calls.is_some()
+                        {
                             serde_json::Value::Null
                         } else {
                             m.to_openai_content()
@@ -312,14 +326,21 @@ impl Provider {
                 body
             }
             ProviderKind::Anthropic => {
-                let system_msg = request.messages.iter()
+                let system_msg = request
+                    .messages
+                    .iter()
                     .find(|m| m.role == "system")
                     .map(|m| m.content.clone());
 
-                let messages: Vec<_> = request.messages.iter()
+                let messages: Vec<_> = request
+                    .messages
+                    .iter()
                     .filter(|m| m.role != "system")
                     .filter(|m| {
-                        if (m.role == "assistant" || m.role == "tool") && m.content.trim().is_empty() && m.tool_calls.is_none() {
+                        if (m.role == "assistant" || m.role == "tool")
+                            && m.content.trim().is_empty()
+                            && m.tool_calls.is_none()
+                        {
                             return false;
                         }
                         true
@@ -388,15 +409,18 @@ impl Provider {
                     return Ok(response);
                 }
                 // Fallback: try to parse Kimi-style response with reasoning_content
-                let raw: serde_json::Value = serde_json::from_str(body)
-                    .with_context(|| format!("Failed to parse OpenAI-compatible response: {}", body))?;
+                let raw: serde_json::Value = serde_json::from_str(body).with_context(|| {
+                    format!("Failed to parse OpenAI-compatible response: {}", body)
+                })?;
 
-                let mut content = raw["choices"][0]["message"]["content"].as_str()
+                let mut content = raw["choices"][0]["message"]["content"]
+                    .as_str()
                     .unwrap_or("")
                     .to_string();
 
                 // Extract reasoning_content if present (Kimi thinking)
-                if let Some(reasoning) = raw["choices"][0]["message"]["reasoning_content"].as_str() {
+                if let Some(reasoning) = raw["choices"][0]["message"]["reasoning_content"].as_str()
+                {
                     if !reasoning.is_empty() {
                         content = format!("<think>\n{}\n</think>\n\n{}", reasoning, content);
                     }
@@ -418,7 +442,9 @@ impl Provider {
                             tool_calls: None,
                             reasoning_content: None,
                         },
-                        finish_reason: raw["choices"][0]["finish_reason"].as_str().map(|s| s.to_string()),
+                        finish_reason: raw["choices"][0]["finish_reason"]
+                            .as_str()
+                            .map(|s| s.to_string()),
                     }],
                     usage,
                 })
@@ -427,7 +453,8 @@ impl Provider {
                 let raw: serde_json::Value = serde_json::from_str(body)
                     .with_context(|| format!("Failed to parse Anthropic response: {}", body))?;
 
-                let content = raw["content"][0]["text"].as_str()
+                let content = raw["content"][0]["text"]
+                    .as_str()
                     .or_else(|| raw["content"].as_str())
                     .unwrap_or("")
                     .to_string();
@@ -458,7 +485,8 @@ impl Provider {
                 let raw: serde_json::Value = serde_json::from_str(body)
                     .with_context(|| format!("Failed to parse Gemini response: {}", body))?;
 
-                let content = raw["candidates"][0]["content"]["parts"][0]["text"].as_str()
+                let content = raw["candidates"][0]["content"]["parts"][0]["text"]
+                    .as_str()
                     .unwrap_or("")
                     .to_string();
 
@@ -499,7 +527,8 @@ impl Provider {
         }
 
         let body = self.build_chat_body(&request);
-        let response = self.build_request_builder(reqwest::Method::POST, "/chat/completions")
+        let response = self
+            .build_request_builder(reqwest::Method::POST, "/chat/completions")
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -507,7 +536,9 @@ impl Provider {
             .with_context(|| format!("Failed to send request to {}", self.base_url))?;
 
         let status = response.status();
-        let body_text = response.text().await
+        let body_text = response
+            .text()
+            .await
             .with_context(|| "Failed to read response body")?;
 
         if !status.is_success() {
@@ -535,17 +566,21 @@ impl Provider {
                 let chunks: Vec<String> = serde_json::from_str(&cached.response)
                     .with_context(|| "Failed to parse cached stream response")?;
                 let token_count = chunks.len() as u32;
-                return Ok((chunks, StreamMetrics {
-                    first_token_latency_ms: 0,
-                    total_latency_ms: 0,
-                    tokens_generated: token_count,
-                    cached: true,
-                }));
+                return Ok((
+                    chunks,
+                    StreamMetrics {
+                        first_token_latency_ms: 0,
+                        total_latency_ms: 0,
+                        tokens_generated: token_count,
+                        cached: true,
+                    },
+                ));
             }
         }
 
         let body = self.build_chat_body(&request);
-        let response = self.build_request_builder(reqwest::Method::POST, "/chat/completions")
+        let response = self
+            .build_request_builder(reqwest::Method::POST, "/chat/completions")
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -582,12 +617,14 @@ impl Provider {
                         let delta_content = match self.kind {
                             ProviderKind::OpenAiCompatible => {
                                 // Stream both content and reasoning_content (Kimi thinking)
-                                let content = event.get("choices")
+                                let content = event
+                                    .get("choices")
                                     .and_then(|c| c.get(0))
                                     .and_then(|c| c.get("delta"))
                                     .and_then(|d| d.get("content"))
                                     .and_then(|c| c.as_str());
-                                let reasoning = event.get("choices")
+                                let reasoning = event
+                                    .get("choices")
                                     .and_then(|c| c.get(0))
                                     .and_then(|c| c.get("delta"))
                                     .and_then(|d| d.get("reasoning_content"))
@@ -601,25 +638,24 @@ impl Provider {
                                 }
                                 content
                             }
-                            ProviderKind::Anthropic => {
-                                event.get("delta")
-                                    .and_then(|d| d.get("text"))
-                                    .and_then(|t| t.as_str())
-                                    .or_else(|| {
-                                        event.get("content_block")
-                                            .and_then(|c| c.get("text"))
-                                            .and_then(|t| t.as_str())
-                                    })
-                            }
-                            ProviderKind::Gemini => {
-                                event.get("candidates")
-                                    .and_then(|c| c.get(0))
-                                    .and_then(|c| c.get("content"))
-                                    .and_then(|c| c.get("parts"))
-                                    .and_then(|p| p.get(0))
-                                    .and_then(|p| p.get("text"))
-                                    .and_then(|t| t.as_str())
-                            }
+                            ProviderKind::Anthropic => event
+                                .get("delta")
+                                .and_then(|d| d.get("text"))
+                                .and_then(|t| t.as_str())
+                                .or_else(|| {
+                                    event
+                                        .get("content_block")
+                                        .and_then(|c| c.get("text"))
+                                        .and_then(|t| t.as_str())
+                                }),
+                            ProviderKind::Gemini => event
+                                .get("candidates")
+                                .and_then(|c| c.get(0))
+                                .and_then(|c| c.get("content"))
+                                .and_then(|c| c.get("parts"))
+                                .and_then(|p| p.get(0))
+                                .and_then(|p| p.get("text"))
+                                .and_then(|t| t.as_str()),
                         };
 
                         if let Some(delta) = delta_content {
@@ -634,7 +670,9 @@ impl Provider {
         }
 
         let total_latency = start_time.elapsed();
-        let first_token_latency = first_token_time.map(|t| t.duration_since(start_time)).unwrap_or_default();
+        let first_token_latency = first_token_time
+            .map(|t| t.duration_since(start_time))
+            .unwrap_or_default();
         let token_count = chunks.len() as u32;
 
         if let Some(ref cache) = self.cache {
@@ -644,12 +682,15 @@ impl Provider {
             }
         }
 
-        Ok((chunks, StreamMetrics {
-            first_token_latency_ms: first_token_latency.as_millis() as u64,
-            total_latency_ms: total_latency.as_millis() as u64,
-            tokens_generated: token_count,
-            cached: false,
-        }))
+        Ok((
+            chunks,
+            StreamMetrics {
+                first_token_latency_ms: first_token_latency.as_millis() as u64,
+                total_latency_ms: total_latency.as_millis() as u64,
+                tokens_generated: token_count,
+                cached: false,
+            },
+        ))
     }
 
     /// Real-time streaming: returns a receiver that yields `StreamChunk` values as they arrive.
@@ -657,7 +698,10 @@ impl Provider {
     pub async fn chat_stream_realtime(
         &self,
         request: ChatRequest,
-    ) -> Result<(tokio::sync::mpsc::UnboundedReceiver<StreamChunk>, StreamMetrics)> {
+    ) -> Result<(
+        tokio::sync::mpsc::UnboundedReceiver<StreamChunk>,
+        StreamMetrics,
+    )> {
         let _start_time = Instant::now();
         let messages_json = serde_json::to_string(&request.messages)
             .with_context(|| "Failed to serialize messages for cache key")?;
@@ -672,12 +716,15 @@ impl Provider {
                     for chunk in chunks {
                         let _ = tx.send(StreamChunk::Content(chunk));
                     }
-                    return Ok((rx, StreamMetrics {
-                        first_token_latency_ms: 0,
-                        total_latency_ms: 0,
-                        tokens_generated: 0,
-                        cached: true,
-                    }));
+                    return Ok((
+                        rx,
+                        StreamMetrics {
+                            first_token_latency_ms: 0,
+                            total_latency_ms: 0,
+                            tokens_generated: 0,
+                            cached: true,
+                        },
+                    ));
                 }
             }
         }
@@ -692,13 +739,17 @@ impl Provider {
         // Spawn the streaming work in a background task so the caller can start receiving immediately
         tokio::spawn(async move {
             let mut request_builder = client
-                .request(reqwest::Method::POST, format!("{}{}", base_url.trim_end_matches('/'), "/chat/completions"))
+                .request(
+                    reqwest::Method::POST,
+                    format!("{}{}", base_url.trim_end_matches('/'), "/chat/completions"),
+                )
                 .header("Content-Type", "application/json")
                 .json(&body);
 
             match kind {
                 ProviderKind::OpenAiCompatible | ProviderKind::Gemini => {
-                    request_builder = request_builder.header("Authorization", format!("Bearer {}", api_key));
+                    request_builder =
+                        request_builder.header("Authorization", format!("Bearer {}", api_key));
                 }
                 ProviderKind::Anthropic => {
                     request_builder = request_builder.header("x-api-key", &api_key);
@@ -720,7 +771,10 @@ impl Provider {
             let status = response.status();
             if !status.is_success() {
                 let body_text = response.text().await.unwrap_or_default();
-                let _ = tx.send(StreamChunk::Content(format!("[API error {}: {}]", status, body_text)));
+                let _ = tx.send(StreamChunk::Content(format!(
+                    "[API error {}: {}]",
+                    status, body_text
+                )));
                 return;
             }
 
@@ -766,7 +820,8 @@ impl Provider {
                         if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                             match kind {
                                 ProviderKind::OpenAiCompatible => {
-                                    let delta = event.get("choices")
+                                    let delta = event
+                                        .get("choices")
                                         .and_then(|c| c.get(0))
                                         .and_then(|c| c.get("delta"));
                                     let content = delta
@@ -778,7 +833,8 @@ impl Provider {
                                     let tool_calls = delta
                                         .and_then(|d| d.get("tool_calls"))
                                         .and_then(|t| t.as_array());
-                                    let finish_reason = event.get("choices")
+                                    let finish_reason = event
+                                        .get("choices")
                                         .and_then(|c| c.get(0))
                                         .and_then(|c| c.get("finish_reason"))
                                         .and_then(|f| f.as_str());
@@ -803,26 +859,34 @@ impl Provider {
                                     // Accumulate tool call fragments by index
                                     if let Some(tcs) = tool_calls {
                                         for tc in tcs {
-                                            let index = tc.get("index")
+                                            let index = tc
+                                                .get("index")
                                                 .and_then(|i| i.as_u64())
-                                                .unwrap_or(0) as u32;
-                                            let entry = pending_tool_calls.entry(index).or_default();
+                                                .unwrap_or(0)
+                                                as u32;
+                                            let entry =
+                                                pending_tool_calls.entry(index).or_default();
 
-                                            if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                            if let Some(id) = tc.get("id").and_then(|i| i.as_str())
+                                            {
                                                 if !id.is_empty() {
                                                     entry.id.push_str(id);
                                                 }
                                             }
-                                            if let Some(name) = tc.get("function")
+                                            if let Some(name) = tc
+                                                .get("function")
                                                 .and_then(|f| f.get("name"))
-                                                .and_then(|n| n.as_str()) {
+                                                .and_then(|n| n.as_str())
+                                            {
                                                 if !name.is_empty() {
                                                     entry.name.push_str(name);
                                                 }
                                             }
-                                            if let Some(args) = tc.get("function")
+                                            if let Some(args) = tc
+                                                .get("function")
                                                 .and_then(|f| f.get("arguments"))
-                                                .and_then(|a| a.as_str()) {
+                                                .and_then(|a| a.as_str())
+                                            {
                                                 entry.arguments.push_str(args);
                                             }
                                         }
@@ -843,11 +907,13 @@ impl Provider {
                                     }
                                 }
                                 ProviderKind::Anthropic => {
-                                    let text = event.get("delta")
+                                    let text = event
+                                        .get("delta")
                                         .and_then(|d| d.get("text"))
                                         .and_then(|t| t.as_str())
                                         .or_else(|| {
-                                            event.get("content_block")
+                                            event
+                                                .get("content_block")
                                                 .and_then(|c| c.get("text"))
                                                 .and_then(|t| t.as_str())
                                         });
@@ -861,7 +927,8 @@ impl Provider {
                                     }
                                 }
                                 ProviderKind::Gemini => {
-                                    let text = event.get("candidates")
+                                    let text = event
+                                        .get("candidates")
                                         .and_then(|c| c.get(0))
                                         .and_then(|c| c.get("content"))
                                         .and_then(|c| c.get("parts"))
@@ -882,16 +949,21 @@ impl Provider {
                     }
                 }
             }
+            // Stream ended normally — send Finish so the TUI knows we're done
+            let _ = tx.send(StreamChunk::Finish("stop".to_string()));
         });
 
         // Return the receiver immediately so the caller can start reading chunks
         // Metrics will be computed when the stream finishes — for now return placeholder
-        Ok((rx, StreamMetrics {
-            first_token_latency_ms: 0,
-            total_latency_ms: 0,
-            tokens_generated: 0,
-            cached: false,
-        }))
+        Ok((
+            rx,
+            StreamMetrics {
+                first_token_latency_ms: 0,
+                total_latency_ms: 0,
+                tokens_generated: 0,
+                cached: false,
+            },
+        ))
     }
 
     #[allow(dead_code)]
@@ -901,35 +973,44 @@ impl Provider {
             _ => "/models",
         };
 
-        let response = self.build_request_builder(reqwest::Method::GET, path)
+        let response = self
+            .build_request_builder(reqwest::Method::GET, path)
             .send()
             .await
             .with_context(|| format!("Failed to list models from {}", self.base_url))?;
 
-        let body: serde_json::Value = response.json().await
+        let body: serde_json::Value = response
+            .json()
+            .await
             .with_context(|| "Failed to parse models response")?;
 
         let models = match self.kind {
-            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => {
-                body.get("data")
-                    .and_then(|d| d.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            }
-            ProviderKind::Gemini => {
-                body.get("models")
-                    .and_then(|d| d.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|m| m.get("name").and_then(|id| id.as_str()).map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            }
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => body
+                .get("data")
+                .and_then(|d| d.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|m| {
+                            m.get("id")
+                                .and_then(|id| id.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ProviderKind::Gemini => body
+                .get("models")
+                .and_then(|d| d.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|m| {
+                            m.get("name")
+                                .and_then(|id| id.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
 
         Ok(models)
@@ -946,9 +1027,9 @@ mod tests {
             role: "user".to_string(),
             content: "Hello".to_string(),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         };
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content, "Hello");
@@ -963,17 +1044,17 @@ mod tests {
                     role: "system".to_string(),
                     content: "You are a helpful assistant".to_string(),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 },
                 Message {
                     role: "user".to_string(),
                     content: "Hello".to_string(),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 },
             ],
             false,
@@ -1017,9 +1098,9 @@ mod tests {
                 role: "assistant".to_string(),
                 content: "Test".to_string(),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             },
             finish_reason: Some("stop".to_string()),
         };
@@ -1062,7 +1143,14 @@ mod tests {
         );
         let request = ChatRequest::new(
             "gpt-4".to_string(),
-            vec![Message { role: "user".to_string(), content: "hi".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None }],
+            vec![Message {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+                images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            }],
             false,
         );
         let body = provider.build_chat_body(&request);
@@ -1082,8 +1170,22 @@ mod tests {
         let request = ChatRequest::new(
             "claude-sonnet-4".to_string(),
             vec![
-                Message { role: "system".to_string(), content: "Be helpful".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
-                Message { role: "user".to_string(), content: "hi".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
+                Message {
+                    role: "system".to_string(),
+                    content: "Be helpful".to_string(),
+                    images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: "hi".to_string(),
+                    images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
+                },
             ],
             false,
         );

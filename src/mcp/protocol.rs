@@ -237,7 +237,8 @@ mod tests {
 
     #[test]
     fn test_json_rpc_error_parsing() {
-        let raw = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
+        let raw =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
         let resp: JsonRpcResponse = serde_json::from_str(raw).unwrap();
         assert!(resp.error.is_some());
         let err = resp.error.unwrap();
@@ -249,8 +250,12 @@ mod tests {
     fn test_call_tool_result_text() {
         let result = CallToolResult {
             content: vec![
-                ToolContent::Text { text: "Hello".to_string() },
-                ToolContent::Text { text: "World".to_string() },
+                ToolContent::Text {
+                    text: "Hello".to_string(),
+                },
+                ToolContent::Text {
+                    text: "World".to_string(),
+                },
             ],
             is_error: None,
         };

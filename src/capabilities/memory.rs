@@ -34,7 +34,10 @@ impl Tool for MemoryTool {
         } else if trimmed == "--list" {
             list_memories()
         } else {
-            Ok("Usage: memory --add <content> [--target user|memory] | --search <query> | --list".to_string())
+            Ok(
+                "Usage: memory --add <content> [--target user|memory] | --search <query> | --list"
+                    .to_string(),
+            )
         }
     }
 }
@@ -65,8 +68,7 @@ fn save_memory(content: &str, target: &str) -> Result<String> {
         content
     );
 
-    std::fs::write(&path, entry)
-        .with_context(|| format!("Failed to write memory: {:?}", path))?;
+    std::fs::write(&path, entry).with_context(|| format!("Failed to write memory: {:?}", path))?;
 
     Ok(format!("Memory saved to {:?}", path))
 }
@@ -75,8 +77,8 @@ fn search_memories(query: &str) -> Result<String> {
     let dir = memory_dir()?;
     let mut matches = Vec::new();
 
-    for entry in std::fs::read_dir(&dir)
-        .with_context(|| format!("Failed to read memory dir: {:?}", dir))?
+    for entry in
+        std::fs::read_dir(&dir).with_context(|| format!("Failed to read memory dir: {:?}", dir))?
     {
         let entry = entry?;
         let path = entry.path();
@@ -114,8 +116,8 @@ fn list_memories() -> Result<String> {
     let dir = memory_dir()?;
     let mut entries = Vec::new();
 
-    for entry in std::fs::read_dir(&dir)
-        .with_context(|| format!("Failed to read memory dir: {:?}", dir))?
+    for entry in
+        std::fs::read_dir(&dir).with_context(|| format!("Failed to read memory dir: {:?}", dir))?
     {
         let entry = entry?;
         let path = entry.path();
@@ -128,7 +130,11 @@ fn list_memories() -> Result<String> {
     if entries.is_empty() {
         Ok("No memories stored yet.".to_string())
     } else {
-        Ok(format!("Stored memories ({}):\n{}", entries.len(), entries.join("\n")))
+        Ok(format!(
+            "Stored memories ({}):\n{}",
+            entries.len(),
+            entries.join("\n")
+        ))
     }
 }
 
@@ -192,7 +198,9 @@ impl Tool for ContextEngineTool {
         let skill = parts.get(1).map(|s| s.trim());
 
         if query.is_empty() {
-            return Ok("Usage: context_engine <query> [--compress] [--inject <skill_name>]".to_string());
+            return Ok(
+                "Usage: context_engine <query> [--compress] [--inject <skill_name>]".to_string(),
+            );
         }
 
         let mut result = format!("Context engine processing: {}\n", query);

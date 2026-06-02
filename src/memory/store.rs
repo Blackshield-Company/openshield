@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -47,24 +47,23 @@ impl MemoryStore {
     pub fn new(db_path: &Path) -> Result<Self> {
         std::fs::create_dir_all(db_path.parent().unwrap_or(Path::new(".")))
             .context("Failed to create memory directory")?;
-        
-        let conn = Connection::open(db_path)
-            .context("Failed to open memory database")?;
-        
+
+        let conn = Connection::open(db_path).context("Failed to open memory database")?;
+
         let store = Self { conn };
         store.init_tables()?;
         Ok(store)
     }
-    
+
     fn init_tables(&self) -> Result<()> {
         // Migration: add project_path column if it doesn't exist (for existing DBs)
-        let _ = self.conn.execute(
-            "ALTER TABLE sessions ADD COLUMN project_path TEXT",
-            [],
-        );
+        let _ = self
+            .conn
+            .execute("ALTER TABLE sessions ADD COLUMN project_path TEXT", []);
 
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS sessions (
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 started_at TEXT NOT NULL,
                 model TEXT NOT NULL,
@@ -123,12 +122,13 @@ impl MemoryStore {
             CREATE INDEX IF NOT EXISTS idx_analysis_results_category ON analysis_results(category);
             CREATE INDEX IF NOT EXISTS idx_perf_metrics_type ON performance_metrics(metric_type);
             CREATE INDEX IF NOT EXISTS idx_perf_metrics_time ON performance_metrics(created_at);
-            "
-        ).context("Failed to create tables")?;
-        
+            ",
+            )
+            .context("Failed to create tables")?;
+
         Ok(())
     }
-    
+
     pub fn create_session(&self, id: &str, model: &str, task_type: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO sessions (id, started_at, model, task_type, project_path) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -156,20 +156,24 @@ impl MemoryStore {
             "SELECT id, started_at, model, task_type, project_path
              FROM sessions
              WHERE project_path = ?1
-             ORDER BY started_at DESC"
+             ORDER BY started_at DESC",
         )?;
 
-        let sessions = stmt.query_map(params![project_path], |row| {
-            Ok(Session {
-                id: row.get(0)?,
-                started_at: row.get::<_, String>(1)?.parse().unwrap_or_else(|_| Utc::now()),
-                model: row.get(2)?,
-                task_type: row.get(3)?,
-                project_path: row.get(4)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get sessions by project")?;
+        let sessions = stmt
+            .query_map(params![project_path], |row| {
+                Ok(Session {
+                    id: row.get(0)?,
+                    started_at: row
+                        .get::<_, String>(1)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    model: row.get(2)?,
+                    task_type: row.get(3)?,
+                    project_path: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get sessions by project")?;
 
         Ok(sessions)
     }
@@ -188,42 +192,48 @@ impl MemoryStore {
              JOIN sessions s ON m.session_id = s.id
              WHERE m.content LIKE ?1 AND s.project_path = ?2
              ORDER BY m.created_at DESC
-             LIMIT ?3"
+             LIMIT ?3",
         )?;
 
-        let messages = stmt.query_map(params![pattern, project_path, limit as i64], |row| {
-            Ok(Message {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get::<_, String>(4)?.parse().unwrap_or_else(|_| Utc::now()),
-                tokens_used: row.get(5)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to search messages by project")?;
+        let messages = stmt
+            .query_map(params![pattern, project_path, limit as i64], |row| {
+                Ok(Message {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row
+                        .get::<_, String>(4)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    tokens_used: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to search messages by project")?;
 
         Ok(messages)
     }
-    
+
     pub fn save_message(&self, msg: &Message) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, created_at, tokens_used) 
+        self.conn
+            .execute(
+                "INSERT INTO messages (id, session_id, role, content, created_at, tokens_used) 
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                msg.id,
-                msg.session_id,
-                msg.role,
-                msg.content,
-                msg.created_at.to_rfc3339(),
-                msg.tokens_used
-            ],
-        ).context("Failed to save message")?;
+                params![
+                    msg.id,
+                    msg.session_id,
+                    msg.role,
+                    msg.content,
+                    msg.created_at.to_rfc3339(),
+                    msg.tokens_used
+                ],
+            )
+            .context("Failed to save message")?;
 
         let embedding = generate_embedding(&msg.content);
-        let embedding_json = serde_json::to_string(&embedding)
-            .context("Failed to serialize embedding")?;
+        let embedding_json =
+            serde_json::to_string(&embedding).context("Failed to serialize embedding")?;
         self.conn.execute(
             "INSERT OR REPLACE INTO message_embeddings (message_id, embedding_json) VALUES (?1, ?2)",
             params![msg.id, embedding_json],
@@ -231,33 +241,35 @@ impl MemoryStore {
 
         Ok(())
     }
-    
-    pub fn get_session_messages(&self,
-        session_id: &str,
-    ) -> Result<Vec<Message>> {
+
+    pub fn get_session_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, session_id, role, content, created_at, tokens_used 
              FROM messages 
              WHERE session_id = ?1 
-             ORDER BY created_at"
+             ORDER BY created_at",
         )?;
-        
-        let messages = stmt.query_map(params![session_id], |row| {
-            Ok(Message {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get::<_, String>(4)?.parse().unwrap_or_else(|_| Utc::now()),
-                tokens_used: row.get(5)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to collect messages")?;
-        
+
+        let messages = stmt
+            .query_map(params![session_id], |row| {
+                Ok(Message {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row
+                        .get::<_, String>(4)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    tokens_used: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to collect messages")?;
+
         Ok(messages)
     }
-    
+
     pub fn save_tool_call(&self, call: &ToolCall) -> Result<()> {
         self.conn.execute(
             "INSERT INTO tool_calls (id, session_id, tool_name, args, result, success, created_at)
@@ -274,32 +286,33 @@ impl MemoryStore {
         ).context("Failed to save tool call")?;
         Ok(())
     }
-    
-    pub fn search_messages(&self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<Message>> {
+
+    pub fn search_messages(&self, query: &str, limit: usize) -> Result<Vec<Message>> {
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
             "SELECT id, session_id, role, content, created_at, tokens_used 
              FROM messages 
              WHERE content LIKE ?1 
              ORDER BY created_at DESC 
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
 
-        let messages = stmt.query_map(params![pattern, limit as i64], |row| {
-            Ok(Message {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get::<_, String>(4)?.parse().unwrap_or_else(|_| Utc::now()),
-                tokens_used: row.get(5)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to search messages")?;
+        let messages = stmt
+            .query_map(params![pattern, limit as i64], |row| {
+                Ok(Message {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row
+                        .get::<_, String>(4)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    tokens_used: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to search messages")?;
 
         Ok(messages)
     }
@@ -315,18 +328,22 @@ impl MemoryStore {
 
         let rows = stmt.query_map([], |row| {
             let embedding_json: String = row.get(6)?;
-            let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
-                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+            let embedding: Vec<f32> = serde_json::from_str(&embedding_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
                     6,
                     rusqlite::types::Type::Text,
                     Box::new(e),
-                ))?;
+                )
+            })?;
             let msg = Message {
                 id: row.get(0)?,
                 session_id: row.get(1)?,
                 role: row.get(2)?,
                 content: row.get(3)?,
-                created_at: row.get::<_, String>(4)?.parse().unwrap_or_else(|_| Utc::now()),
+                created_at: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or_else(|_| Utc::now()),
                 tokens_used: row.get(5)?,
             };
             Ok((msg, embedding))
@@ -346,81 +363,93 @@ impl MemoryStore {
 
         Ok(scored)
     }
-    
-    pub fn get_recent_sessions(&self,
-        limit: usize,
-    ) -> Result<Vec<Session>> {
+
+    pub fn get_recent_sessions(&self, limit: usize) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, started_at, model, task_type, project_path
              FROM sessions
              ORDER BY started_at DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
-        
-        let sessions = stmt.query_map(params![limit as i64], |row| {
-            Ok(Session {
-                id: row.get(0)?,
-                started_at: row.get::<_, String>(1)?.parse().unwrap_or_else(|_| Utc::now()),
-                model: row.get(2)?,
-                task_type: row.get(3)?,
-                project_path: row.get(4)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get sessions")?;
-        
+
+        let sessions = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(Session {
+                    id: row.get(0)?,
+                    started_at: row
+                        .get::<_, String>(1)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    model: row.get(2)?,
+                    task_type: row.get(3)?,
+                    project_path: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get sessions")?;
+
         Ok(sessions)
     }
-    
+
     pub fn search_tool_calls_by_session(&self, session_id: &str) -> Result<Vec<ToolCall>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, session_id, tool_name, args, result, success, created_at 
              FROM tool_calls 
              WHERE session_id = ?1 
-             ORDER BY created_at"
+             ORDER BY created_at",
         )?;
-        
-        let calls = stmt.query_map(params![session_id], |row| {
-            Ok(ToolCall {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                tool_name: row.get(2)?,
-                args: row.get(3)?,
-                result: row.get(4)?,
-                success: row.get::<_, i32>(5)? != 0,
-                created_at: row.get::<_, String>(6)?.parse().unwrap_or_else(|_| Utc::now()),
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to search tool calls")?;
-        
+
+        let calls = stmt
+            .query_map(params![session_id], |row| {
+                Ok(ToolCall {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    tool_name: row.get(2)?,
+                    args: row.get(3)?,
+                    result: row.get(4)?,
+                    success: row.get::<_, i32>(5)? != 0,
+                    created_at: row
+                        .get::<_, String>(6)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to search tool calls")?;
+
         Ok(calls)
     }
 
     pub fn save_analysis_result(&self, category: &str, key: &str, value: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO analysis_results (category, key, value, created_at)
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO analysis_results (category, key, value, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            params![category, key, value, Utc::now().to_rfc3339()],
-        ).context("Failed to save analysis result")?;
+                params![category, key, value, Utc::now().to_rfc3339()],
+            )
+            .context("Failed to save analysis result")?;
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn get_analysis_results(&self, category: &str) -> Result<Vec<(String, String, DateTime<Utc>)>> {
+    pub fn get_analysis_results(
+        &self,
+        category: &str,
+    ) -> Result<Vec<(String, String, DateTime<Utc>)>> {
         let mut stmt = self.conn.prepare(
             "SELECT key, value, created_at FROM analysis_results WHERE category = ?1 ORDER BY created_at DESC"
         )?;
-        let results = stmt.query_map(params![category], |row| {
-            let created_at: String = row.get(2)?;
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                created_at.parse().unwrap_or_else(|_| Utc::now()),
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get analysis results")?;
+        let results = stmt
+            .query_map(params![category], |row| {
+                let created_at: String = row.get(2)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    created_at.parse().unwrap_or_else(|_| Utc::now()),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get analysis results")?;
         Ok(results)
     }
 
@@ -429,16 +458,18 @@ impl MemoryStore {
         let mut stmt = self.conn.prepare(
             "SELECT value FROM analysis_results WHERE category = ?1 AND key = ?2 ORDER BY created_at DESC LIMIT 1"
         )?;
-        let result = stmt.query_map(params![category, key], |row| {
-            Ok(row.get::<_, String>(0)?)
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get analysis result")?;
+        let result = stmt
+            .query_map(params![category, key], |row| Ok(row.get::<_, String>(0)?))?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get analysis result")?;
         Ok(result.into_iter().next())
     }
 
     #[allow(dead_code)]
-    pub fn get_all_tool_calls_with_sessions(&self, limit: usize) -> Result<Vec<(ToolCall, Session)>> {
+    pub fn get_all_tool_calls_with_sessions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(ToolCall, Session)>> {
         let mut stmt = self.conn.prepare(
             "SELECT
                 tc.id, tc.session_id, tc.tool_name, tc.args, tc.result, tc.success, tc.created_at,
@@ -446,30 +477,37 @@ impl MemoryStore {
              FROM tool_calls tc
              JOIN sessions s ON tc.session_id = s.id
              ORDER BY tc.created_at DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let results = stmt.query_map(params![limit as i64], |row| {
-            let tool_call = ToolCall {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                tool_name: row.get(2)?,
-                args: row.get(3)?,
-                result: row.get(4)?,
-                success: row.get::<_, i32>(5)? != 0,
-                created_at: row.get::<_, String>(6)?.parse().unwrap_or_else(|_| Utc::now()),
-            };
-            let session = Session {
-                id: row.get(7)?,
-                started_at: row.get::<_, String>(8)?.parse().unwrap_or_else(|_| Utc::now()),
-                model: row.get(9)?,
-                task_type: row.get(10)?,
-                project_path: row.get(11)?,
-            };
-            Ok((tool_call, session))
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get tool calls with sessions")?;
+        let results = stmt
+            .query_map(params![limit as i64], |row| {
+                let tool_call = ToolCall {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    tool_name: row.get(2)?,
+                    args: row.get(3)?,
+                    result: row.get(4)?,
+                    success: row.get::<_, i32>(5)? != 0,
+                    created_at: row
+                        .get::<_, String>(6)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                };
+                let session = Session {
+                    id: row.get(7)?,
+                    started_at: row
+                        .get::<_, String>(8)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    model: row.get(9)?,
+                    task_type: row.get(10)?,
+                    project_path: row.get(11)?,
+                };
+                Ok((tool_call, session))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get tool calls with sessions")?;
 
         Ok(results)
     }
@@ -486,18 +524,19 @@ impl MemoryStore {
              GROUP BY tool_a, tool_b
              HAVING co_fail_count >= 2
              ORDER BY co_fail_count DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let patterns = stmt.query_map(params![limit as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, usize>(2)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get tool failure patterns")?;
+        let patterns = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, usize>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get tool failure patterns")?;
 
         Ok(patterns)
     }
@@ -510,22 +549,23 @@ impl MemoryStore {
              GROUP BY result
              HAVING error_count >= 1
              ORDER BY error_count DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let errors = stmt.query_map(params![limit as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, usize>(1)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get common errors")?;
+        let errors = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get common errors")?;
 
         Ok(errors)
     }
 
-    pub fn get_prompt_effectiveness(&self, limit: usize) -> Result<Vec<(String, usize, usize, f64)>> {
+    pub fn get_prompt_effectiveness(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(String, usize, usize, f64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT 
                 m.content as prompt,
@@ -538,22 +578,23 @@ impl MemoryStore {
              GROUP BY m.content
              HAVING total_calls >= 2
              ORDER BY total_calls DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let effectiveness = stmt.query_map(params![limit as i64], |row| {
-            let prompt: String = row.get(0)?;
-            let total_calls: usize = row.get(1)?;
-            let success_calls: usize = row.get(2)?;
-            let success_rate = if total_calls > 0 {
-                (success_calls as f64 / total_calls as f64) * 100.0
-            } else {
-                0.0
-            };
-            Ok((prompt, total_calls, success_calls, success_rate))
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get prompt effectiveness")?;
+        let effectiveness = stmt
+            .query_map(params![limit as i64], |row| {
+                let prompt: String = row.get(0)?;
+                let total_calls: usize = row.get(1)?;
+                let success_calls: usize = row.get(2)?;
+                let success_rate = if total_calls > 0 {
+                    (success_calls as f64 / total_calls as f64) * 100.0
+                } else {
+                    0.0
+                };
+                Ok((prompt, total_calls, success_calls, success_rate))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get prompt effectiveness")?;
 
         Ok(effectiveness)
     }
@@ -583,32 +624,36 @@ impl MemoryStore {
                  GROUP BY session_id
              ) tc_counts ON s.id = tc_counts.session_id
              ORDER BY s.started_at DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let metrics = stmt.query_map(params![limit as i64], |row| {
-            let tool_call_count: usize = row.get(5)?;
-            let tool_success_count: usize = row.get(6)?;
-            let tool_success_rate = if tool_call_count > 0 {
-                (tool_success_count as f64 / tool_call_count as f64) * 100.0
-            } else {
-                0.0
-            };
+        let metrics = stmt
+            .query_map(params![limit as i64], |row| {
+                let tool_call_count: usize = row.get(5)?;
+                let tool_success_count: usize = row.get(6)?;
+                let tool_success_rate = if tool_call_count > 0 {
+                    (tool_success_count as f64 / tool_call_count as f64) * 100.0
+                } else {
+                    0.0
+                };
 
-            Ok(SessionQualityMetrics {
-                session_id: row.get(0)?,
-                model: row.get(1)?,
-                task_type: row.get(2)?,
-                started_at: row.get::<_, String>(3)?.parse().unwrap_or_else(|_| Utc::now()),
-                message_count: row.get(4)?,
-                tool_call_count,
-                tool_success_count,
-                tool_success_rate,
-                quality_score: 0.0,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get session quality metrics")?;
+                Ok(SessionQualityMetrics {
+                    session_id: row.get(0)?,
+                    model: row.get(1)?,
+                    task_type: row.get(2)?,
+                    started_at: row
+                        .get::<_, String>(3)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    message_count: row.get(4)?,
+                    tool_call_count,
+                    tool_success_count,
+                    tool_success_rate,
+                    quality_score: 0.0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get session quality metrics")?;
 
         Ok(metrics)
     }
@@ -626,51 +671,46 @@ impl MemoryStore {
              GROUP BY s.model, day
              HAVING total_calls > 0
              ORDER BY day DESC, s.model
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let trends = stmt.query_map(params![limit as i64], |row| {
-            let total_calls: usize = row.get(3)?;
-            let success_calls: usize = row.get(4)?;
-            let success_rate = if total_calls > 0 {
-                (success_calls as f64 / total_calls as f64) * 100.0
-            } else {
-                0.0
-            };
+        let trends = stmt
+            .query_map(params![limit as i64], |row| {
+                let total_calls: usize = row.get(3)?;
+                let success_calls: usize = row.get(4)?;
+                let success_rate = if total_calls > 0 {
+                    (success_calls as f64 / total_calls as f64) * 100.0
+                } else {
+                    0.0
+                };
 
-            Ok(ModelTrendData {
-                model: row.get(0)?,
-                day: row.get(1)?,
-                session_count: row.get(2)?,
-                total_calls,
-                success_calls,
-                success_rate,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get model performance trends")?;
+                Ok(ModelTrendData {
+                    model: row.get(0)?,
+                    day: row.get(1)?,
+                    session_count: row.get(2)?,
+                    total_calls,
+                    success_calls,
+                    success_rate,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get model performance trends")?;
 
         Ok(trends)
     }
 
     pub fn get_stats_summary(&self) -> Result<MemoryStats> {
-        let total_sessions: usize = self.conn.query_row(
-            "SELECT COUNT(*) FROM sessions",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_sessions: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))?;
 
-        let total_messages: usize = self.conn.query_row(
-            "SELECT COUNT(*) FROM messages",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_messages: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?;
 
-        let total_tool_calls: usize = self.conn.query_row(
-            "SELECT COUNT(*) FROM tool_calls",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_tool_calls: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM tool_calls", [], |row| row.get(0))?;
 
         let successful_tool_calls: usize = self.conn.query_row(
             "SELECT COUNT(*) FROM tool_calls WHERE success = 1",
@@ -684,29 +724,35 @@ impl MemoryStore {
             |row| row.get(0),
         )?;
 
-        let unique_models: usize = self.conn.query_row(
-            "SELECT COUNT(DISTINCT model) FROM sessions",
-            [],
-            |row| row.get(0),
-        )?;
+        let unique_models: usize =
+            self.conn
+                .query_row("SELECT COUNT(DISTINCT model) FROM sessions", [], |row| {
+                    row.get(0)
+                })?;
 
-        let first_session: Option<DateTime<Utc>> = self.conn.query_row(
-            "SELECT started_at FROM sessions ORDER BY started_at ASC LIMIT 1",
-            [],
-            |row| {
-                let s: String = row.get(0)?;
-                Ok(s.parse().unwrap_or_else(|_| Utc::now()))
-            },
-        ).ok();
+        let first_session: Option<DateTime<Utc>> = self
+            .conn
+            .query_row(
+                "SELECT started_at FROM sessions ORDER BY started_at ASC LIMIT 1",
+                [],
+                |row| {
+                    let s: String = row.get(0)?;
+                    Ok(s.parse().unwrap_or_else(|_| Utc::now()))
+                },
+            )
+            .ok();
 
-        let latest_session: Option<DateTime<Utc>> = self.conn.query_row(
-            "SELECT started_at FROM sessions ORDER BY started_at DESC LIMIT 1",
-            [],
-            |row| {
-                let s: String = row.get(0)?;
-                Ok(s.parse().unwrap_or_else(|_| Utc::now()))
-            },
-        ).ok();
+        let latest_session: Option<DateTime<Utc>> = self
+            .conn
+            .query_row(
+                "SELECT started_at FROM sessions ORDER BY started_at DESC LIMIT 1",
+                [],
+                |row| {
+                    let s: String = row.get(0)?;
+                    Ok(s.parse().unwrap_or_else(|_| Utc::now()))
+                },
+            )
+            .ok();
 
         let tool_success_rate = if total_tool_calls > 0 {
             (successful_tool_calls as f64 / total_tool_calls as f64) * 100.0
@@ -740,29 +786,30 @@ impl MemoryStore {
              LEFT JOIN messages m ON s.id = m.session_id
              LEFT JOIN tool_calls tc ON s.id = tc.session_id
              GROUP BY s.model
-             ORDER BY session_count DESC"
+             ORDER BY session_count DESC",
         )?;
 
-        let stats = stmt.query_map([], |row| {
-            let tool_call_count: usize = row.get(4)?;
-            let successful_tool_calls: usize = row.get(5)?;
-            let tool_success_rate = if tool_call_count > 0 {
-                (successful_tool_calls as f64 / tool_call_count as f64) * 100.0
-            } else {
-                0.0
-            };
+        let stats = stmt
+            .query_map([], |row| {
+                let tool_call_count: usize = row.get(4)?;
+                let successful_tool_calls: usize = row.get(5)?;
+                let tool_success_rate = if tool_call_count > 0 {
+                    (successful_tool_calls as f64 / tool_call_count as f64) * 100.0
+                } else {
+                    0.0
+                };
 
-            Ok(ModelUsageStats {
-                model: row.get(0)?,
-                session_count: row.get(1)?,
-                message_count: row.get(2)?,
-                total_tokens: row.get(3)?,
-                tool_call_count,
-                tool_success_rate,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get model usage stats")?;
+                Ok(ModelUsageStats {
+                    model: row.get(0)?,
+                    session_count: row.get(1)?,
+                    message_count: row.get(2)?,
+                    total_tokens: row.get(3)?,
+                    tool_call_count,
+                    tool_success_rate,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get model usage stats")?;
 
         Ok(stats)
     }
@@ -776,19 +823,20 @@ impl MemoryStore {
                 AVG(CASE WHEN success = 1 THEN 1.0 ELSE 0.0 END) * 100.0 as success_rate
              FROM tool_calls
              GROUP BY tool_name
-             ORDER BY total_calls DESC"
+             ORDER BY total_calls DESC",
         )?;
 
-        let stats = stmt.query_map([], |row| {
-            Ok(ToolUsageStats {
-                tool_name: row.get(0)?,
-                total_calls: row.get(1)?,
-                successful_calls: row.get(2)?,
-                success_rate: row.get(3)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get tool usage stats")?;
+        let stats = stmt
+            .query_map([], |row| {
+                Ok(ToolUsageStats {
+                    tool_name: row.get(0)?,
+                    total_calls: row.get(1)?,
+                    successful_calls: row.get(2)?,
+                    success_rate: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get tool usage stats")?;
 
         Ok(stats)
     }
@@ -802,19 +850,20 @@ impl MemoryStore {
              FROM sessions
              WHERE started_at >= date('now', ?1)
              GROUP BY day
-             ORDER BY day DESC"
+             ORDER BY day DESC",
         )?;
 
         let days_param = format!("-{} days", days);
-        let activity = stmt.query_map(params![days_param], |row| {
-            Ok(DailyActivity {
-                day: row.get(0)?,
-                session_count: row.get(1)?,
-                model_count: row.get(2)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get daily activity")?;
+        let activity = stmt
+            .query_map(params![days_param], |row| {
+                Ok(DailyActivity {
+                    day: row.get(0)?,
+                    session_count: row.get(1)?,
+                    model_count: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get daily activity")?;
 
         Ok(activity)
     }
@@ -851,21 +900,22 @@ impl MemoryStore {
              FROM performance_metrics
              WHERE metric_type = ?1
              ORDER BY created_at DESC
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
 
-        let metrics = stmt.query_map(params![metric_type, limit as i64], |row| {
-            let created_at: String = row.get(4)?;
-            Ok(PerformanceMetric {
-                metric_type: row.get(0)?,
-                metric_name: row.get(1)?,
-                value_ms: row.get::<_, i64>(2)? as u64,
-                metadata: row.get(3)?,
-                created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to get performance metrics")?;
+        let metrics = stmt
+            .query_map(params![metric_type, limit as i64], |row| {
+                let created_at: String = row.get(4)?;
+                Ok(PerformanceMetric {
+                    metric_type: row.get(0)?,
+                    metric_name: row.get(1)?,
+                    value_ms: row.get::<_, i64>(2)? as u64,
+                    metadata: row.get(3)?,
+                    created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get performance metrics")?;
 
         Ok(metrics)
     }
@@ -940,7 +990,11 @@ mod tests {
     fn create_test_store() -> MemoryStore {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = format!("/tmp/openshark_memory_test_{}_{}.db", std::process::id(), count);
+        let db_path = format!(
+            "/tmp/openshark_memory_test_{}_{}.db",
+            std::process::id(),
+            count
+        );
         let _ = std::fs::remove_file(&db_path);
         MemoryStore::new(Path::new(&db_path)).unwrap()
     }
@@ -956,7 +1010,13 @@ mod tests {
         }
     }
 
-    fn create_test_tool_call(session_id: &str, id: &str, tool_name: &str, success: bool, result: &str) -> ToolCall {
+    fn create_test_tool_call(
+        session_id: &str,
+        id: &str,
+        tool_name: &str,
+        success: bool,
+        result: &str,
+    ) -> ToolCall {
         ToolCall {
             id: id.to_string(),
             session_id: session_id.to_string(),
@@ -985,21 +1045,31 @@ mod tests {
     #[test]
     fn test_create_session_with_project() {
         let store = create_test_store();
-        let result = store.create_session_with_project("sess-1", "model-a", "code", "/home/user/project");
+        let result =
+            store.create_session_with_project("sess-1", "model-a", "code", "/home/user/project");
         assert!(result.is_ok());
 
         let sessions = store.get_sessions_by_project("/home/user/project").unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "sess-1");
-        assert_eq!(sessions[0].project_path.as_deref(), Some("/home/user/project"));
+        assert_eq!(
+            sessions[0].project_path.as_deref(),
+            Some("/home/user/project")
+        );
     }
 
     #[test]
     fn test_get_sessions_by_project() {
         let store = create_test_store();
-        store.create_session_with_project("sess-1", "model-a", "code", "/project/a").unwrap();
-        store.create_session_with_project("sess-2", "model-b", "chat", "/project/a").unwrap();
-        store.create_session_with_project("sess-3", "model-c", "other", "/project/b").unwrap();
+        store
+            .create_session_with_project("sess-1", "model-a", "code", "/project/a")
+            .unwrap();
+        store
+            .create_session_with_project("sess-2", "model-b", "chat", "/project/a")
+            .unwrap();
+        store
+            .create_session_with_project("sess-3", "model-c", "other", "/project/b")
+            .unwrap();
 
         let sessions_a = store.get_sessions_by_project("/project/a").unwrap();
         assert_eq!(sessions_a.len(), 2);
@@ -1015,8 +1085,12 @@ mod tests {
     #[test]
     fn test_search_messages_by_project() {
         let store = create_test_store();
-        store.create_session_with_project("sess-1", "model-a", "code", "/project/a").unwrap();
-        store.create_session_with_project("sess-2", "model-b", "chat", "/project/b").unwrap();
+        store
+            .create_session_with_project("sess-1", "model-a", "code", "/project/a")
+            .unwrap();
+        store
+            .create_session_with_project("sess-2", "model-b", "chat", "/project/b")
+            .unwrap();
 
         let msg1 = create_test_message("sess-1", "msg-1", "user", "rust programming in project a");
         let msg2 = create_test_message("sess-2", "msg-2", "user", "rust programming in project b");
@@ -1024,11 +1098,15 @@ mod tests {
         store.save_message(&msg1).unwrap();
         store.save_message(&msg2).unwrap();
 
-        let results_a = store.search_messages_by_project("rust", "/project/a", 10).unwrap();
+        let results_a = store
+            .search_messages_by_project("rust", "/project/a", 10)
+            .unwrap();
         assert_eq!(results_a.len(), 1);
         assert!(results_a[0].content.contains("project a"));
 
-        let results_b = store.search_messages_by_project("rust", "/project/b", 10).unwrap();
+        let results_b = store
+            .search_messages_by_project("rust", "/project/b", 10)
+            .unwrap();
         assert_eq!(results_b.len(), 1);
         assert!(results_b[0].content.contains("project b"));
     }
@@ -1093,7 +1171,9 @@ mod tests {
         let store = create_test_store();
         store.create_session("sess-1", "model-a", "code").unwrap();
         store.create_session("sess-2", "model-b", "chat").unwrap();
-        store.create_session("sess-3", "model-c", "analysis").unwrap();
+        store
+            .create_session("sess-3", "model-c", "analysis")
+            .unwrap();
 
         let sessions = store.get_recent_sessions(2).unwrap();
         assert_eq!(sessions.len(), 2);
@@ -1102,8 +1182,12 @@ mod tests {
     #[test]
     fn test_save_and_get_analysis_results() {
         let store = create_test_store();
-        store.save_analysis_result("model_performance", "model-a", "rate=0.95").unwrap();
-        store.save_analysis_result("model_performance", "model-b", "rate=0.80").unwrap();
+        store
+            .save_analysis_result("model_performance", "model-a", "rate=0.95")
+            .unwrap();
+        store
+            .save_analysis_result("model_performance", "model-b", "rate=0.80")
+            .unwrap();
 
         let results = store.get_analysis_results("model_performance").unwrap();
         assert_eq!(results.len(), 2);
@@ -1216,8 +1300,12 @@ mod tests {
     #[test]
     fn test_analysis_results_update() {
         let store = create_test_store();
-        store.save_analysis_result("test_cat", "key1", "value1").unwrap();
-        store.save_analysis_result("test_cat", "key1", "value2").unwrap();
+        store
+            .save_analysis_result("test_cat", "key1", "value1")
+            .unwrap();
+        store
+            .save_analysis_result("test_cat", "key1", "value2")
+            .unwrap();
 
         let results = store.get_analysis_results("test_cat").unwrap();
         assert_eq!(results.len(), 1);
@@ -1229,9 +1317,20 @@ mod tests {
         let store = create_test_store();
         store.create_session("sess-1", "model-a", "code").unwrap();
 
-        let msg1 = create_test_message("sess-1", "msg-1", "user", "How to write rust code for systems programming");
-        let msg2 = create_test_message("sess-1", "msg-2", "user", "Python scripting and automation");
-        let msg3 = create_test_message("sess-1", "msg-3", "user", "Rust memory management and ownership");
+        let msg1 = create_test_message(
+            "sess-1",
+            "msg-1",
+            "user",
+            "How to write rust code for systems programming",
+        );
+        let msg2 =
+            create_test_message("sess-1", "msg-2", "user", "Python scripting and automation");
+        let msg3 = create_test_message(
+            "sess-1",
+            "msg-3",
+            "user",
+            "Rust memory management and ownership",
+        );
         let msg4 = create_test_message("sess-1", "msg-4", "user", "Cooking recipes for beginners");
 
         store.save_message(&msg1).unwrap();
@@ -1255,7 +1354,12 @@ mod tests {
         store.create_session("sess-1", "model-a", "code").unwrap();
 
         for i in 0..5 {
-            let msg = create_test_message("sess-1", &format!("msg-{}", i), "user", &format!("topic {}", i));
+            let msg = create_test_message(
+                "sess-1",
+                &format!("msg-{}", i),
+                "user",
+                &format!("topic {}", i),
+            );
             store.save_message(&msg).unwrap();
         }
 
@@ -1320,9 +1424,10 @@ mod tests {
         let msg = create_test_message("sess-1", "msg-1", "user", "Hello world");
         store.save_message(&msg).unwrap();
 
-        let mut stmt = store.conn.prepare(
-            "SELECT embedding_json FROM message_embeddings WHERE message_id = ?1"
-        ).unwrap();
+        let mut stmt = store
+            .conn
+            .prepare("SELECT embedding_json FROM message_embeddings WHERE message_id = ?1")
+            .unwrap();
         let embedding_json: String = stmt.query_row(params!["msg-1"], |row| row.get(0)).unwrap();
         let embedding: Vec<f32> = serde_json::from_str(&embedding_json).unwrap();
         assert_eq!(embedding.len(), crate::memory::embeddings::EMBEDDING_DIM);

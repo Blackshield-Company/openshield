@@ -82,17 +82,14 @@ impl IdentityManager {
     }
 
     /// Create a new session for an identity.
-    pub fn create_session(
-        &self,
-        identity: &str,
-    ) -> Result<String> {
+    pub fn create_session(&self, identity: &str) -> Result<String> {
         // Check concurrent session limit
-        let sessions = self.sessions.lock()
+        let sessions = self
+            .sessions
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock sessions: {}", e))?;
 
-        let active_count = sessions.values()
-            .filter(|s| s.identity == identity)
-            .count();
+        let active_count = sessions.values().filter(|s| s.identity == identity).count();
 
         if active_count >= self.config.max_concurrent_sessions {
             return Err(anyhow::anyhow!(
@@ -127,7 +124,9 @@ impl IdentityManager {
             revoked: false,
         };
 
-        let mut creds = self.credentials.lock()
+        let mut creds = self
+            .credentials
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock credentials: {}", e))?;
         creds.insert(credential.id.clone(), credential.clone());
 
@@ -140,15 +139,14 @@ impl IdentityManager {
     }
 
     /// Validate a credential for a tool operation.
-    pub fn validate_credential(
-        &self,
-        credential_id: &str,
-        tool_name: &str,
-    ) -> Result<()> {
-        let creds = self.credentials.lock()
+    pub fn validate_credential(&self, credential_id: &str, tool_name: &str) -> Result<()> {
+        let creds = self
+            .credentials
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock credentials: {}", e))?;
 
-        let credential = creds.get(credential_id)
+        let credential = creds
+            .get(credential_id)
             .ok_or_else(|| anyhow::anyhow!("Credential not found"))?;
 
         if credential.revoked {
@@ -189,7 +187,9 @@ impl IdentityManager {
 
     /// Revoke a credential.
     pub fn revoke_credential(&self, credential_id: &str) -> Result<()> {
-        let mut creds = self.credentials.lock()
+        let mut creds = self
+            .credentials
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock credentials: {}", e))?;
 
         if let Some(cred) = creds.get_mut(credential_id) {
@@ -202,7 +202,9 @@ impl IdentityManager {
 
     /// Revoke all credentials for a session.
     pub fn revoke_session_credentials(&self, session_id: &str) -> Result<usize> {
-        let mut creds = self.credentials.lock()
+        let mut creds = self
+            .credentials
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock credentials: {}", e))?;
 
         let mut count = 0;
@@ -222,13 +224,17 @@ impl IdentityManager {
         let now = Instant::now();
         let ttl = Duration::from_secs(self.config.credential_ttl_secs * 2);
 
-        let mut sessions = self.sessions.lock()
+        let mut sessions = self
+            .sessions
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock sessions: {}", e))?;
         let session_count_before = sessions.len();
         sessions.retain(|_, s| now.duration_since(s.last_active) < ttl);
         let sessions_removed = session_count_before - sessions.len();
 
-        let mut creds = self.credentials.lock()
+        let mut creds = self
+            .credentials
+            .lock()
             .map_err(|e| anyhow::anyhow!("Failed to lock credentials: {}", e))?;
         let cred_count_before = creds.len();
         let now_dt = chrono::Utc::now();
@@ -241,11 +247,17 @@ impl IdentityManager {
     /// Check if an endpoint is allowed.
     pub fn is_endpoint_allowed(&self, endpoint: &str) -> bool {
         if !self.config.allowed_endpoints.is_empty() {
-            return self.config.allowed_endpoints.iter()
+            return self
+                .config
+                .allowed_endpoints
+                .iter()
                 .any(|allowed| endpoint.contains(allowed));
         }
 
-        !self.config.blocked_endpoints.iter()
+        !self
+            .config
+            .blocked_endpoints
+            .iter()
             .any(|blocked| endpoint.contains(blocked))
     }
 }
@@ -275,7 +287,9 @@ mod tests {
     fn test_issue_credential() {
         let mgr = IdentityManager::new(test_config());
         let session = mgr.create_session("test").unwrap();
-        let cred = mgr.issue_credential(&session, CredentialScope::ReadOnly).unwrap();
+        let cred = mgr
+            .issue_credential(&session, CredentialScope::ReadOnly)
+            .unwrap();
         assert_eq!(cred.session_id, session);
         assert!(!cred.revoked);
     }
@@ -284,7 +298,9 @@ mod tests {
     fn test_validate_credential_scope() {
         let mgr = IdentityManager::new(test_config());
         let session = mgr.create_session("test").unwrap();
-        let cred = mgr.issue_credential(&session, CredentialScope::ReadOnly).unwrap();
+        let cred = mgr
+            .issue_credential(&session, CredentialScope::ReadOnly)
+            .unwrap();
 
         // ReadOnly should allow fs
         assert!(mgr.validate_credential(&cred.id, "fs").is_ok());
@@ -297,7 +313,9 @@ mod tests {
     fn test_revoke_credential() {
         let mgr = IdentityManager::new(test_config());
         let session = mgr.create_session("test").unwrap();
-        let cred = mgr.issue_credential(&session, CredentialScope::Full).unwrap();
+        let cred = mgr
+            .issue_credential(&session, CredentialScope::Full)
+            .unwrap();
 
         mgr.revoke_credential(&cred.id).unwrap();
         assert!(mgr.validate_credential(&cred.id, "fs").is_err());
@@ -316,7 +334,9 @@ mod tests {
         config.credential_ttl_secs = 0; // Immediate expiry
         let mgr = IdentityManager::new(config);
         let session = mgr.create_session("test").unwrap();
-        let cred = mgr.issue_credential(&session, CredentialScope::Full).unwrap();
+        let cred = mgr
+            .issue_credential(&session, CredentialScope::Full)
+            .unwrap();
 
         // Should fail because credential expired immediately
         std::thread::sleep(std::time::Duration::from_millis(10));

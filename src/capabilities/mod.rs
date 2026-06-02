@@ -25,8 +25,8 @@ pub mod productivity;
 pub mod smart_home;
 pub mod web;
 
-use std::sync::{Arc, OnceLock};
 use crate::tools::Tool;
+use std::sync::{Arc, OnceLock};
 
 /// Global singleton registry for all capability tools.
 static CAPABILITY_REGISTRY: OnceLock<CapabilityRegistry> = OnceLock::new();

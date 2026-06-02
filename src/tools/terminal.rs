@@ -1,6 +1,6 @@
+use super::Tool;
 use anyhow::{Context, Result};
 use std::process::Command;
-use super::Tool;
 
 pub struct TerminalTool;
 
@@ -25,7 +25,10 @@ impl Tool for TerminalTool {
             result.push_str(&String::from_utf8_lossy(&output.stdout));
         }
         if !output.stderr.is_empty() {
-            result.push_str(&format!("\n[stderr]: {}", String::from_utf8_lossy(&output.stderr)));
+            result.push_str(&format!(
+                "\n[stderr]: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(result)

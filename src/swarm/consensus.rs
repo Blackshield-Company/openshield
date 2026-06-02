@@ -45,7 +45,9 @@ impl ConsensusMemory {
     /// Approve an entry by a reviewer.
     pub fn approve_entry(&mut self, author: &str, reviewer: &str) {
         // Find the most recent pending entry by this author
-        if let Some(entry) = self.entries.values_mut()
+        if let Some(entry) = self
+            .entries
+            .values_mut()
             .filter(|e| e.author == author && e.status == EntryStatus::Pending)
             .max_by_key(|e| e.timestamp)
         {
@@ -69,7 +71,9 @@ impl ConsensusMemory {
 
     /// Reject an entry by a reviewer with feedback.
     pub fn reject_entry(&mut self, author: &str, reviewer: &str, _feedback: &str) {
-        if let Some(entry) = self.entries.values_mut()
+        if let Some(entry) = self
+            .entries
+            .values_mut()
             .filter(|e| e.author == author && e.status == EntryStatus::Pending)
             .max_by_key(|e| e.timestamp)
         {
@@ -106,7 +110,8 @@ impl ConsensusMemory {
 
     /// Get entries by status.
     pub fn entries_by_status(&self, status: EntryStatus) -> Vec<&ConsensusEntry> {
-        self.entries.values()
+        self.entries
+            .values()
             .filter(|e| e.status == status)
             .collect()
     }

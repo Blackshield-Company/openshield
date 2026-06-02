@@ -60,7 +60,9 @@ impl SlackBot {
             .slack
             .app_token
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Slack app token not configured (required for Socket Mode)"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Slack app token not configured (required for Socket Mode)")
+            })?;
 
         info!("Slack gateway scaffolding...");
         info!("Bot token: xoxb-*** | App token: xapp-***");

@@ -39,24 +39,23 @@ impl<'a> ContextInjector<'a> {
     /// Searches across all layers (session → project → global) and returns
     /// the top 5 most relevant messages that provide context for the query.
     #[allow(dead_code)]
-    pub fn inject_relevant_context(
-        &self,
-        query: &str,
-        session_id: &str,
-    ) -> Result<Vec<Message>> {
+    pub fn inject_relevant_context(&self, query: &str, session_id: &str) -> Result<Vec<Message>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
 
         // Determine the project path for this session
-        let project_path = self.get_session_project_path(session_id)
+        let project_path = self
+            .get_session_project_path(session_id)
             .unwrap_or_default();
 
         // Collect results from all layers with different weights
         let mut all_results: Vec<(Message, f32)> = Vec::new();
 
         // Session layer: highest relevance, search current session
-        let session_results = self.hierarchy.query_session_layer(session_id, query, 5)
+        let session_results = self
+            .hierarchy
+            .query_session_layer(session_id, query, 5)
             .unwrap_or_default();
         for (msg, score) in session_results {
             all_results.push((msg, score * 1.5)); // Boost session context
@@ -64,7 +63,9 @@ impl<'a> ContextInjector<'a> {
 
         // Project layer: medium relevance
         if !project_path.is_empty() {
-            let project_results = self.hierarchy.query_project_layer(&project_path, query, 5)
+            let project_results = self
+                .hierarchy
+                .query_project_layer(&project_path, query, 5)
                 .unwrap_or_default();
             for (msg, score) in project_results {
                 // Skip messages already in session layer
@@ -75,7 +76,9 @@ impl<'a> ContextInjector<'a> {
         }
 
         // Global layer: lowest relevance but broadest scope
-        let global_results = self.hierarchy.query_layer(ContextLayer::Global, query, 5)
+        let global_results = self
+            .hierarchy
+            .query_layer(ContextLayer::Global, query, 5)
             .unwrap_or_default();
         for (msg, score) in global_results {
             if !all_results.iter().any(|(m, _)| m.id == msg.id) {
@@ -84,10 +87,7 @@ impl<'a> ContextInjector<'a> {
         }
 
         // Sort by score descending
-        all_results.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        all_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Limit to top 5 most relevant
         all_results.truncate(5);
@@ -101,18 +101,21 @@ impl<'a> ContextInjector<'a> {
     ///
     /// Parses the query intent, searches relevant context, and returns
     /// a human-readable summary.
-    pub fn answer_natural_query(&self,
-        query: &str,
-    ) -> Result<String> {
+    pub fn answer_natural_query(&self, query: &str) -> Result<String> {
         let intent = self.parse_query_intent(query);
         let search_query = self.intent_to_search_query(&intent);
 
         // Search across all layers
-        let global_results = self.hierarchy.query_layer(ContextLayer::Global, &search_query, 10)
+        let global_results = self
+            .hierarchy
+            .query_layer(ContextLayer::Global, &search_query, 10)
             .unwrap_or_default();
 
         if global_results.is_empty() {
-            return Ok(format!("I couldn't find any relevant information about '{}' in my memory.", query));
+            return Ok(format!(
+                "I couldn't find any relevant information about '{}' in my memory.",
+                query
+            ));
         }
 
         // Generate a human-readable answer based on intent and results
@@ -122,7 +125,9 @@ impl<'a> ContextInjector<'a> {
 
     /// Get the project path for a session.
     fn get_session_project_path(&self, session_id: &str) -> Result<String> {
-        let sessions = self.store.get_recent_sessions(1000)
+        let sessions = self
+            .store
+            .get_recent_sessions(1000)
             .context("Failed to get sessions")?;
 
         sessions
@@ -137,19 +142,25 @@ impl<'a> ContextInjector<'a> {
         let query_lower = query.to_lowercase();
 
         // Pattern: "What did we do about X?"
-        let what_did_we_do = Regex::new(r"what did we do (about|regarding|with|for)\s+(.+?)\??$").unwrap();
+        let what_did_we_do =
+            Regex::new(r"what did we do (about|regarding|with|for)\s+(.+?)\??$").unwrap();
         if let Some(caps) = what_did_we_do.captures(&query_lower) {
             return QueryIntent::WhatDidWeDo {
-                topic: caps.get(2).map(|m| m.as_str().to_string())
+                topic: caps
+                    .get(2)
+                    .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| query.to_string()),
             };
         }
 
         // Pattern: "How did we solve X?"
-        let how_did_we_solve = Regex::new(r"how did we (solve|fix|handle|address|implement)\s+(.+?)\??$").unwrap();
+        let how_did_we_solve =
+            Regex::new(r"how did we (solve|fix|handle|address|implement)\s+(.+?)\??$").unwrap();
         if let Some(caps) = how_did_we_solve.captures(&query_lower) {
             return QueryIntent::HowDidWeSolve {
-                topic: caps.get(2).map(|m| m.as_str().to_string())
+                topic: caps
+                    .get(2)
+                    .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| query.to_string()),
             };
         }
@@ -158,16 +169,22 @@ impl<'a> ContextInjector<'a> {
         let tell_me_about = Regex::new(r"tell me (about|regarding)\s+(.+?)\??$").unwrap();
         if let Some(caps) = tell_me_about.captures(&query_lower) {
             return QueryIntent::TellMeAbout {
-                topic: caps.get(2).map(|m| m.as_str().to_string())
+                topic: caps
+                    .get(2)
+                    .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| query.to_string()),
             };
         }
 
         // Pattern: "What was the issue with X?"
-        let what_was_issue = Regex::new(r"what (was|is) the (issue|problem|error|bug) (with|in)\s+(.+?)\??$").unwrap();
+        let what_was_issue =
+            Regex::new(r"what (was|is) the (issue|problem|error|bug) (with|in)\s+(.+?)\??$")
+                .unwrap();
         if let Some(caps) = what_was_issue.captures(&query_lower) {
             return QueryIntent::WhatWasTheIssue {
-                topic: caps.get(4).map(|m| m.as_str().to_string())
+                topic: caps
+                    .get(4)
+                    .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| query.to_string()),
             };
         }
@@ -187,24 +204,16 @@ impl<'a> ContextInjector<'a> {
             QueryIntent::HowDidWeSolve { topic } => {
                 format!("{} fix solution workaround resolved", topic)
             }
-            QueryIntent::TellMeAbout { topic } => {
-                topic.clone()
-            }
+            QueryIntent::TellMeAbout { topic } => topic.clone(),
             QueryIntent::WhatWasTheIssue { topic } => {
                 format!("{} error bug problem failed issue", topic)
             }
-            QueryIntent::Generic { query } => {
-                query.clone()
-            }
+            QueryIntent::Generic { query } => query.clone(),
         }
     }
 
     /// Format search results into a natural language answer.
-    fn format_natural_answer(
-        &self,
-        intent: &QueryIntent,
-        results: &[(Message, f32)],
-    ) -> String {
+    fn format_natural_answer(&self, intent: &QueryIntent, results: &[(Message, f32)]) -> String {
         let mut answer = String::new();
 
         match intent {
@@ -218,7 +227,10 @@ impl<'a> ContextInjector<'a> {
                 answer.push_str(&format!("Here's what I found about **{}**:\n\n", topic));
             }
             QueryIntent::WhatWasTheIssue { topic } => {
-                answer.push_str(&format!("Here's what I found about issues with **{}**:\n\n", topic));
+                answer.push_str(&format!(
+                    "Here's what I found about issues with **{}**:\n\n",
+                    topic
+                ));
             }
             QueryIntent::Generic { query } => {
                 answer.push_str(&format!("Here's what I found for **{}**:\n\n", query));
@@ -241,19 +253,27 @@ impl<'a> ContextInjector<'a> {
             ));
         }
 
-        answer.push_str(&format!("\n(Found {} relevant messages)", results.len().min(5)));
+        answer.push_str(&format!(
+            "\n(Found {} relevant messages)",
+            results.len().min(5)
+        ));
         answer
     }
 
     /// Get context summary for display in TUI.
-    pub fn get_context_summary(
-        &self, session_id: &str) -> Result<String> {
-        let session_msgs = self.hierarchy.get_session_context(session_id)
+    pub fn get_context_summary(&self, session_id: &str) -> Result<String> {
+        let session_msgs = self
+            .hierarchy
+            .get_session_context(session_id)
             .unwrap_or_default();
 
-        let project_path = self.get_session_project_path(session_id).unwrap_or_default();
+        let project_path = self
+            .get_session_project_path(session_id)
+            .unwrap_or_default();
         let project_msgs = if !project_path.is_empty() {
-            self.hierarchy.get_project_context(&project_path).unwrap_or_default()
+            self.hierarchy
+                .get_project_context(&project_path)
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -263,8 +283,13 @@ impl<'a> ContextInjector<'a> {
         let mut summary = String::from("Memory Context Summary\n");
         summary.push_str("======================\n\n");
         summary.push_str(&format!("Session: {} messages\n", session_msgs.len()));
-        summary.push_str(&format!("Project ({}): {} messages\n",
-            if project_path.is_empty() { "none" } else { &project_path },
+        summary.push_str(&format!(
+            "Project ({}): {} messages\n",
+            if project_path.is_empty() {
+                "none"
+            } else {
+                &project_path
+            },
             project_msgs.len()
         ));
         summary.push_str(&format!("Global: {} messages\n", global_msgs.len()));
@@ -290,7 +315,11 @@ mod tests {
     fn create_test_store() -> MemoryStore {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = format!("/tmp/openshark_context_test_{}_{}.db", std::process::id(), count);
+        let db_path = format!(
+            "/tmp/openshark_context_test_{}_{}.db",
+            std::process::id(),
+            count
+        );
         let _ = std::fs::remove_file(&db_path);
         MemoryStore::new(Path::new(&db_path)).unwrap()
     }
@@ -320,7 +349,9 @@ mod tests {
         let store = create_test_store();
         let injector = ContextInjector::new(&store);
 
-        let results = injector.inject_relevant_context("rust", "nonexistent").unwrap();
+        let results = injector
+            .inject_relevant_context("rust", "nonexistent")
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -349,13 +380,17 @@ mod tests {
                 "sess-1",
                 &format!("msg-{}", i),
                 "user",
-                &format!("rust topic {}", i)
+                &format!("rust topic {}", i),
             );
             store.save_message(&msg).unwrap();
         }
 
         let results = injector.inject_relevant_context("rust", "sess-1").unwrap();
-        assert!(results.len() <= 5, "Should limit to 5 results, got {}", results.len());
+        assert!(
+            results.len() <= 5,
+            "Should limit to 5 results, got {}",
+            results.len()
+        );
     }
 
     #[test]
@@ -364,11 +399,20 @@ mod tests {
         let injector = ContextInjector::new(&store);
 
         store.create_session("sess-1", "model-a", "code").unwrap();
-        let msg = create_test_message("sess-1", "msg-1", "assistant", "We implemented JWT authentication with refresh tokens");
+        let msg = create_test_message(
+            "sess-1",
+            "msg-1",
+            "assistant",
+            "We implemented JWT authentication with refresh tokens",
+        );
         store.save_message(&msg).unwrap();
 
-        let answer = injector.answer_natural_query("What did we do about auth?").unwrap();
-        assert!(answer.contains("auth") || answer.contains("authentication") || answer.contains("JWT"));
+        let answer = injector
+            .answer_natural_query("What did we do about auth?")
+            .unwrap();
+        assert!(
+            answer.contains("auth") || answer.contains("authentication") || answer.contains("JWT")
+        );
     }
 
     #[test]
@@ -377,10 +421,17 @@ mod tests {
         let injector = ContextInjector::new(&store);
 
         store.create_session("sess-1", "model-a", "code").unwrap();
-        let msg = create_test_message("sess-1", "msg-1", "assistant", "We fixed the database connection by increasing the pool size");
+        let msg = create_test_message(
+            "sess-1",
+            "msg-1",
+            "assistant",
+            "We fixed the database connection by increasing the pool size",
+        );
         store.save_message(&msg).unwrap();
 
-        let answer = injector.answer_natural_query("How did we solve the database issue?").unwrap();
+        let answer = injector
+            .answer_natural_query("How did we solve the database issue?")
+            .unwrap();
         assert!(answer.contains("database") || answer.contains("pool"));
     }
 
@@ -389,7 +440,9 @@ mod tests {
         let store = create_test_store();
         let injector = ContextInjector::new(&store);
 
-        let answer = injector.answer_natural_query("What did we do about quantum physics?").unwrap();
+        let answer = injector
+            .answer_natural_query("What did we do about quantum physics?")
+            .unwrap();
         assert!(answer.contains("couldn't find") || answer.contains("relevant"));
     }
 
