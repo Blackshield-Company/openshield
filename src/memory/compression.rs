@@ -2,6 +2,8 @@
 //!
 //! When a session's context approaches the model's limit, this system
 //! compresses older messages into summaries to keep the conversation alive.
+
+#![allow(dead_code)]
 //!
 //! ## How it works
 //!

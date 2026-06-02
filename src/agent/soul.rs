@@ -174,7 +174,7 @@ pub fn load_soul() -> AgentSoul {
     }
 }
 
-fn capitalize_first(s: &str) -> String {
+fn _capitalize_first(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
         None => String::new(),
@@ -279,8 +279,8 @@ mod tests {
 
     #[test]
     fn test_capitalize_first() {
-        assert_eq!(capitalize_first("synthshark"), "Synthshark");
-        assert_eq!(capitalize_first(""), "");
-        assert_eq!(capitalize_first("a"), "A");
+        assert_eq!(_capitalize_first("synthshark"), "Synthshark");
+        assert_eq!(_capitalize_first(""), "");
+        assert_eq!(_capitalize_first("a"), "A");
     }
 }

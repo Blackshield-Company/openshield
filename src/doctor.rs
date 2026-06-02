@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use std::path::Path;
 
 // ANSI color codes (no external crate needed)
 const RESET: &str = "\x1b[0m";

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -18,7 +20,7 @@ use crate::agent::{Agent, AgentConfig};
 use crate::config::Config;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, ToolCall};
 use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetrics};
-use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, GitTool, Tool, ToolSuggestion};
+use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, Tool, ToolSuggestion};
 use chrono::Utc;
 use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
@@ -27,6 +29,7 @@ use crate::session::{SessionExport, ExportMessage, ExportBranch, export_to_defau
 
 mod theme;
 mod clipboard_image;
+mod command_palette;
 use theme::*;
 
 mod ascii_art;
@@ -242,6 +245,8 @@ struct App {
     file_tree: Vec<String>,
     /// Selected file index in the file tree.
     file_tree_selected: usize,
+    /// Command palette for fuzzy command search.
+    command_palette: command_palette::CommandPalette,
 }
 
 #[derive(Debug, Clone)]
@@ -498,6 +503,7 @@ impl App {
             diff_scroll: 0,
             file_tree: Vec::new(),
             file_tree_selected: 0,
+            command_palette: command_palette::CommandPalette::new(),
         })
     }
 
@@ -1499,6 +1505,46 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false); // Don't exit
     }
 
+    // Command palette mode: handle palette navigation
+    if app.command_palette.visible {
+        match key.code {
+            KeyCode::Esc => {
+                app.command_palette.hide();
+                return Ok(false);
+            }
+            KeyCode::Enter => {
+                if let Some(cmd) = app.command_palette.selected_command() {
+                    app.command_palette.hide();
+                    // Inject the command into input and process it
+                    app.input = cmd.clone();
+                    app.cursor_position = cmd.len();
+                    let input = app.input.trim().to_string();
+                    app.input.clear();
+                    app.cursor_position = 0;
+                    process_user_input(app, input).await?;
+                }
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                app.command_palette.prev();
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                app.command_palette.next();
+                return Ok(false);
+            }
+            KeyCode::Backspace => {
+                app.command_palette.backspace();
+                return Ok(false);
+            }
+            KeyCode::Char(c) => {
+                app.command_palette.type_char(c);
+                return Ok(false);
+            }
+            _ => return Ok(false),
+        }
+    }
+
     // ToolApproval mode: handle y/n immediately, no other input accepted
     if app.mode == AppMode::ToolApproval {
         match key.code {
@@ -1635,7 +1681,11 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.sidebar_expanded = !app.sidebar_expanded;
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.show_model_selector();
+            if app.command_palette.visible {
+                app.command_palette.hide();
+            } else {
+                app.command_palette.show();
+            }
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.autonomous_mode = !app.autonomous_mode;
@@ -1841,19 +1891,6 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.sidebar_scroll += 5;
             } else {
                 app.scroll_down(5);
-            }
-        }
-        KeyCode::Enter => {
-            // Toggle tool expansion in Inspector tab when sidebar is focused
-            if app.focused_pane == 0 && app.sidebar_tab == 3 {
-                let visible_agents: Vec<String> = app.agent_streams.keys().cloned().collect();
-                if let Some(agent_id) = visible_agents.get(app.sidebar_scroll) {
-                    if app.agent_tool_expanded.contains(agent_id) {
-                        app.agent_tool_expanded.remove(agent_id);
-                    } else {
-                        app.agent_tool_expanded.insert(agent_id.clone());
-                    }
-                }
             }
         }
         KeyCode::Esc => {
@@ -4131,6 +4168,9 @@ fn draw_ui(f: &mut Frame, app: &App) {
     if app.show_comparison {
         draw_comparison_overlay(f, app);
     }
+
+    // Command palette overlay (drawn last so it's on top)
+    command_palette::draw_command_palette(f, &app.command_palette, size);
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {

@@ -7,6 +7,8 @@
 //! - Three-layer pixel waves with foam crests
 //! - Synthwave '84 color palette: deep purple, electric purple, hot pink, neon cyan
 
+#![allow(dead_code)]
+
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Center a line of text within a given width, accounting for wide chars.
