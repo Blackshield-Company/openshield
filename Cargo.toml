@@ -15,7 +15,7 @@ name = "openshark"
 path = "src/main.rs"
 
 [features]
-default = ["discord", "telegram"]
+default = ["discord", "telegram", "slack", "matrix"]
 discord = ["serenity"]
 telegram = ["teloxide"]
 slack = ["slack-morphism"]
