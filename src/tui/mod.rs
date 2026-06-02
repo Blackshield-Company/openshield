@@ -4681,7 +4681,7 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                 }
             }
 
-            // Render assistant messages with syntax highlighting
+            // Render assistant messages with syntax highlighting + inline markdown
             let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
             for (is_code, block_lines) in highlighted {
                 if is_code {
@@ -4696,7 +4696,9 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                     ]));
                 } else {
                     for hl_line in block_lines {
-                        lines.push(hl_line);
+                        // Apply inline markdown rendering to plain text blocks
+                        let rendered = syntax_highlight::render_markdown_line(&hl_line.to_string());
+                        lines.push(rendered);
                     }
                 }
             }
