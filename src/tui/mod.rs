@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::skills::SkillRegistry;
 
 mod theme;
+mod clipboard_image;
 use theme::*;
 
 mod ascii_art;
@@ -111,6 +112,8 @@ struct ChatMessage {
     timestamp: chrono::DateTime<Utc>,
     /// Secondary responses from other models (multi-model mode).
     multi_model_responses: Vec<SecondaryResponse>,
+    /// Persistent reasoning/thinking content from the model.
+    reasoning: Option<String>,
 }
 
 /// Application state for the TUI.
@@ -222,6 +225,14 @@ struct App {
     is_reasoning: bool,
     /// Index of the last progress message in self.messages (for in-place updates).
     last_progress_msg_idx: Option<usize>,
+    /// Circuit breaker: count of consecutive empty responses to prevent infinite re-prompt loops.
+    empty_response_count: u8,
+    /// Input history for Up/Down arrow recall.
+    input_history: Vec<String>,
+    /// Current index into input_history (None = not navigating history).
+    history_index: Option<usize>,
+    /// File path for persisting input history.
+    history_file: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -314,9 +325,28 @@ impl App {
             .map(|m| m.context_length)
             .unwrap_or(128000);
 
-        let project_path = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let project_path = config
+            .filesystem
+            .working_directory
+            .clone()
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "/home/synth".to_string());
+
+        // Load input history
+        let history_file = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("openshark")
+            .join("input_history.txt");
+        let input_history = if history_file.exists() {
+            std::fs::read_to_string(&history_file)
+                .unwrap_or_default()
+                .lines()
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         if project_path.is_empty() {
             memory.create_session(&session_id, &model, "general")?;
@@ -450,6 +480,10 @@ impl App {
             reasoning_content: String::new(),
             is_reasoning: false,
             last_progress_msg_idx: None,
+            empty_response_count: 0,
+            input_history,
+            history_index: None,
+            history_file,
         })
     }
 
@@ -653,6 +687,7 @@ impl App {
             images: images.as_ref().map(|img| vec![img.clone()]),
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
+            reasoning: None,
         };
         self.messages.push(msg);
 
@@ -686,7 +721,7 @@ impl App {
         self.tokens_used += token_count;
     }
 
-    fn add_assistant_message(&mut self, content: String) {
+    fn add_assistant_message(&mut self, content: String, reasoning: Option<String>) {
         let token_count = content.split_whitespace().count() as u64;
         let msg = ChatMessage {
             role: "assistant".to_string(),
@@ -694,6 +729,7 @@ impl App {
             images: None,
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
+            reasoning,
         };
         self.messages.push(msg);
 
@@ -727,6 +763,7 @@ impl App {
             images: None,
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
+            reasoning: None,
         };
         self.messages.push(msg);
     }
@@ -747,8 +784,9 @@ impl App {
                 self.streaming_content.push_str(&strip_tool_lines(&cleaned));
             }
             StreamEvent::ReasoningChunk(chunk) => {
-                // Merge reasoning into normal streaming content — no separate thinking display
-                self.streaming_content.push_str(&chunk);
+                // Accumulate reasoning separately from normal content
+                self.reasoning_content.push_str(&chunk);
+                self.is_reasoning = true;
             }
             StreamEvent::ResponseComplete { content, metrics } => {
                 self.is_streaming = false;
@@ -767,10 +805,9 @@ impl App {
                     Some(&format!("tokens={}", metrics.tokens_generated)),
                 );
 
-                // Persist reasoning content as a chat message BEFORE the response
-                if !self.reasoning_content.is_empty() {
-                    self.add_assistant_message(self.reasoning_content.trim().to_string());
-                }
+                // Reasoning is ephemeral — displayed in real-time but NOT persisted to history.
+                // This keeps model_messages clean and prevents token bloat from thinking content.
+                let reasoning_to_save = None;
 
                 // Check for embedded TOOL: lines anywhere in the response
                 let embedded_tools = parse_embedded_tools(&content);
@@ -778,7 +815,12 @@ impl App {
                     // Display the assistant's message with tool lines and think tags stripped
                     let display_content = strip_think_tags(&strip_tool_lines(&content));
                     if !display_content.trim().is_empty() {
-                        self.add_assistant_message(display_content);
+                        self.add_assistant_message(display_content, reasoning_to_save);
+                    } else {
+                        // Still save reasoning even if content is empty
+                        if let Some(ref r) = reasoning_to_save {
+                            self.add_assistant_message("".to_string(), Some(r.clone()));
+                        }
                     }
                     // Store tool invocations in model messages for follow-up context
                     for (tool_name, args) in &embedded_tools {
@@ -797,7 +839,7 @@ impl App {
                     if !parts.is_empty() {
                         let tool_name = parts[0].trim().to_string();
                         let args = parts.get(1).unwrap_or(&"").trim().to_string();
-                        self.add_assistant_message(format!("🔧 Using tool: {} {}", tool_name, args));
+                        self.add_assistant_message(format!("🔧 Using tool: {} {}", tool_name, args), reasoning_to_save.clone());
                         // Store tool invocation in model messages for follow-up
                         self.model_messages.push(Message {
                             role: "assistant".to_string(),
@@ -812,28 +854,9 @@ impl App {
                     // Save reasoning content as a separate message before the assistant response.
                     // Skip if streaming_content is empty — the model wrapped its entire response
                     // in <think> tags (Kimi behavior) and there's no separate response to show.
-                    if !self.reasoning_content.is_empty() && !self.streaming_content.trim().is_empty() {
-                        let reasoning_msg = ChatMessage {
-                            role: "assistant".to_string(),
-                            content: self.reasoning_content.trim().to_string(),
-                            images: None,
-                            timestamp: Utc::now(),
-                            multi_model_responses: Vec::new(),
-                        };
-                        self.messages.push(reasoning_msg);
-                        // Also save to model_messages so the model knows it reasoned
-                        self.model_messages.push(Message {
-                            role: "assistant".to_string(),
-                            content: self.reasoning_content.trim().to_string(),
-                            images: None,
-                            tool_call_id: None,
-                            tool_calls: None,
-                            reasoning_content: None,
-                        });
-                    }
                     // Strip any remaining think tags from content before saving to chat history
                     let clean_content = strip_think_tags(&content);
-                    self.add_assistant_message(clean_content);
+                    self.add_assistant_message(clean_content, reasoning_to_save);
                     // Tool suggestions are now handled in the background task (stream_model_response_task)
                     // to ensure proper execution → result → follow-up flow.
                     // The UI only handles approval-required tools here.
@@ -970,7 +993,7 @@ impl App {
                     // command lines and strip_think_tags cleans model thinking tags.
                     let display_content = strip_think_tags(&strip_tool_lines(&content));
                     if !display_content.trim().is_empty() {
-                        self.add_assistant_message(display_content);
+                        self.add_assistant_message(display_content, None);
                     }
                     // Store tool invocations in model_messages
                     for (tool_name, args) in &embedded_tools {
@@ -1003,46 +1026,70 @@ impl App {
                 }
 
                 // Accept follow-up as-is. The model was explicitly asked to synthesize.
-                // Only re-prompt if truly empty.
+                // Only re-prompt if truly empty — but use a circuit breaker to avoid infinite loops.
                 let trimmed = content.trim();
                 if trimmed.is_empty() {
-                    self.add_system_message(
-                        "⚠️ Response was empty — re-prompting for synthesis...".to_string()
-                    );
-                    // Inject a completion prompt and re-request
-                    self.model_messages.push(Message {
-                        role: "assistant".to_string(),
-                        content: content.clone(),
-                        images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
-                    });
-                    self.model_messages.push(Message {
-                        role: "user".to_string(),
-                        content: "Provide a COMPLETE synthesis of the tool results. Explain what was found, what it means, and the next step.".to_string(),
-                        images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
-                    });
-                    // Spawn a new background task for the completion
-                    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                    self.stream_rx = Some(rx);
-                    let provider = self.provider.clone();
-                    let model = self.model.clone();
-                    let model_config = self.model_config.clone();
-                    let model_messages = self.model_messages.clone();
-                    let is_multi_model = self.multi_model_mode;
-                    let config = self.config.clone();
-                    tokio::spawn(async move {
-                        let _ = stream_model_response_task(
-                            tx, provider, model, model_config,
-                            model_messages, is_multi_model, config,
-                        ).await;
-                    });
+                    self.empty_response_count += 1;
+                    if self.empty_response_count >= 3 {
+                        // Circuit breaker: show tool results directly instead of looping forever
+                        self.add_system_message(
+                            "⚠️ Model returned empty responses repeatedly. Showing raw tool results:".to_string()
+                        );
+                        // Find the most recent tool results in model_messages and display them
+                        let mut found_results = Vec::new();
+                        for msg in self.model_messages.iter().rev().take(20) {
+                            if msg.role == "user" && msg.content.starts_with("Tool result:") {
+                                found_results.push(msg.content.clone());
+                            }
+                        }
+                        if found_results.is_empty() {
+                            self.add_system_message("No recent tool results to display.".to_string());
+                        } else {
+                            for result in found_results.iter().rev() {
+                                self.add_system_message(result.clone());
+                            }
+                        }
+                        self.empty_response_count = 0;
+                    } else {
+                        self.add_system_message(
+                            format!("⚠️ Response was empty — re-prompting for synthesis... (attempt {}/3)", self.empty_response_count)
+                        );
+                        // Inject a completion prompt and re-request
+                        self.model_messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: content.clone(),
+                            images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                        });
+                        self.model_messages.push(Message {
+                            role: "user".to_string(),
+                            content: "Provide a COMPLETE synthesis of the tool results. Explain what was found, what it means, and the next step.".to_string(),
+                            images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                        });
+                        // Spawn a new background task for the completion
+                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                        self.stream_rx = Some(rx);
+                        let provider = self.provider.clone();
+                        let model = self.model.clone();
+                        let model_config = self.model_config.clone();
+                        let model_messages = self.model_messages.clone();
+                        let is_multi_model = self.multi_model_mode;
+                        let config = self.config.clone();
+                        tokio::spawn(async move {
+                            let _ = stream_model_response_task(
+                                tx, provider, model, model_config,
+                                model_messages, is_multi_model, config,
+                            ).await;
+                        });
+                    }
                 } else {
-                    self.add_assistant_message(strip_think_tags(&content));
+                    self.empty_response_count = 0;
+                    self.add_assistant_message(strip_think_tags(&content), None);
                 }
             }
             StreamEvent::MultiModelResponse { name, content, metrics } => {
@@ -1108,14 +1155,15 @@ impl App {
         }
     }
 
-    /// Scroll up in chat history.
+    /// Scroll up in chat history — smooth line-by-line.
     fn scroll_up(&mut self, amount: usize) {
         self.scroll = self.scroll.saturating_sub(amount);
     }
 
-    /// Scroll down in chat history.
+    /// Scroll down in chat history — smooth line-by-line.
     fn scroll_down(&mut self, amount: usize) {
-        let max_scroll = self.messages.len().saturating_sub(1);
+        let total_lines = self.messages.len();
+        let max_scroll = total_lines.saturating_sub(1);
         self.scroll = (self.scroll + amount).min(max_scroll);
     }
 
@@ -1482,8 +1530,19 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char('v') if key.modifiers == KeyModifiers::CONTROL => {
-            // Clipboard paste via arboard is unavailable on this system.
-            // Silently ignore — use terminal-native paste: Ctrl+Shift+V or right-click.
+            // Try to paste image from clipboard via arboard
+            match crate::tui::clipboard_image::try_paste_image_from_clipboard() {
+                Ok(Some(data_url)) => {
+                    app.pending_image = Some(data_url.clone());
+                    app.add_system_message("📎 Image pasted from clipboard (will be sent with your next message)".to_string());
+                }
+                Ok(None) => {
+                    // No image in clipboard — silently ignore, user can use Ctrl+Shift+V for text
+                }
+                Err(e) => {
+                    app.add_system_message(format!("⚠️ Clipboard error: {}", e));
+                }
+            }
         }
         KeyCode::Char('y') if key.modifiers == KeyModifiers::CONTROL => {
             // Copy last assistant message to clipboard via OSC 52 escape sequence.
@@ -1511,6 +1570,13 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Enter => {
             let input = app.input.trim().to_string();
             if !input.is_empty() {
+                // Save to history
+                app.input_history.push(input.clone());
+                app.history_index = None;
+                let _ = std::fs::write(
+                    &app.history_file,
+                    app.input_history.join("\n")
+                );
                 app.input.clear();
                 app.cursor_position = 0;
                 process_user_input(app, input).await?;
@@ -1552,13 +1618,21 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.comparison_selected = app.comparison_selected.saturating_sub(1);
             } else if app.focused_pane == 0 {
                 app.sidebar_scroll = app.sidebar_scroll.saturating_sub(1);
+            } else if !app.input_history.is_empty() {
+                // Navigate input history
+                let idx = app.history_index.map_or(
+                    app.input_history.len().saturating_sub(1),
+                    |i| i.saturating_sub(1)
+                );
+                app.input = app.input_history[idx].clone();
+                app.cursor_position = app.input.len();
+                app.history_index = Some(idx);
             } else {
-                app.scroll_up(3);
+                app.scroll_up(1);
             }
         }
         KeyCode::Down => {
             if app.show_comparison {
-                // Find the assistant message with the most secondary responses
                 let max_responses = app.messages.iter()
                     .filter(|m| m.role == "assistant")
                     .map(|m| m.multi_model_responses.len())
@@ -1569,22 +1643,33 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
             } else if app.focused_pane == 0 {
                 app.sidebar_scroll += 1;
+            } else if let Some(idx) = app.history_index {
+                // Navigate forward in history
+                if idx + 1 < app.input_history.len() {
+                    app.input = app.input_history[idx + 1].clone();
+                    app.cursor_position = app.input.len();
+                    app.history_index = Some(idx + 1);
+                } else {
+                    app.input.clear();
+                    app.cursor_position = 0;
+                    app.history_index = None;
+                }
             } else {
-                app.scroll_down(3);
+                app.scroll_down(1);
             }
         }
         KeyCode::PageUp => {
             if app.focused_pane == 0 {
                 app.sidebar_scroll = app.sidebar_scroll.saturating_sub(5);
             } else {
-                app.scroll_up(10);
+                app.scroll_up(5);
             }
         }
         KeyCode::PageDown => {
             if app.focused_pane == 0 {
                 app.sidebar_scroll += 5;
             } else {
-                app.scroll_down(10);
+                app.scroll_down(5);
             }
         }
         KeyCode::Enter => {
@@ -1917,9 +2002,13 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     // ── Direct tool routing for common commands ─────────────────────────────
     // If user types exactly "test", route directly to test tool
     if input.trim().eq_ignore_ascii_case("test") {
-        let project_path = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| ".".to_string());
+        let project_path = app
+            .config
+            .filesystem
+            .working_directory
+            .clone()
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "/home/synth".to_string());
         app.add_user_message(input.clone());
         let test_tool = crate::tools::test_runner::TestTool;
         match crate::tools::Tool::execute(&test_tool, &format!("run {}", project_path)) {
@@ -1940,6 +2029,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     app.add_user_message(input.clone());
+    // Reset circuit breaker on fresh user input
+    app.empty_response_count = 0;
 
     // ── Swarm Guard: Block regular chat while swarm is working ─────────────
     if app.swarm_running {
@@ -1989,7 +2080,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                                 step.iterations
                             ));
                         }
-                        app.add_assistant_message(response);
+                        app.add_assistant_message(response, None);
                     }
                     Err(e) => app.add_system_message(format!("Agent error: {}", e)),
                 }
@@ -2014,10 +2105,15 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     let mut model_messages = app.model_messages.clone();
 
     // ── Phase 1b: Context compression if threshold exceeded ────────────────
+    // HARD GUARDRAIL: If estimated tokens exceed 95% of context window,
+    // force compression regardless of threshold. If compression fails,
+    // truncate oldest messages to prevent API errors.
     let compression_notice = if let Some(ref mut compressor) = app.compressor {
-        let estimated = crate::memory::compression::estimate_tokens(&model_messages
-        );
-        if compressor.should_compress(estimated, app.model_context_length) {
+        let estimated = crate::memory::compression::estimate_tokens(&model_messages);
+        let threshold_trigger = compressor.should_compress(estimated, app.model_context_length);
+        let hard_limit_trigger = estimated > (app.model_context_length * 95 / 100);
+
+        if threshold_trigger || hard_limit_trigger {
             match compressor.compress(&mut model_messages, &app.provider) {
                 Ok(true) => {
                     let stats = compressor.stats();
@@ -2028,11 +2124,28 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         stats.tokens_saved
                     ))
                 }
+                Ok(false) if hard_limit_trigger => {
+                    // Compression didn't fire but we're at hard limit — emergency truncate
+                    let preserve_count = (app.model_context_length * 90 / 100).max(1000);
+                    emergency_truncate_messages(&mut model_messages, preserve_count);
+                    Some(format!(
+                        "⚠️ Context emergency-truncated: exceeded {} tokens ({}% of {} limit). Oldest messages removed.",
+                        estimated,
+                        estimated * 100 / app.model_context_length,
+                        app.model_context_length
+                    ))
+                }
                 Ok(false) => None,
-                Err(e) => Some(format!(
-                    "⚠️ Context compression failed: {}",
-                    e
-                )),
+                Err(e) => {
+                    if hard_limit_trigger {
+                        let preserve_count = (app.model_context_length * 90 / 100).max(1000);
+                        emergency_truncate_messages(&mut model_messages, preserve_count);
+                    }
+                    Some(format!(
+                        "⚠️ Context compression failed: {}",
+                        e
+                    ))
+                }
             }
         } else {
             None
@@ -2148,37 +2261,155 @@ fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
     tools
 }
 
-/// Parse JSON tool format: tool_name:0>{"args":"value"} or tool_name:0>{"query":"value"}
+/// Parse JSON tool format: supports two forms:
+/// 1. tool_name {"key": "value", ...}    (bare JSON)
+/// 2. tool_name:0>{"key": "value", ...}  (numeric-indexed)
 fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
-    // Find the first ':' followed by a digit and '>'
+    // Try bare JSON format first: tool_name {"key": "value"}
+    if let Some(space_pos) = rest.find(|c: char| c == '{' || c == ':') {
+        if rest.as_bytes().get(space_pos) == Some(&b'{') {
+            let tool_name = rest[..space_pos].trim().to_string();
+            if tool_name.is_empty() {
+                return None;
+            }
+            let json_str = find_balanced_json(&rest[space_pos..])?;
+            return extract_args_from_json(json_str, &tool_name);
+        }
+    }
+
+    // Try numeric-indexed format: tool_name:0>{"key": "value"}
     let colon_pos = rest.find(':')?;
     let after_colon = &rest[colon_pos + 1..];
     if after_colon.is_empty() || !after_colon.starts_with(|c: char| c.is_ascii_digit()) {
         return None;
     }
-    // Find the '>'
     let gt_pos = after_colon.find('>')?;
     if !after_colon[gt_pos..].starts_with(">{") {
         return None;
     }
 
     let tool_name = rest[..colon_pos].trim().to_string();
-    let json_str = &after_colon[gt_pos + 1..]; // after '>'
+    let json_str = find_balanced_json(&after_colon[gt_pos + 1..])?;
+    extract_args_from_json(json_str, &tool_name)
+}
 
-    // Parse JSON to extract "args" or "query" value
+/// Find balanced JSON string starting with '{' or '['.
+fn find_balanced_json(s: &str) -> Option<&str> {
+    if s.is_empty() {
+        return None;
+    }
+    let first_char = s.chars().next()?;
+    let (open, close) = match first_char {
+        '{' => ('{', '}'),
+        '[' => ('[', ']'),
+        _ => return None,
+    };
+    let mut depth = 0u32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, ch) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string {
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&s[..=i]);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract args from a parsed JSON object string.
+/// Maps JSON fields to space-separated args that each tool's execute method expects.
+fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<(String, String)> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
         if let Some(args) = v.get("args").and_then(|a| a.as_str()) {
-            return Some((tool_name, args.to_string()));
+            return Some((tool_name.to_string(), args.to_string()));
         }
         if let Some(args) = v.get("query").and_then(|a| a.as_str()) {
-            return Some((tool_name, args.to_string()));
+            return Some((tool_name.to_string(), args.to_string()));
         }
-        // Fallback: collect all string values from the JSON object
-        if let Some(obj) = v.as_object() {
-            let parts: Vec<&str> = obj.values().filter_map(|v| v.as_str()).collect();
-            if !parts.is_empty() {
-                return Some((tool_name, parts.join(" ")));
+
+        let fields: &[&str] = match tool_name {
+            "fs" => &["operation", "path", "content"],
+            "git" => &["command", "args"],
+            "search" => &["query", "path"],
+            "grep" => &["pattern", "path"],
+            "terminal" => &["command"],
+            "edit" => &["file", "old_string", "new_string"],
+            "test" => &["path", "framework"],
+            "refactor" => &["operation", "file", "line", "column", "new_name"],
+            "lsp" => &["command", "file", "line", "column"],
+            _ => return extract_generic_args(v, tool_name),
+        };
+
+        let mut parts: Vec<String> = Vec::with_capacity(fields.len());
+        for field in fields {
+            if let Some(val) = v.get(*field) {
+                match val {
+                    serde_json::Value::String(s) => parts.push(s.clone()),
+                    serde_json::Value::Number(n) => parts.push(n.to_string()),
+                    _ => {}
+                }
             }
+        }
+
+        if parts.is_empty() {
+            return None;
+        }
+
+        if tool_name == "edit" && !parts.is_empty() {
+            let file = parts.get(0).cloned().unwrap_or_default();
+            if file.is_empty() {
+                return None;
+            }
+            let old_str = parts.get(1).cloned().unwrap_or_default();
+            let new_str = parts.get(2).cloned().unwrap_or_default();
+            if !old_str.is_empty() {
+                return Some((tool_name.to_string(), format!("replace {}\n{}\n---\n{}", file, old_str, new_str)));
+            }
+            return Some((tool_name.to_string(), format!("read {}", file)));
+        }
+        if tool_name == "test" && !parts.is_empty() {
+            let mut reordered = vec!["run".to_string()];
+            reordered.extend(parts);
+            return Some((tool_name.to_string(), reordered.join(" ")));
+        }
+
+        Some((tool_name.to_string(), parts.join(" ")))
+    } else {
+        None
+    }
+}
+
+/// Generic fallback for unknown/MCP tools: collect all string/number values.
+fn extract_generic_args(v: serde_json::Value, tool_name: &str) -> Option<(String, String)> {
+    if let Some(obj) = v.as_object() {
+        let parts: Vec<String> = obj
+            .values()
+            .filter_map(|val| match val {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect();
+        if !parts.is_empty() {
+            return Some((tool_name.to_string(), parts.join(" ")));
         }
     }
     None
@@ -2329,54 +2560,71 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
         results: batch_results,
     });
     // Follow-up request with all tool results — inject completion mandate
+    // Build a summary of all tool results to ensure the model sees them clearly
+    let mut tool_summary = String::from("TOOL EXECUTION COMPLETE. Here are the results:\n\n");
+    for (idx, (tool_name, args)) in tools.iter().enumerate() {
+        // Find the result for this tool from follow_messages
+        let result_prefix = format!("Tool result ({} {}):", tool_name, args);
+        if let Some(msg) = follow_messages.iter().find(|m| m.role == "user" && m.content.starts_with(&result_prefix)) {
+            tool_summary.push_str(&format!("{}. {}\n{}", idx + 1, tool_name, msg.content));
+            tool_summary.push_str("\n\n");
+        } else if let Some(msg) = follow_messages.iter().find(|m| m.role == "user" && m.content.starts_with(&format!("Tool error ({} {}):", tool_name, args))) {
+            tool_summary.push_str(&format!("{}. {}\n{}", idx + 1, tool_name, msg.content));
+            tool_summary.push_str("\n\n");
+        }
+    }
+    tool_summary.push_str("Based on these tool results, provide a complete response. Explain what was found, what it means, and what to do next. If a tool result is empty or missing, state that explicitly — do not hallucinate.");
+
     follow_messages.push(Message {
         role: "user".to_string(),
-        content: "Synthesize the tool results above into a complete response. \
-                  Explain what was found, what it means, and what to do next.".to_string(),
+        content: tool_summary,
         images: None,
     tool_call_id: None,
     tool_calls: None,
     reasoning_content: None,
     });
 
-    let follow_up = ChatRequest::new(model.to_string(), follow_messages, true);
-    match provider.chat_stream(follow_up).await {
-        Ok((follow_chunks, _metrics)) => {
+    let follow_up = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
+    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
+        Ok(Ok((follow_chunks, _metrics))) => {
             let follow_content: String = follow_chunks.join("");
             let trimmed = follow_content.trim();
             if trimmed.is_empty() {
                 let _ = tx.send(StreamEvent::Error(
-                    "Model returned empty follow-up after tool execution. Re-prompting for synthesis...".to_string()
+                    "Model returned empty follow-up after tool execution. Re-prompting...".to_string()
                 ));
-                // Re-prompt with stronger mandate
-                let mut retry_messages = model_messages.to_vec();
+                // Re-prompt with stronger mandate — include tool results so model sees them
+                let mut retry_messages = follow_messages.clone();
                 retry_messages.push(Message {
                     role: "user".to_string(),
-                    content: "The previous response was empty. You MUST provide a complete synthesis of the tool results. \
-                              Explain what was found, what it means, and the next step. Do not skip this.".to_string(),
+                    content: "Your previous response was empty. Using the tool results already provided above, write a complete response explaining what was found, what it means, and the next step. Do not skip this.".to_string(),
                     images: None,
                 tool_call_id: None,
                 tool_calls: None,
                 reasoning_content: None,
                 });
                 let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                match provider.chat_stream(retry_req).await {
-                    Ok((retry_chunks, _retry_metrics)) => {
+                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
+                    Ok(Ok((retry_chunks, _retry_metrics))) => {
                         let retry_content: String = retry_chunks.join("");
                         let _ = tx.send(StreamEvent::FollowUp(retry_content));
                         let _ = tx.send(StreamEvent::Done);
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                    Err(_) => {
+                        let _ = tx.send(StreamEvent::Error("Follow-up timed out after 120s".to_string()));
                         let _ = tx.send(StreamEvent::Done);
                     }
                 }
             } else if trimmed.split_whitespace().count() < 15 {
                 // Too short — treat as incomplete and re-prompt
                 let _ = tx.send(StreamEvent::SystemMessage(
-                    "⚠️ Follow-up too brief — requesting complete synthesis...".to_string()
+                    "⚠️ Follow-up too brief — requesting complete response...".to_string()
                 ));
-                let mut retry_messages = model_messages.to_vec();
+                let mut retry_messages = follow_messages.clone();
                 retry_messages.push(Message {
                     role: "assistant".to_string(),
                     content: follow_content.clone(),
@@ -2387,21 +2635,25 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
                 });
                 retry_messages.push(Message {
                     role: "user".to_string(),
-                    content: "That was too brief. Provide a thorough synthesis: what did the tools reveal, what does it mean, and what's next?".to_string(),
+                    content: "That was too brief. Using the tool results already provided above, write a thorough response: what did the tools reveal, what does it mean, and what's next?".to_string(),
                     images: None,
                 tool_call_id: None,
                 tool_calls: None,
                 reasoning_content: None,
                 });
                 let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                match provider.chat_stream(retry_req).await {
-                    Ok((retry_chunks, _retry_metrics)) => {
+                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
+                    Ok(Ok((retry_chunks, _retry_metrics))) => {
                         let retry_content: String = retry_chunks.join("");
                         let _ = tx.send(StreamEvent::FollowUp(retry_content));
                         let _ = tx.send(StreamEvent::Done);
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                    Err(_) => {
+                        let _ = tx.send(StreamEvent::Error("Follow-up timed out after 120s".to_string()));
                         let _ = tx.send(StreamEvent::Done);
                     }
                 }
@@ -2410,8 +2662,12 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
             }
             let _ = tx.send(StreamEvent::Done);
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+            let _ = tx.send(StreamEvent::Done);
+        }
+        Err(_) => {
+            let _ = tx.send(StreamEvent::Error("Follow-up timed out after 120s".to_string()));
             let _ = tx.send(StreamEvent::Done);
         }
     }
@@ -2496,21 +2752,9 @@ async fn stream_model_response_task(
                             name, args
                         )));
 
-                        // Parse the JSON arguments to extract the actual args string for our tools
-                        let tool_args = match serde_json::from_str::<serde_json::Value>(&args) {
-                            Ok(v) => {
-                                // For tools with a single "command" or "args" field, extract it
-                                if let Some(cmd) = v.get("command").and_then(|c| c.as_str()) {
-                                    cmd.to_string()
-                                } else if let Some(a) = v.get("args").and_then(|a| a.as_str()) {
-                                    a.to_string()
-                                } else {
-                                    // Otherwise pass the full JSON as args
-                                    args.clone()
-                                }
-                            }
-                            Err(_) => args.clone(),
-                        };
+                        let tool_args = extract_args_from_json(&args, &name)
+                            .map(|(_, extracted)| extracted)
+                            .unwrap_or_else(|| args.clone());
 
                         match security_engine.check_tool_call(&name, &tool_args) {
                             crate::security::SecurityDecision::Allow => {
@@ -2541,7 +2785,7 @@ async fn stream_model_response_task(
                                             id.clone()
                                         };
                                         // Assistant message MUST include tool_calls array with the id
-                                        // AND reasoning_content for models that require thinking history
+                                        // Reasoning is kept ephemeral — not stored in persistent history
                                         follow_messages.push(Message {
                                             role: "assistant".to_string(),
                                             content: full_content.clone(),
@@ -2557,7 +2801,7 @@ async fn stream_model_response_task(
                                                     },
                                                 },
                                             ]),
-                                            reasoning_content: if accumulated_reasoning.is_empty() { None } else { Some(accumulated_reasoning.clone()) },
+                                            reasoning_content: None,
                                         });
                                         // Tool result message MUST include tool_call_id matching the assistant's tool_calls
                                         follow_messages.push(Message {
@@ -2702,8 +2946,7 @@ async fn stream_model_response_task(
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
-                                        content: "Synthesize the tool result into a complete response. \
-                                                  Explain what was found, what it means, and what to do next.".to_string(),
+                                        content: "TOOL EXECUTION COMPLETE. Based on the tool result provided above, write a complete response. Explain what was found, what it means, and what to do next.".to_string(),
                                         images: None,
                                     tool_call_id: None,
                                     tool_calls: None,
@@ -2727,7 +2970,7 @@ async fn stream_model_response_task(
                                                 let mut retry = follow_messages.clone();
                                                 retry.push(Message {
                                                     role: "user".to_string(),
-                                                    content: "Your previous response was empty. Provide a complete synthesis of the tool results now.".to_string(),
+                                                    content: "Your previous response was empty. Using the tool result already provided above, write a complete response explaining what was found, what it means, and the next step.".to_string(),
                                                     images: None,
                                                 tool_call_id: None,
                                                 tool_calls: None,
@@ -2919,8 +3162,7 @@ async fn stream_model_response_task_legacy(
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
-                                        content: "Synthesize the tool result into a complete response. \
-                                                  Explain what was found, what it means, and what to do next.".to_string(),
+                                        content: "TOOL EXECUTION COMPLETE. Based on the tool result provided above, write a complete response. Explain what was found, what it means, and what to do next.".to_string(),
                                         images: None,
                                     tool_call_id: None,
                                     tool_calls: None,
@@ -2944,7 +3186,7 @@ async fn stream_model_response_task_legacy(
                                                 let mut retry = follow_messages.clone();
                                                 retry.push(Message {
                                                     role: "user".to_string(),
-                                                    content: "Your previous response was empty. Provide a complete synthesis of the tool results now.".to_string(),
+                                                    content: "Your previous response was empty. Using the tool result already provided above, write a complete response explaining what was found, what it means, and the next step.".to_string(),
                                                     images: None,
                                                 tool_call_id: None,
                                                 tool_calls: None,
@@ -3232,7 +3474,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                     for chunk in chunks {
                         follow_content.push_str(&chunk);
                     }
-                    app.add_assistant_message(follow_content);
+                    app.add_assistant_message(follow_content, None);
                 }
                 Err(e) => app.add_system_message(format!("Follow-up failed: {}", e)),
             }
@@ -3877,25 +4119,41 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
 
         // Render content with syntax highlighting for assistant messages
         if msg.role == "assistant" {
+            // Render persistent reasoning first, if present
+            if let Some(ref reasoning) = msg.reasoning {
+                if !reasoning.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::styled("  💭 ", reasoning_style()),
+                        Span::styled("Thinking", reasoning_style().add_modifier(Modifier::BOLD | Modifier::ITALIC)),
+                    ]));
+                    for line in reasoning.lines() {
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("     {}", line), reasoning_style().add_modifier(Modifier::ITALIC)),
+                        ]));
+                    }
+                    lines.push(Line::from(""));
+                }
+            }
+
             // Render assistant messages with syntax highlighting
-                let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
-                for (is_code, block_lines) in highlighted {
-                    if is_code {
-                        lines.push(Line::from(vec![
-                            Span::styled("┌─ code ──────────────────────────────", muted_style()),
-                        ]));
-                        for hl_line in block_lines {
-                            lines.push(hl_line);
-                        }
-                        lines.push(Line::from(vec![
-                            Span::styled("└─────────────────────────────────────", muted_style()),
-                        ]));
-                    } else {
-                        for hl_line in block_lines {
-                            lines.push(hl_line);
-                        }
+            let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
+            for (is_code, block_lines) in highlighted {
+                if is_code {
+                    lines.push(Line::from(vec![
+                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
+                    ]));
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
+                    }
+                    lines.push(Line::from(vec![
+                        Span::styled("└─────────────────────────────────────", muted_style()),
+                    ]));
+                } else {
+                    for hl_line in block_lines {
+                        lines.push(hl_line);
                     }
                 }
+            }
 
         } else {
             for content_line in msg.content.lines() {
@@ -4560,4 +4818,30 @@ fn split_thinking_content(content: &str) -> (String, String) {
     }
 
     (thinking, regular)
+}
+
+/// Emergency truncate: remove oldest non-system messages until estimated tokens
+/// are below `target_tokens`. Preserves system prompt and most recent messages.
+fn emergency_truncate_messages(
+    messages: &mut Vec<crate::providers::Message>,
+    target_tokens: usize,
+) {
+    loop {
+        let estimated = crate::memory::compression::estimate_tokens(messages);
+        if estimated <= target_tokens || messages.len() <= 2 {
+            break;
+        }
+        // Find oldest non-system message to remove
+        let remove_idx = messages
+            .iter()
+            .enumerate()
+            .skip(1) // Never remove index 0 (system prompt)
+            .find(|(_, m)| m.role != "system")
+            .map(|(i, _)| i);
+        if let Some(idx) = remove_idx {
+            messages.remove(idx);
+        } else {
+            break;
+        }
+    }
 }
