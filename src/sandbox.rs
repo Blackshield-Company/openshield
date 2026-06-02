@@ -20,7 +20,7 @@ pub fn extract_code_blocks(content: &str) -> Vec<(String, String)> {
                 in_block = false;
             } else {
                 // Start of block
-                current_lang = line[3..].trim().to_string();
+                current_lang = line.strip_prefix("```").unwrap_or("").trim().to_string();
                 in_block = true;
             }
         } else if in_block {

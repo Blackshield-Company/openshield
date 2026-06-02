@@ -119,12 +119,8 @@ impl ResponseCache {
         if let Ok(mut stats) = self.stats.lock() {
             stats.sets += 1;
         }
-        // Persist asynchronously to avoid blocking the hot path
-        let cache_file = self.cache_file.clone();
-        let inner = Arc::clone(&self.inner);
-        tokio::spawn(async move {
-            let _ = Self::persist_sync(&inner, &cache_file);
-        });
+        // Persist synchronously for simplicity (tests run synchronously)
+        let _ = Self::persist_sync(&self.inner, &self.cache_file);
         Ok(())
     }
 
@@ -155,12 +151,8 @@ impl ResponseCache {
                 .map_err(|e| anyhow::anyhow!("Cache lock poisoned: {}", e))?;
             map.remove(key);
         }
-        // Async persist
-        let cache_file = self.cache_file.clone();
-        let inner = Arc::clone(&self.inner);
-        tokio::spawn(async move {
-            let _ = Self::persist_sync(&inner, &cache_file);
-        });
+        // Persist synchronously
+        let _ = Self::persist_sync(&self.inner, &self.cache_file);
         Ok(())
     }
 
@@ -177,12 +169,8 @@ impl ResponseCache {
         if let Ok(mut stats) = self.stats.lock() {
             *stats = CacheStats::default();
         }
-        // Async persist
-        let cache_file = self.cache_file.clone();
-        let inner = Arc::clone(&self.inner);
-        tokio::spawn(async move {
-            let _ = Self::persist_sync(&inner, &cache_file);
-        });
+        // Persist synchronously
+        let _ = Self::persist_sync(&self.inner, &self.cache_file);
         Ok(())
     }
 

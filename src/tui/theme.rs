@@ -1033,14 +1033,14 @@ pub fn hr(width: usize) -> String {
     let t = current_theme();
     let left = fg("▛", &color_to_hex(t.border_unfocused));
     let right = fg("▜", &color_to_hex(t.border_unfocused));
-    let bar: String = std::iter::repeat('▀').take(width.saturating_sub(2)).collect();
+    let bar: String = "▀".repeat(width.saturating_sub(2));
     let bar = fg(&bar, &color_to_hex(t.row_alt_bg));
     format!("{}{}{}", left, bar, right)
 }
 
 pub fn border_line(width: usize) -> String {
     let t = current_theme();
-    let line: String = std::iter::repeat('═').take(width).collect();
+    let line: String = "═".repeat(width);
     fg(&line, &color_to_hex(t.border_unfocused))
 }
 
@@ -1049,7 +1049,7 @@ pub fn box_top(width: usize) -> String {
     let mut s = String::new();
     s.push_str(&fg("╔", &color_to_hex(t.border_unfocused)));
     s.push_str(&fg(
-        &std::iter::repeat('═').take(width.saturating_sub(2)).collect::<String>(),
+        &"═".repeat(width.saturating_sub(2)),
         &color_to_hex(t.border_focused),
     ));
     s.push_str(&fg("╗", &color_to_hex(t.border_unfocused)));
@@ -1061,7 +1061,7 @@ pub fn box_bottom(width: usize) -> String {
     let mut s = String::new();
     s.push_str(&fg("╚", &color_to_hex(t.border_unfocused)));
     s.push_str(&fg(
-        &std::iter::repeat('═').take(width.saturating_sub(2)).collect::<String>(),
+        &"═".repeat(width.saturating_sub(2)),
         &color_to_hex(t.border_focused),
     ));
     s.push_str(&fg("╝", &color_to_hex(t.border_unfocused)));

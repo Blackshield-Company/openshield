@@ -143,7 +143,7 @@ impl<'a> ContextInjector<'a> {
 
         // Pattern: "What did we do about X?"
         let what_did_we_do =
-            Regex::new(r"what did we do (about|regarding|with|for)\s+(.+?)\??$").unwrap();
+            Regex::new(r"what did we do (about|regarding|with|for)\s+(.+?)\??$").expect("valid regex");
         if let Some(caps) = what_did_we_do.captures(&query_lower) {
             return QueryIntent::WhatDidWeDo {
                 topic: caps
@@ -155,7 +155,7 @@ impl<'a> ContextInjector<'a> {
 
         // Pattern: "How did we solve X?"
         let how_did_we_solve =
-            Regex::new(r"how did we (solve|fix|handle|address|implement)\s+(.+?)\??$").unwrap();
+            Regex::new(r"how did we (solve|fix|handle|address|implement)\s+(.+?)\??$").expect("valid regex");
         if let Some(caps) = how_did_we_solve.captures(&query_lower) {
             return QueryIntent::HowDidWeSolve {
                 topic: caps
@@ -166,7 +166,7 @@ impl<'a> ContextInjector<'a> {
         }
 
         // Pattern: "Tell me about X"
-        let tell_me_about = Regex::new(r"tell me (about|regarding)\s+(.+?)\??$").unwrap();
+        let tell_me_about = Regex::new(r"tell me (about|regarding)\s+(.+?)\??$").expect("valid regex");
         if let Some(caps) = tell_me_about.captures(&query_lower) {
             return QueryIntent::TellMeAbout {
                 topic: caps
@@ -179,7 +179,7 @@ impl<'a> ContextInjector<'a> {
         // Pattern: "What was the issue with X?"
         let what_was_issue =
             Regex::new(r"what (was|is) the (issue|problem|error|bug) (with|in)\s+(.+?)\??$")
-                .unwrap();
+                .expect("valid regex");
         if let Some(caps) = what_was_issue.captures(&query_lower) {
             return QueryIntent::WhatWasTheIssue {
                 topic: caps

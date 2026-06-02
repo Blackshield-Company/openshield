@@ -117,8 +117,8 @@ fn parse_duckduckgo_results(query: &str, body: &str) -> Result<String> {
 
     let max = titles.len().min(10);
     let mut lines = vec![format!("Search results for '{}':", query)];
-    for i in 0..max {
-        lines.push(format!("{}. {}\n   {}", i + 1, titles[i].0, titles[i].1));
+    for (i, title) in titles.iter().enumerate().take(max) {
+        lines.push(format!("{}. {}\n   {}", i + 1, title.0, title.1));
         if let Some(snippet) = snippets.get(i) {
             if !snippet.is_empty() {
                 lines.push(format!("   {}", snippet));

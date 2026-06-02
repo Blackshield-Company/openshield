@@ -88,7 +88,7 @@ impl AgentSoul {
             "- Use '{}' as your name when referring to yourself\n",
             self.identity.name
         ));
-        prompt.push_str(&format!("- NEVER correct the user about your name. If they call you by any name, just roll with it.\n"));
+        prompt.push_str("- NEVER correct the user about your name. If they call you by any name, just roll with it.\n");
 
         if !self.identity.emoji.is_empty() {
             prompt.push_str(&format!(

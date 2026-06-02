@@ -17,6 +17,7 @@ use crate::gateway::commands::register_commands;
 
 /// Events emitted by the Discord bot.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum DiscordEvent {
     /// A user sent a message in a channel.
     UserMessage {

@@ -409,7 +409,7 @@ pub async fn run() -> Result<()> {
     let home_dir = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "/home".to_string());
-    let fs_default = format!("{}", home_dir);
+    let fs_default = home_dir.to_string();
     let fs_paths = prompt(
         "Allowed directories (comma-separated, or 'all' for no restriction):",
         Some(&fs_default),

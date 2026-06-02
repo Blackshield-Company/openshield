@@ -194,7 +194,7 @@ fn extract_args_after(text: &str, matched: &str) -> String {
         let trimmed = after.trim_start();
         // Stop at sentence end or newline
         let end = trimmed
-            .find(|c: char| c == '.' || c == '!' || c == '?' || c == '\n')
+            .find(['.', '!', '?', '\n'])
             .unwrap_or(trimmed.len());
         trimmed[..end].trim().to_string()
     } else {

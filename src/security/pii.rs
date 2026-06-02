@@ -84,7 +84,7 @@ impl PiiDetector {
 
         // Sort by position descending to replace from end to start
         let mut sorted = findings;
-        sorted.sort_by(|a, b| b.position.0.cmp(&a.position.0));
+        sorted.sort_by_key(|f| std::cmp::Reverse(f.position.0));
 
         for finding in sorted {
             let replacement = format!("[REDACTED_{}]", finding.category);

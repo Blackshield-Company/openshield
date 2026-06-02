@@ -1,6 +1,6 @@
 /// Simple inline diff generator for file edits.
 /// Produces a unified-diff-style output without external dependencies.
-
+///
 /// Generate a diff between old and new content.
 pub fn generate_diff(old: &str, new: &str, path: &str) -> String {
     let old_lines: Vec<&str> = old.lines().collect();

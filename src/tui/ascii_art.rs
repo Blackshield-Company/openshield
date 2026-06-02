@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn wordmark_spells_openshark() {
-        let first_line = WORDMARK.lines().next().unwrap();
+        let first_line = WORDMARK.lines().next().expect("WORDMARK should have lines");
         assert!(first_line.contains("▪▪▪▪"), "Missing block letters");
         assert!(
             first_line.width() <= 75,

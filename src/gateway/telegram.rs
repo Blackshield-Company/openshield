@@ -129,7 +129,7 @@ async fn handle_message(
         })
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let user_id = user.map(|u| u.id.0 as u64).unwrap_or(0);
+    let user_id = user.map(|u| u.id.0).unwrap_or(0);
 
     let event = TelegramEvent::UserMessage {
         chat_id,

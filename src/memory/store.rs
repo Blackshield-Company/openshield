@@ -459,7 +459,7 @@ impl MemoryStore {
             "SELECT value FROM analysis_results WHERE category = ?1 AND key = ?2 ORDER BY created_at DESC LIMIT 1"
         )?;
         let result = stmt
-            .query_map(params![category, key], |row| Ok(row.get::<_, String>(0)?))?
+            .query_map(params![category, key], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()
             .context("Failed to get analysis result")?;
         Ok(result.into_iter().next())
