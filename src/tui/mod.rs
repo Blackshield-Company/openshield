@@ -1568,18 +1568,24 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Enter => {
-            let input = app.input.trim().to_string();
-            if !input.is_empty() {
-                // Save to history
-                app.input_history.push(input.clone());
-                app.history_index = None;
-                let _ = std::fs::write(
-                    &app.history_file,
-                    app.input_history.join("\n")
-                );
-                app.input.clear();
-                app.cursor_position = 0;
-                process_user_input(app, input).await?;
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                // Insert newline for multi-line input
+                app.input.insert(app.cursor_position, '\n');
+                app.cursor_position += 1;
+            } else {
+                let input = app.input.trim().to_string();
+                if !input.is_empty() {
+                    // Save to history
+                    app.input_history.push(input.clone());
+                    app.history_index = None;
+                    let _ = std::fs::write(
+                        &app.history_file,
+                        app.input_history.join("\n")
+                    );
+                    app.input.clear();
+                    app.cursor_position = 0;
+                    process_user_input(app, input).await?;
+                }
             }
         }
         KeyCode::Char(c) => {
@@ -4401,7 +4407,9 @@ fn input_bar_height(app: &App, area_width: u16) -> u16 {
     } else {
         app.input.len()
     };
-    let lines = (text + available_width - 1) / available_width; // ceil division
+    let explicit_lines = app.input.matches('\n').count() + 1;
+    let wrapped_lines = (text + available_width - 1) / available_width; // ceil division
+    let lines = explicit_lines.max(wrapped_lines);
     let lines = lines.max(1);
     // Cap at 8 lines so it doesn't eat the whole chat area
     let capped = lines.min(8);
