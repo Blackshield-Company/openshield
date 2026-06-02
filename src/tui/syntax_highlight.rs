@@ -778,3 +778,122 @@ pub fn extract_and_highlight(text: &str) -> Vec<(bool, Vec<Line<'static>>)> {
 
     result
 }
+
+/// Render inline markdown within a plain text line.
+/// Supports: **bold**, *italic*, `code`, [links](url), ~~strikethrough~~
+pub fn render_markdown_line(line: &str) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            // Bold: **text**
+            '*' if chars.peek() == Some(&'*') => {
+                chars.next(); // consume second *
+                let mut text = String::new();
+                while let Some(c) = chars.next() {
+                    if c == '*' && chars.peek() == Some(&'*') {
+                        chars.next();
+                        break;
+                    }
+                    text.push(c);
+                }
+                spans.push(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+            // Italic: *text* or _text_
+            '*' | '_' => {
+                let marker = ch;
+                let mut text = String::new();
+                while let Some(c) = chars.next() {
+                    if c == marker {
+                        break;
+                    }
+                    text.push(c);
+                }
+                spans.push(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+            }
+            // Inline code: `text`
+            '`' => {
+                let mut text = String::new();
+                while let Some(c) = chars.next() {
+                    if c == '`' {
+                        break;
+                    }
+                    text.push(c);
+                }
+                spans.push(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+            // Strikethrough: ~~text~~
+            '~' if chars.peek() == Some(&'~') => {
+                chars.next();
+                let mut text = String::new();
+                while let Some(c) = chars.next() {
+                    if c == '~' && chars.peek() == Some(&'~') {
+                        chars.next();
+                        break;
+                    }
+                    text.push(c);
+                }
+                spans.push(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                ));
+            }
+            // Link: [text](url)
+            '[' => {
+                let mut text = String::new();
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        break;
+                    }
+                    text.push(c);
+                }
+                // Skip (url)
+                if chars.peek() == Some(&'(') {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == ')' {
+                            break;
+                        }
+                    }
+                }
+                spans.push(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::UNDERLINED),
+                ));
+            }
+            c => {
+                // Accumulate plain text
+                let mut plain = String::from(c);
+                while let Some(&next) = chars.peek() {
+                    if next == '*' || next == '_' || next == '`' || next == '~' || next == '[' {
+                        break;
+                    }
+                    plain.push(chars.next().unwrap());
+                }
+                spans.push(Span::styled(plain, Style::default().fg(Color::White)));
+            }
+        }
+    }
+
+    Line::from(spans)
+}
