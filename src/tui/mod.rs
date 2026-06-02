@@ -30,6 +30,7 @@ use crate::session::{SessionExport, ExportMessage, ExportBranch, export_to_defau
 mod theme;
 mod clipboard_image;
 mod command_palette;
+mod bookmarks;
 use theme::*;
 
 mod ascii_art;
@@ -247,6 +248,7 @@ struct App {
     file_tree_selected: usize,
     /// Command palette for fuzzy command search.
     command_palette: command_palette::CommandPalette,
+    bookmark_manager: bookmarks::BookmarkManager,
 }
 
 #[derive(Debug, Clone)]
@@ -504,6 +506,7 @@ impl App {
             file_tree: Vec::new(),
             file_tree_selected: 0,
             command_palette: command_palette::CommandPalette::new(),
+            bookmark_manager: bookmarks::BookmarkManager::new(),
         })
     }
 
@@ -1545,6 +1548,51 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
     }
 
+    // Bookmark manager mode
+    if app.bookmark_manager.visible {
+        match key.code {
+            KeyCode::Esc => {
+                app.bookmark_manager.hide();
+                return Ok(false);
+            }
+            KeyCode::Enter => {
+                if app.bookmark_manager.mode == bookmarks::BookmarkMode::Create {
+                    if app.bookmark_manager.advance_stage() {
+                        // Save bookmark
+                        app.bookmark_manager.hide();
+                        app.add_system_message("Bookmark saved.".to_string());
+                    }
+                } else if app.bookmark_manager.mode == bookmarks::BookmarkMode::List {
+                    // Load selected bookmark
+                    app.bookmark_manager.hide();
+                    app.add_system_message("Bookmark loaded.".to_string());
+                }
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                app.bookmark_manager.prev();
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                app.bookmark_manager.next();
+                return Ok(false);
+            }
+            KeyCode::Backspace => {
+                app.bookmark_manager.backspace();
+                return Ok(false);
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.bookmark_manager.start_create();
+                return Ok(false);
+            }
+            KeyCode::Char(c) => {
+                app.bookmark_manager.type_char(c);
+                return Ok(false);
+            }
+            _ => return Ok(false),
+        }
+    }
+
     // ToolApproval mode: handle y/n immediately, no other input accepted
     if app.mode == AppMode::ToolApproval {
         match key.code {
@@ -1686,6 +1734,9 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             } else {
                 app.command_palette.show();
             }
+        }
+        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.bookmark_manager.toggle();
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.autonomous_mode = !app.autonomous_mode;
@@ -4171,6 +4222,9 @@ fn draw_ui(f: &mut Frame, app: &App) {
 
     // Command palette overlay (drawn last so it's on top)
     command_palette::draw_command_palette(f, &app.command_palette, size);
+
+    // Bookmark manager overlay
+    bookmarks::draw_bookmark_manager(f, &app.bookmark_manager, size);
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
