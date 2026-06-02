@@ -2012,7 +2012,12 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             \n\
             Tool commands:\n\
             • /undo             — Undo last file edit\n\
-            • /diff             — Show diff preview for last edit"
+            • /diff             — Show diff preview for last edit\n\
+            \n\
+            Git agent commands:\n\
+            • /commit [msg]     — Stage all, commit (auto-msg if empty)\n\
+            • /pr [title]       — Branch, commit, push, suggest PR\n\
+            • /review           — Review staged diff"
                 .to_string(),
         );
         return Ok(());
