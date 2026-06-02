@@ -159,6 +159,10 @@ mod tests {
         let lines: Vec<_> = banner.lines().collect();
         // First wordmark line should be centered (starts with space or ▪)
         let first = &lines[0];
-        assert!(first.starts_with(' ') || first.starts_with('▪'), "Not centered: {}", first);
+        assert!(
+            first.starts_with(' ') || first.starts_with('▪'),
+            "Not centered: {}",
+            first
+        );
     }
 }

@@ -76,21 +76,16 @@ impl TelegramBot {
         let require_prefix = self.config.gateway.telegram.require_command_prefix;
         let event_tx = self.event_tx.clone();
 
-        let handler = Update::filter_message().endpoint(
-            move |bot: Bot, msg: Message| {
-                let event_tx = event_tx.clone();
-                let allowed_chats = allowed_chats.clone();
-                async move {
-                    handle_message(bot, msg, event_tx, allowed_chats, require_prefix).await;
-                    Ok::<(), teloxide::RequestError>(())
-                }
-            },
-        );
+        let handler = Update::filter_message().endpoint(move |bot: Bot, msg: Message| {
+            let event_tx = event_tx.clone();
+            let allowed_chats = allowed_chats.clone();
+            async move {
+                handle_message(bot, msg, event_tx, allowed_chats, require_prefix).await;
+                Ok::<(), teloxide::RequestError>(())
+            }
+        });
 
-        Dispatcher::builder(bot, handler)
-            .build()
-            .dispatch()
-            .await;
+        Dispatcher::builder(bot, handler).build().dispatch().await;
 
         Ok(())
     }
@@ -119,13 +114,20 @@ async fn handle_message(
     }
 
     let user = msg.from.clone();
-    let username = user.as_ref().map(|u| {
-        u.username.clone().unwrap_or_else(|| {
-            format!("{} {}", u.first_name, u.last_name.clone().unwrap_or_default())
+    let username = user
+        .as_ref()
+        .map(|u| {
+            u.username.clone().unwrap_or_else(|| {
+                format!(
+                    "{} {}",
+                    u.first_name,
+                    u.last_name.clone().unwrap_or_default()
+                )
                 .trim()
                 .to_string()
+            })
         })
-    }).unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "Unknown".to_string());
 
     let user_id = user.map(|u| u.id.0 as u64).unwrap_or(0);
 

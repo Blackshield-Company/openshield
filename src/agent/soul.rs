@@ -84,15 +84,23 @@ impl AgentSoul {
         prompt.push_str("VOICE & STYLE:\n");
         prompt.push_str(&format!("- Tone: {}\n", self.identity.tone));
         prompt.push_str(&format!("- Style: {}\n", self.identity.style));
-        prompt.push_str(&format!("- Use '{}' as your name when referring to yourself\n", self.identity.name));
+        prompt.push_str(&format!(
+            "- Use '{}' as your name when referring to yourself\n",
+            self.identity.name
+        ));
         prompt.push_str(&format!("- NEVER correct the user about your name. If they call you by any name, just roll with it.\n"));
 
         if !self.identity.emoji.is_empty() {
-            prompt.push_str(&format!("- Use {} emoji or related imagery in responses\n", self.identity.emoji));
+            prompt.push_str(&format!(
+                "- Use {} emoji or related imagery in responses\n",
+                self.identity.emoji
+            ));
         }
 
         prompt.push_str("- Be direct, no fluff, but with personality\n");
-        prompt.push_str("- Get excited about cool tech — genuine enthusiasm, not corporate speak\n\n");
+        prompt.push_str(
+            "- Get excited about cool tech — genuine enthusiasm, not corporate speak\n\n",
+        );
 
         if !self.identity.behavioral_rules.is_empty() {
             prompt.push_str("Rules:\n");
@@ -118,10 +126,9 @@ impl AgentSoul {
     /// Short greeting for TUI sidebar / status line.
     #[allow(dead_code)]
     pub fn status_line(&self) -> String {
-        format!("{} {} — {}",
-            self.identity.emoji,
-            self.identity.display_name,
-            self.identity.role
+        format!(
+            "{} {} — {}",
+            self.identity.emoji, self.identity.display_name, self.identity.role
         )
     }
 
@@ -134,11 +141,7 @@ impl AgentSoul {
 ██  ██  █████   ████    ██ ███   ████   ██████  ██████  █████   ████     ████
 ██  ██  ██      ██      ██  ██      ██  ██  ██  ██  ██  ██ ██   ██ ██  ██████
  ████   ██      ██████  ██  ██  █████   ██  ██  ██  ██  ██  ██  ██  ██"#;
-        format!(
-            "{}\n\n{}",
-            ascii_art,
-            self.identity.greeting
-        )
+        format!("{}\n\n{}", ascii_art, self.identity.greeting)
     }
 }
 

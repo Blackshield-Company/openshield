@@ -79,7 +79,10 @@ impl Tool for TodoTool {
         } else if trimmed == "--clear" {
             clear_todos()
         } else {
-            Ok("Usage: todo --add <task> | --complete <id> | --cancel <id> | --list | --clear".to_string())
+            Ok(
+                "Usage: todo --add <task> | --complete <id> | --cancel <id> | --list | --clear"
+                    .to_string(),
+            )
         }
     }
 }
@@ -224,7 +227,9 @@ fn create_cronjob(args: &str) -> Result<String> {
     let name = name.unwrap_or(&default_name);
 
     if prompt.is_empty() {
-        return Ok("Usage: cronjob --create --schedule <cron> --prompt <task> [--name <name>]".to_string());
+        return Ok(
+            "Usage: cronjob --create --schedule <cron> --prompt <task> [--name <name>]".to_string(),
+        );
     }
 
     let dir = cronjob_dir()?;
@@ -251,8 +256,8 @@ fn list_cronjobs() -> Result<String> {
     let dir = cronjob_dir()?;
     let mut jobs = Vec::new();
 
-    for entry in std::fs::read_dir(&dir)
-        .with_context(|| format!("Failed to read cronjob dir: {:?}", dir))?
+    for entry in
+        std::fs::read_dir(&dir).with_context(|| format!("Failed to read cronjob dir: {:?}", dir))?
     {
         let entry = entry?;
         let path = entry.path();
@@ -265,7 +270,11 @@ fn list_cronjobs() -> Result<String> {
     if jobs.is_empty() {
         Ok("No cronjobs configured.".to_string())
     } else {
-        Ok(format!("Configured cronjobs ({}):\n{}", jobs.len(), jobs.join("\n")))
+        Ok(format!(
+            "Configured cronjobs ({}):\n{}",
+            jobs.len(),
+            jobs.join("\n")
+        ))
     }
 }
 
@@ -326,8 +335,8 @@ fn list_skills() -> Result<String> {
     let dir = skills_dir()?;
     let mut skills = Vec::new();
 
-    for entry in std::fs::read_dir(&dir)
-        .with_context(|| format!("Failed to read skills dir: {:?}", dir))?
+    for entry in
+        std::fs::read_dir(&dir).with_context(|| format!("Failed to read skills dir: {:?}", dir))?
     {
         let entry = entry?;
         let path = entry.path();

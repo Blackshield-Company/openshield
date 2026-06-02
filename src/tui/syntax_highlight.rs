@@ -22,220 +22,513 @@ pub fn highlight_code_block(code: &str, lang: &str) -> Vec<Line<'static>> {
 // ── Rust ───────────────────────────────────────────────────────────────────
 fn highlight_rust(lines: &[&str]) -> Vec<Line<'static>> {
     let keywords = [
-        "fn", "let", "mut", "const", "static", "struct", "enum", "trait",
-        "impl", "pub", "use", "mod", "match", "if", "else", "for", "while",
-        "loop", "return", "break", "continue", "async", "await", "move",
-        "where", "type", "as", "ref", "self", "Self", "super", "crate",
+        "fn", "let", "mut", "const", "static", "struct", "enum", "trait", "impl", "pub", "use",
+        "mod", "match", "if", "else", "for", "while", "loop", "return", "break", "continue",
+        "async", "await", "move", "where", "type", "as", "ref", "self", "Self", "super", "crate",
         "unsafe", "extern", "dyn", "box", "yield", "try", "macro",
     ];
     let types = [
-        "i8", "i16", "i32", "i64", "i128", "isize",
-        "u8", "u16", "u32", "u64", "u128", "usize",
-        "f32", "f64", "bool", "char", "str", "String",
-        "Vec", "Option", "Result", "HashMap", "BTreeMap",
-        "Arc", "Rc", "Box", "Pin", "Cell", "RefCell",
-        "VecDeque", "HashSet", "BTreeSet", "LinkedList",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "i128",
+        "isize",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "u128",
+        "usize",
+        "f32",
+        "f64",
+        "bool",
+        "char",
+        "str",
+        "String",
+        "Vec",
+        "Option",
+        "Result",
+        "HashMap",
+        "BTreeMap",
+        "Arc",
+        "Rc",
+        "Box",
+        "Pin",
+        "Cell",
+        "RefCell",
+        "VecDeque",
+        "HashSet",
+        "BTreeSet",
+        "LinkedList",
     ];
     let builtins = [
-        "println!", "print!", "format!", "vec!", "assert!", "assert_eq!",
-        "panic!", "todo!", "unimplemented!", "unwrap", "expect", "clone",
-        "len", "push", "pop", "insert", "remove", "get", "iter", "collect",
-        "map", "filter", "fold", "zip", "enumerate", "chars", "lines",
-        "to_string", "parse", "into", "from", "default", "new", "with_capacity",
+        "println!",
+        "print!",
+        "format!",
+        "vec!",
+        "assert!",
+        "assert_eq!",
+        "panic!",
+        "todo!",
+        "unimplemented!",
+        "unwrap",
+        "expect",
+        "clone",
+        "len",
+        "push",
+        "pop",
+        "insert",
+        "remove",
+        "get",
+        "iter",
+        "collect",
+        "map",
+        "filter",
+        "fold",
+        "zip",
+        "enumerate",
+        "chars",
+        "lines",
+        "to_string",
+        "parse",
+        "into",
+        "from",
+        "default",
+        "new",
+        "with_capacity",
     ];
 
-    lines.iter().map(|line| {
-        let spans = tokenize_and_highlight(line, &keywords, &types, &builtins);
-        Line::from(spans)
-    }).collect()
+    lines
+        .iter()
+        .map(|line| {
+            let spans = tokenize_and_highlight(line, &keywords, &types, &builtins);
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── Python ─────────────────────────────────────────────────────────────────
 fn highlight_python(lines: &[&str]) -> Vec<Line<'static>> {
     let keywords = [
-        "def", "class", "if", "elif", "else", "for", "while", "try",
-        "except", "finally", "with", "as", "import", "from", "return",
-        "yield", "async", "await", "lambda", "pass", "break", "continue",
-        "raise", "assert", "del", "global", "nonlocal", "in", "is", "not",
-        "and", "or", "True", "False", "None",
+        "def", "class", "if", "elif", "else", "for", "while", "try", "except", "finally", "with",
+        "as", "import", "from", "return", "yield", "async", "await", "lambda", "pass", "break",
+        "continue", "raise", "assert", "del", "global", "nonlocal", "in", "is", "not", "and", "or",
+        "True", "False", "None",
     ];
     let types = [
-        "int", "float", "str", "bool", "list", "dict", "tuple", "set",
-        "frozenset", "bytes", "bytearray", "memoryview", "object",
+        "int",
+        "float",
+        "str",
+        "bool",
+        "list",
+        "dict",
+        "tuple",
+        "set",
+        "frozenset",
+        "bytes",
+        "bytearray",
+        "memoryview",
+        "object",
     ];
     let builtins = [
-        "print", "len", "range", "enumerate", "zip", "map", "filter",
-        "sum", "min", "max", "sorted", "reversed", "open", "input",
-        "isinstance", "hasattr", "getattr", "setattr", "delattr",
-        "type", "id", "repr", "str", "int", "float", "list", "dict",
-        "append", "extend", "insert", "remove", "pop", "clear",
-        "keys", "values", "items", "get", "update", "join", "split",
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sum",
+        "min",
+        "max",
+        "sorted",
+        "reversed",
+        "open",
+        "input",
+        "isinstance",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "delattr",
+        "type",
+        "id",
+        "repr",
+        "str",
+        "int",
+        "float",
+        "list",
+        "dict",
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "clear",
+        "keys",
+        "values",
+        "items",
+        "get",
+        "update",
+        "join",
+        "split",
     ];
 
-    lines.iter().map(|line| {
-        let spans = tokenize_and_highlight(line, &keywords, &types, &builtins);
-        Line::from(spans)
-    }).collect()
+    lines
+        .iter()
+        .map(|line| {
+            let spans = tokenize_and_highlight(line, &keywords, &types, &builtins);
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── JavaScript / TypeScript ────────────────────────────────────────────────
 fn highlight_js(lines: &[&str]) -> Vec<Line<'static>> {
     let keywords = [
-        "function", "const", "let", "var", "if", "else", "for", "while",
-        "do", "switch", "case", "break", "continue", "return", "try",
-        "catch", "finally", "throw", "new", "this", "typeof", "instanceof",
-        "void", "delete", "in", "of", "await", "async", "yield",
-        "class", "extends", "super", "import", "export", "from", "default",
-        "interface", "type", "enum", "namespace", "module", "declare",
-        "public", "private", "protected", "readonly", "abstract", "implements",
+        "function",
+        "const",
+        "let",
+        "var",
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "break",
+        "continue",
+        "return",
+        "try",
+        "catch",
+        "finally",
+        "throw",
+        "new",
+        "this",
+        "typeof",
+        "instanceof",
+        "void",
+        "delete",
+        "in",
+        "of",
+        "await",
+        "async",
+        "yield",
+        "class",
+        "extends",
+        "super",
+        "import",
+        "export",
+        "from",
+        "default",
+        "interface",
+        "type",
+        "enum",
+        "namespace",
+        "module",
+        "declare",
+        "public",
+        "private",
+        "protected",
+        "readonly",
+        "abstract",
+        "implements",
     ];
     let types = [
-        "string", "number", "boolean", "symbol", "bigint", "undefined",
-        "null", "any", "unknown", "never", "void", "object", "Array",
-        "Promise", "Map", "Set", "Date", "RegExp", "Error", "Function",
+        "string",
+        "number",
+        "boolean",
+        "symbol",
+        "bigint",
+        "undefined",
+        "null",
+        "any",
+        "unknown",
+        "never",
+        "void",
+        "object",
+        "Array",
+        "Promise",
+        "Map",
+        "Set",
+        "Date",
+        "RegExp",
+        "Error",
+        "Function",
     ];
     let builtins = [
-        "console", "log", "warn", "error", "info", "JSON", "parse", "stringify",
-        "Math", "random", "floor", "ceil", "round", "abs", "min", "max",
-        "setTimeout", "setInterval", "clearTimeout", "clearInterval",
-        "fetch", "then", "catch", "finally", "push", "pop", "shift",
-        "unshift", "slice", "splice", "concat", "join", "split", "map",
-        "filter", "reduce", "forEach", "find", "includes", "indexOf",
-        "toString", "valueOf", "hasOwnProperty",
+        "console",
+        "log",
+        "warn",
+        "error",
+        "info",
+        "JSON",
+        "parse",
+        "stringify",
+        "Math",
+        "random",
+        "floor",
+        "ceil",
+        "round",
+        "abs",
+        "min",
+        "max",
+        "setTimeout",
+        "setInterval",
+        "clearTimeout",
+        "clearInterval",
+        "fetch",
+        "then",
+        "catch",
+        "finally",
+        "push",
+        "pop",
+        "shift",
+        "unshift",
+        "slice",
+        "splice",
+        "concat",
+        "join",
+        "split",
+        "map",
+        "filter",
+        "reduce",
+        "forEach",
+        "find",
+        "includes",
+        "indexOf",
+        "toString",
+        "valueOf",
+        "hasOwnProperty",
     ];
 
-    lines.iter().map(|line| {
-        let spans = tokenize_and_highlight(line, &keywords, &types, &builtins);
-        Line::from(spans)
-    }).collect()
+    lines
+        .iter()
+        .map(|line| {
+            let spans = tokenize_and_highlight(line, &keywords, &types, &builtins);
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── JSON ───────────────────────────────────────────────────────────────────
 fn highlight_json(lines: &[&str]) -> Vec<Line<'static>> {
-    lines.iter().map(|line| {
-        let mut spans = Vec::new();
-        let mut chars = line.chars().peekable();
+    lines
+        .iter()
+        .map(|line| {
+            let mut spans = Vec::new();
+            let mut chars = line.chars().peekable();
 
-        while let Some(ch) = chars.next() {
-            match ch {
-                '{' | '}' | '[' | ']' | ':' | ',' => {
-                    spans.push(Span::styled(ch.to_string(), Style::default().fg(Color::White)));
-                }
-                '"' => {
-                    let mut string = String::from('"');
-                    while let Some(c) = chars.next() {
-                        string.push(c);
-                        if c == '"' {
-                            break;
+            while let Some(ch) = chars.next() {
+                match ch {
+                    '{' | '}' | '[' | ']' | ':' | ',' => {
+                        spans.push(Span::styled(
+                            ch.to_string(),
+                            Style::default().fg(Color::White),
+                        ));
+                    }
+                    '"' => {
+                        let mut string = String::from('"');
+                        while let Some(c) = chars.next() {
+                            string.push(c);
+                            if c == '"' {
+                                break;
+                            }
+                        }
+                        // Keys vs values: key is before colon
+                        let is_key = line.trim().starts_with(&string)
+                            || line[..line.find(&string).unwrap_or(0)]
+                                .trim_end()
+                                .ends_with(',');
+                        let color = if is_key { Color::Cyan } else { Color::Green };
+                        spans.push(Span::styled(string, Style::default().fg(color)));
+                    }
+                    't' if line.trim().starts_with("true")
+                        || line[line.find('t').unwrap_or(0)..].starts_with("true") =>
+                    {
+                        spans.push(Span::styled(
+                            "true".to_string(),
+                            Style::default().fg(Color::Magenta),
+                        ));
+                        for _ in 0..3 {
+                            chars.next();
                         }
                     }
-                    // Keys vs values: key is before colon
-                    let is_key = line.trim().starts_with(&string) ||
-                        line[..line.find(&string).unwrap_or(0)].trim_end().ends_with(',');
-                    let color = if is_key { Color::Cyan } else { Color::Green };
-                    spans.push(Span::styled(string, Style::default().fg(color)));
-                }
-                't' if line.trim().starts_with("true") || line[line.find('t').unwrap_or(0)..].starts_with("true") => {
-                    spans.push(Span::styled("true".to_string(), Style::default().fg(Color::Magenta)));
-                    for _ in 0..3 { chars.next(); }
-                }
-                'f' if line.trim().starts_with("false") || line[line.find('f').unwrap_or(0)..].starts_with("false") => {
-                    spans.push(Span::styled("false".to_string(), Style::default().fg(Color::Magenta)));
-                    for _ in 0..4 { chars.next(); }
-                }
-                'n' if line.trim().starts_with("null") || line[line.find('n').unwrap_or(0)..].starts_with("null") => {
-                    spans.push(Span::styled("null".to_string(), Style::default().fg(Color::Magenta)));
-                    for _ in 0..3 { chars.next(); }
-                }
-                c if c.is_numeric() || c == '-' => {
-                    let mut num = String::from(c);
-                    while let Some(&next) = chars.peek() {
-                        if next.is_numeric() || next == '.' || next == 'e' || next == 'E' || next == '-' || next == '+' {
-                            num.push(chars.next().unwrap());
-                        } else {
-                            break;
+                    'f' if line.trim().starts_with("false")
+                        || line[line.find('f').unwrap_or(0)..].starts_with("false") =>
+                    {
+                        spans.push(Span::styled(
+                            "false".to_string(),
+                            Style::default().fg(Color::Magenta),
+                        ));
+                        for _ in 0..4 {
+                            chars.next();
                         }
                     }
-                    spans.push(Span::styled(num, Style::default().fg(Color::Yellow)));
-                }
-                c => {
-                    spans.push(Span::styled(c.to_string(), Style::default().fg(Color::Gray)));
+                    'n' if line.trim().starts_with("null")
+                        || line[line.find('n').unwrap_or(0)..].starts_with("null") =>
+                    {
+                        spans.push(Span::styled(
+                            "null".to_string(),
+                            Style::default().fg(Color::Magenta),
+                        ));
+                        for _ in 0..3 {
+                            chars.next();
+                        }
+                    }
+                    c if c.is_numeric() || c == '-' => {
+                        let mut num = String::from(c);
+                        while let Some(&next) = chars.peek() {
+                            if next.is_numeric()
+                                || next == '.'
+                                || next == 'e'
+                                || next == 'E'
+                                || next == '-'
+                                || next == '+'
+                            {
+                                num.push(chars.next().unwrap());
+                            } else {
+                                break;
+                            }
+                        }
+                        spans.push(Span::styled(num, Style::default().fg(Color::Yellow)));
+                    }
+                    c => {
+                        spans.push(Span::styled(
+                            c.to_string(),
+                            Style::default().fg(Color::Gray),
+                        ));
+                    }
                 }
             }
-        }
-        Line::from(spans)
-    }).collect()
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── TOML ───────────────────────────────────────────────────────────────────
 fn highlight_toml(lines: &[&str]) -> Vec<Line<'static>> {
-    lines.iter().map(|line| {
-        let mut spans = Vec::new();
-        let trimmed = line.trim();
+    lines
+        .iter()
+        .map(|line| {
+            let mut spans = Vec::new();
+            let trimmed = line.trim();
 
-        if trimmed.starts_with('#') {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)));
-        } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
-        } else if let Some(pos) = line.find('=') {
-            let key = &line[..pos];
-            let rest = &line[pos..];
-            spans.push(Span::styled(key.to_string(), Style::default().fg(Color::Cyan)));
-            spans.push(Span::styled(rest.to_string(), Style::default().fg(Color::White)));
-        } else {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::White)));
-        }
-        Line::from(spans)
-    }).collect()
+            if trimmed.starts_with('#') {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+            } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if let Some(pos) = line.find('=') {
+                let key = &line[..pos];
+                let rest = &line[pos..];
+                spans.push(Span::styled(
+                    key.to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+                spans.push(Span::styled(
+                    rest.to_string(),
+                    Style::default().fg(Color::White),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::White),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── YAML ───────────────────────────────────────────────────────────────────
 fn highlight_yaml(lines: &[&str]) -> Vec<Line<'static>> {
-    lines.iter().map(|line| {
-        let mut spans = Vec::new();
-        let trimmed = line.trim();
+    lines
+        .iter()
+        .map(|line| {
+            let mut spans = Vec::new();
+            let trimmed = line.trim();
 
-        if trimmed.starts_with('#') {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)));
-        } else if trimmed.ends_with(':') {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
-        } else if trimmed == "-" || trimmed.starts_with("- ") {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::Yellow)));
-        } else if trimmed == "true" || trimmed == "false" || trimmed == "null" || trimmed == "~" {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::Magenta)));
-        } else {
-            spans.push(Span::styled(line.to_string(), Style::default().fg(Color::White)));
-        }
-        Line::from(spans)
-    }).collect()
+            if trimmed.starts_with('#') {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+            } else if trimmed.ends_with(':') {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if trimmed == "-" || trimmed.starts_with("- ") {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
+            } else if trimmed == "true" || trimmed == "false" || trimmed == "null" || trimmed == "~"
+            {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::Magenta),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::White),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── Bash ───────────────────────────────────────────────────────────────────
 fn highlight_bash(lines: &[&str]) -> Vec<Line<'static>> {
     let keywords = [
-        "if", "then", "else", "elif", "fi", "for", "while", "do", "done",
-        "case", "esac", "in", "function", "return", "exit", "break", "continue",
-        "local", "export", "unset", "readonly", "shift", "source", ".",
+        "if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "in",
+        "function", "return", "exit", "break", "continue", "local", "export", "unset", "readonly",
+        "shift", "source", ".",
     ];
     let builtins = [
-        "echo", "printf", "cat", "grep", "sed", "awk", "cut", "sort", "uniq",
-        "head", "tail", "wc", "find", "xargs", "chmod", "chown", "mkdir",
-        "rm", "cp", "mv", "ln", "touch", "ls", "cd", "pwd", "which",
-        "curl", "wget", "git", "docker", "cargo", "npm", "yarn", "node",
-        "python", "python3", "pip", "rustc", "make", "cmake", "tar", "zip",
+        "echo", "printf", "cat", "grep", "sed", "awk", "cut", "sort", "uniq", "head", "tail", "wc",
+        "find", "xargs", "chmod", "chown", "mkdir", "rm", "cp", "mv", "ln", "touch", "ls", "cd",
+        "pwd", "which", "curl", "wget", "git", "docker", "cargo", "npm", "yarn", "node", "python",
+        "python3", "pip", "rustc", "make", "cmake", "tar", "zip",
     ];
 
-    lines.iter().map(|line| {
-        let spans = tokenize_and_highlight(line, &keywords, &[], &builtins);
-        Line::from(spans)
-    }).collect()
+    lines
+        .iter()
+        .map(|line| {
+            let spans = tokenize_and_highlight(line, &keywords, &[], &builtins);
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── Generic ────────────────────────────────────────────────────────────────
 fn highlight_generic(lines: &[&str]) -> Vec<Line<'static>> {
-    lines.iter().map(|line| {
-        Line::from(vec![Span::styled(line.to_string(), Style::default().fg(Color::White))])
-    }).collect()
+    lines
+        .iter()
+        .map(|line| {
+            Line::from(vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::White),
+            )])
+        })
+        .collect()
 }
 
 // ── Shared tokenizer ───────────────────────────────────────────────────────
@@ -256,7 +549,12 @@ fn tokenize_and_highlight(
                 while let Some(c) = chars.next() {
                     comment.push(c);
                 }
-                spans.push(Span::styled(comment, Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)));
+                spans.push(Span::styled(
+                    comment,
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ));
                 break;
             }
             '#' => {
@@ -264,7 +562,12 @@ fn tokenize_and_highlight(
                 while let Some(c) = chars.next() {
                     comment.push(c);
                 }
-                spans.push(Span::styled(comment, Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)));
+                spans.push(Span::styled(
+                    comment,
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ));
                 break;
             }
             // Strings
@@ -327,9 +630,23 @@ fn tokenize_and_highlight(
             c if c.is_numeric() => {
                 let mut num = String::from(c);
                 while let Some(&next) = chars.peek() {
-                    if next.is_numeric() || next == '.' || next == '_' || next == 'x' || next == 'b' || next == 'o' || next == 'e' || next == 'E' {
+                    if next.is_numeric()
+                        || next == '.'
+                        || next == '_'
+                        || next == 'x'
+                        || next == 'b'
+                        || next == 'o'
+                        || next == 'e'
+                        || next == 'E'
+                    {
                         num.push(chars.next().unwrap());
-                    } else if next == 'u' || next == 'i' || next == 'f' || next == 'U' || next == 'I' || next == 'F' {
+                    } else if next == 'u'
+                        || next == 'i'
+                        || next == 'f'
+                        || next == 'U'
+                        || next == 'I'
+                        || next == 'F'
+                    {
                         num.push(chars.next().unwrap());
                         while let Some(&n) = chars.peek() {
                             if n.is_numeric() {
@@ -356,7 +673,9 @@ fn tokenize_and_highlight(
                     }
                 }
                 let style = if keywords.contains(&ident.as_str()) {
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD)
                 } else if types.contains(&ident.as_str()) {
                     Style::default().fg(Color::Cyan)
                 } else if builtins.contains(&ident.as_str()) {
@@ -367,15 +686,26 @@ fn tokenize_and_highlight(
                 spans.push(Span::styled(ident, style));
             }
             // Macros (Rust)
-            '!' if !spans.is_empty() && spans.last().map(|s| {
-                let text = s.content.as_ref();
-                text.chars().all(|c| c.is_alphanumeric() || c == '_')
-            }).unwrap_or(false) => {
-                spans.push(Span::styled("!".to_string(), Style::default().fg(Color::Yellow)));
+            '!' if !spans.is_empty()
+                && spans
+                    .last()
+                    .map(|s| {
+                        let text = s.content.as_ref();
+                        text.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    })
+                    .unwrap_or(false) =>
+            {
+                spans.push(Span::styled(
+                    "!".to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
             }
             // Whitespace and punctuation
             c => {
-                spans.push(Span::styled(c.to_string(), Style::default().fg(Color::White)));
+                spans.push(Span::styled(
+                    c.to_string(),
+                    Style::default().fg(Color::White),
+                ));
             }
         }
     }
@@ -404,8 +734,14 @@ pub fn extract_and_highlight(text: &str) -> Vec<(bool, Vec<Line<'static>>)> {
             } else {
                 // Start code block — flush plain text first
                 if !plain_buffer.is_empty() {
-                    let plain_lines: Vec<Line<'static>> = plain_buffer.lines()
-                        .map(|l| Line::from(vec![Span::styled(l.to_string(), Style::default().fg(Color::White))]))
+                    let plain_lines: Vec<Line<'static>> = plain_buffer
+                        .lines()
+                        .map(|l| {
+                            Line::from(vec![Span::styled(
+                                l.to_string(),
+                                Style::default().fg(Color::White),
+                            )])
+                        })
                         .collect();
                     result.push((false, plain_lines));
                     plain_buffer.clear();
@@ -424,8 +760,14 @@ pub fn extract_and_highlight(text: &str) -> Vec<(bool, Vec<Line<'static>>)> {
 
     // Flush remaining
     if !plain_buffer.is_empty() {
-        let plain_lines: Vec<Line<'static>> = plain_buffer.lines()
-            .map(|l| Line::from(vec![Span::styled(l.to_string(), Style::default().fg(Color::White))]))
+        let plain_lines: Vec<Line<'static>> = plain_buffer
+            .lines()
+            .map(|l| {
+                Line::from(vec![Span::styled(
+                    l.to_string(),
+                    Style::default().fg(Color::White),
+                )])
+            })
             .collect();
         result.push((false, plain_lines));
     }

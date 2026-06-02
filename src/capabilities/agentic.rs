@@ -49,7 +49,9 @@ impl Tool for DelegationTool {
     fn execute(&self, args: &str) -> Result<String> {
         let trimmed = args.trim();
         if trimmed.is_empty() {
-            return Ok("Usage: delegation <task_description> [--toolsets <list>] [--parallel]".to_string());
+            return Ok(
+                "Usage: delegation <task_description> [--toolsets <list>] [--parallel]".to_string(),
+            );
         }
 
         let parts: Vec<&str> = trimmed.split("--toolsets").collect();
@@ -86,10 +88,7 @@ impl Tool for ClarifyTool {
 
         let parts: Vec<&str> = trimmed.split("--choices").collect();
         let question = parts.first().unwrap_or(&"").trim();
-        let choices = parts
-            .get(1)
-            .map(|s| s.trim())
-            .unwrap_or("");
+        let choices = parts.get(1).map(|s| s.trim()).unwrap_or("");
 
         let mut result = format!("Clarification needed: {}", question);
         if !choices.is_empty() {

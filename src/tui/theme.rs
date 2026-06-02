@@ -28,6 +28,7 @@ pub struct Theme {
     pub selected_fg: Color,
     pub row_alt_bg: Color,
     pub tool: Color,
+    pub reasoning: Color,
     pub user_name: Color,
     pub agent_name: Color,
 }
@@ -60,6 +61,7 @@ impl Theme {
             selected_fg: Color::Rgb(0, 0, 0),
             row_alt_bg: Color::Rgb(35, 0, 60),
             tool: Color::Rgb(250, 204, 21),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(34, 211, 238),
             agent_name: Color::Rgb(253, 224, 71),
         }
@@ -86,6 +88,7 @@ impl Theme {
             selected_fg: Color::Rgb(255, 255, 255),
             row_alt_bg: Color::Rgb(245, 245, 245),
             tool: Color::Rgb(58, 58, 58),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(0, 0, 0),
             agent_name: Color::Rgb(26, 26, 26),
         }
@@ -112,6 +115,7 @@ impl Theme {
             selected_fg: Color::Rgb(30, 30, 46),
             row_alt_bg: Color::Rgb(35, 35, 52),
             tool: Color::Rgb(249, 226, 175),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(137, 180, 250),
             agent_name: Color::Rgb(245, 194, 231),
         }
@@ -135,6 +139,7 @@ impl Theme {
             selected_fg: Color::Rgb(26, 27, 38),
             row_alt_bg: Color::Rgb(32, 33, 46),
             tool: Color::Rgb(255, 158, 100),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(122, 162, 247),
             agent_name: Color::Rgb(187, 154, 247),
         }
@@ -158,6 +163,7 @@ impl Theme {
             selected_fg: Color::Rgb(40, 40, 40),
             row_alt_bg: Color::Rgb(48, 48, 48),
             tool: Color::Rgb(216, 166, 87),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(125, 174, 163),
             agent_name: Color::Rgb(211, 134, 155),
         }
@@ -181,6 +187,7 @@ impl Theme {
             selected_fg: Color::Rgb(46, 52, 64),
             row_alt_bg: Color::Rgb(52, 58, 72),
             tool: Color::Rgb(235, 203, 139),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(129, 161, 193),
             agent_name: Color::Rgb(180, 142, 173),
         }
@@ -204,6 +211,7 @@ impl Theme {
             selected_fg: Color::Rgb(45, 53, 59),
             row_alt_bg: Color::Rgb(52, 61, 66),
             tool: Color::Rgb(219, 188, 127),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(167, 192, 128),
             agent_name: Color::Rgb(227, 171, 157),
         }
@@ -227,6 +235,7 @@ impl Theme {
             selected_fg: Color::Rgb(31, 31, 40),
             row_alt_bg: Color::Rgb(38, 38, 48),
             tool: Color::Rgb(232, 191, 120),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(126, 156, 216),
             agent_name: Color::Rgb(210, 126, 153),
         }
@@ -250,6 +259,7 @@ impl Theme {
             selected_fg: Color::Rgb(25, 23, 36),
             row_alt_bg: Color::Rgb(33, 31, 45),
             tool: Color::Rgb(246, 193, 119),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(156, 207, 216),
             agent_name: Color::Rgb(235, 188, 186),
         }
@@ -276,6 +286,7 @@ impl Theme {
             selected_fg: Color::Rgb(11, 12, 22),
             row_alt_bg: Color::Rgb(18, 19, 30),
             tool: Color::Rgb(124, 248, 247),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(130, 251, 156),
             agent_name: Color::Rgb(124, 248, 247),
         }
@@ -299,6 +310,7 @@ impl Theme {
             selected_fg: Color::Rgb(0, 0, 0),
             row_alt_bg: Color::Rgb(16, 16, 16),
             tool: Color::Rgb(180, 180, 180),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(200, 200, 200),
             agent_name: Color::Rgb(255, 255, 255),
         }
@@ -322,6 +334,7 @@ impl Theme {
             selected_fg: Color::Rgb(5, 24, 46),
             row_alt_bg: Color::Rgb(10, 35, 60),
             tool: Color::Rgb(233, 123, 60),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(250, 169, 104),
             agent_name: Color::Rgb(140, 191, 184),
         }
@@ -345,6 +358,7 @@ impl Theme {
             selected_fg: Color::Rgb(20, 20, 20),
             row_alt_bg: Color::Rgb(28, 28, 28),
             tool: Color::Rgb(160, 160, 160),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(180, 180, 180),
             agent_name: Color::Rgb(200, 200, 200),
         }
@@ -368,6 +382,7 @@ impl Theme {
             selected_fg: Color::Rgb(33, 37, 30),
             row_alt_bg: Color::Rgb(40, 44, 36),
             tool: Color::Rgb(187, 176, 130),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(136, 166, 96),
             agent_name: Color::Rgb(174, 155, 120),
         }
@@ -391,6 +406,7 @@ impl Theme {
             selected_fg: Color::Rgb(35, 35, 50),
             row_alt_bg: Color::Rgb(42, 42, 58),
             tool: Color::Rgb(200, 180, 240),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(180, 160, 220),
             agent_name: Color::Rgb(220, 160, 180),
         }
@@ -414,6 +430,7 @@ impl Theme {
             selected_fg: Color::Rgb(230, 230, 220),
             row_alt_bg: Color::Rgb(220, 220, 210),
             tool: Color::Rgb(80, 100, 120),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(60, 80, 100),
             agent_name: Color::Rgb(80, 60, 50),
         }
@@ -437,6 +454,7 @@ impl Theme {
             selected_fg: Color::Rgb(25, 35, 35),
             row_alt_bg: Color::Rgb(32, 42, 42),
             tool: Color::Rgb(140, 200, 160),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(100, 180, 160),
             agent_name: Color::Rgb(160, 180, 140),
         }
@@ -460,6 +478,7 @@ impl Theme {
             selected_fg: Color::Rgb(35, 30, 30),
             row_alt_bg: Color::Rgb(42, 37, 37),
             tool: Color::Rgb(200, 160, 120),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(180, 140, 110),
             agent_name: Color::Rgb(200, 170, 140),
         }
@@ -483,6 +502,7 @@ impl Theme {
             selected_fg: Color::Rgb(250, 248, 245),
             row_alt_bg: Color::Rgb(242, 240, 237),
             tool: Color::Rgb(100, 100, 100),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(80, 80, 80),
             agent_name: Color::Rgb(100, 100, 100),
         }
@@ -509,6 +529,7 @@ impl Theme {
             selected_fg: Color::Rgb(250, 250, 250),
             row_alt_bg: Color::Rgb(240, 240, 240),
             tool: Color::Rgb(80, 80, 80),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(0, 100, 200),
             agent_name: Color::Rgb(0, 80, 160),
         }
@@ -532,6 +553,7 @@ impl Theme {
             selected_fg: Color::Rgb(30, 30, 30),
             row_alt_bg: Color::Rgb(40, 40, 40),
             tool: Color::Rgb(160, 160, 160),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(100, 150, 220),
             agent_name: Color::Rgb(120, 170, 240),
         }
@@ -558,6 +580,7 @@ impl Theme {
             selected_fg: Color::Rgb(15, 0, 40),
             row_alt_bg: Color::Rgb(25, 0, 55),
             tool: Color::Rgb(255, 200, 50),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(255, 50, 150),
             agent_name: Color::Rgb(255, 200, 50),
         }
@@ -581,6 +604,7 @@ impl Theme {
             selected_fg: Color::Rgb(20, 0, 10),
             row_alt_bg: Color::Rgb(35, 0, 18),
             tool: Color::Rgb(255, 160, 40),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(255, 80, 80),
             agent_name: Color::Rgb(255, 220, 80),
         }
@@ -604,6 +628,7 @@ impl Theme {
             selected_fg: Color::Rgb(40, 15, 30),
             row_alt_bg: Color::Rgb(55, 20, 40),
             tool: Color::Rgb(255, 180, 80),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(255, 140, 80),
             agent_name: Color::Rgb(255, 200, 100),
         }
@@ -627,6 +652,7 @@ impl Theme {
             selected_fg: Color::Rgb(10, 10, 25),
             row_alt_bg: Color::Rgb(18, 18, 38),
             tool: Color::Rgb(180, 160, 255),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(100, 120, 255),
             agent_name: Color::Rgb(140, 180, 255),
         }
@@ -650,6 +676,7 @@ impl Theme {
             selected_fg: Color::Rgb(10, 0, 15),
             row_alt_bg: Color::Rgb(20, 0, 25),
             tool: Color::Rgb(255, 200, 0),
+            reasoning: Color::Rgb(180, 140, 255),
             user_name: Color::Rgb(0, 255, 120),
             agent_name: Color::Rgb(255, 255, 0),
         }

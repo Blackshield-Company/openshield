@@ -1,6 +1,6 @@
-use anyhow::Result;
 use super::{AgentIdentity, Config};
 use crate::gateway::{DiscordConfig, GatewayConfig};
+use anyhow::Result;
 use std::io::{self, Write};
 
 fn prompt(question: &str, default: Option<&str>) -> Result<String> {
@@ -38,27 +38,30 @@ pub async fn run() -> Result<()> {
     println!("  - Memory: ~/.local/share/openshark/memory.db");
     println!();
     println!("Press Enter to continue or Ctrl+C to cancel...");
-    
+
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
-    
+
     let mut config = Config::default();
-    
+
     // ── Agent Identity ──────────────────────────────────────────────────────
     println!();
     println!("🎭 Agent Identity (Your AI Assistant)");
     println!("──────────────────────────────────────");
     println!("This is the AI that will help you code. Give it a name and personality.");
     println!();
-    
+
     let agent_name = prompt("Agent name (lowercase, no spaces):", Some("synthshark"))?;
     let display_name = prompt("Display name:", Some(&capitalize_first(&agent_name)))?;
     println!();
     println!("ℹ️  Use Unicode emoji (e.g. 🎹🦈) not Discord codes (:emoji:)");
     let emoji = prompt("Emoji:", Some(""))?;
     let tagline = prompt("Tagline:", Some(""))?;
-    let greeting = prompt("Greeting:", Some("The grid is endless. What are we building?"))?;
-    
+    let greeting = prompt(
+        "Greeting:",
+        Some("The grid is endless. What are we building?"),
+    )?;
+
     // ── User Identity ───────────────────────────────────────────────────────
     println!();
     println!("👤 Your Identity (The Human)");
@@ -68,18 +71,33 @@ pub async fn run() -> Result<()> {
     let user_name = prompt("Your name/username:", Some("synth"))?;
     config.user_name = user_name;
     println!();
-    
+
     config.agent = AgentIdentity {
         name: agent_name.clone(),
         display_name: display_name.clone(),
         role: prompt("Role:", Some("synthesis engine"))?,
-        origin: prompt("Origin story:", Some("Born from the VHS tracking static of 1984"))?,
-        purpose: prompt("Purpose:", Some("To build, debug, and ship code with surgical accuracy"))?,
+        origin: prompt(
+            "Origin story:",
+            Some("Born from the VHS tracking static of 1984"),
+        )?,
+        purpose: prompt(
+            "Purpose:",
+            Some("To build, debug, and ship code with surgical accuracy"),
+        )?,
         tagline: tagline.clone(),
-        tone: prompt("Tone:", Some("Neon-lit confidence, retro warmth, technical precision"))?,
-        style: prompt("Style:", Some("Direct. No fluff. Gets to the point. But with soul."))?,
+        tone: prompt(
+            "Tone:",
+            Some("Neon-lit confidence, retro warmth, technical precision"),
+        )?,
+        style: prompt(
+            "Style:",
+            Some("Direct. No fluff. Gets to the point. But with soul."),
+        )?,
         greeting: greeting.clone(),
-        farewell: prompt("Farewell:", Some("Code shipped. On to the next. The tape never stops rolling."))?,
+        farewell: prompt(
+            "Farewell:",
+            Some("Code shipped. On to the next. The tape never stops rolling."),
+        )?,
         emoji: emoji.clone(),
         catchphrases: vec![
             "This is the wave.".to_string(),
@@ -100,21 +118,24 @@ pub async fn run() -> Result<()> {
             "Be the assistant you'd want at 2am, not a corporate drone".to_string(),
         ],
     };
-    
+
     println!();
     println!("✅ Agent configured: {} {}", emoji, display_name);
     println!("   Tagline: {}", tagline);
     println!("   Greeting: {}", greeting);
     println!();
-    
+
     // ── Provider Configuration ──────────────────────────────────────────────
     println!("🎹🦈 Provider Configuration");
     println!("───────────────────────────");
     println!();
-    
+
     // Kimi via proxy
     if prompt_bool("Enable Kimi K2.6 via local proxy (port 8699)", true)? {
-        let kimi_key = prompt("Kimi API key (or leave blank to use ~/.config/openshark/kimi.env):", None)?;
+        let kimi_key = prompt(
+            "Kimi API key (or leave blank to use ~/.config/openshark/kimi.env):",
+            None,
+        )?;
         let mut kimi_provider = config.providers.get_mut("kimi").unwrap().clone();
         if !kimi_key.is_empty() {
             kimi_provider.api_key = kimi_key;
@@ -126,10 +147,13 @@ pub async fn run() -> Result<()> {
         config.providers.remove("kimi");
     }
     println!();
-    
+
     // OpenAI
     if prompt_bool("Enable OpenAI", false)? {
-        let openai_key = prompt("OpenAI API key (or leave blank to use env OPENAI_API_KEY):", None)?;
+        let openai_key = prompt(
+            "OpenAI API key (or leave blank to use env OPENAI_API_KEY):",
+            None,
+        )?;
         if !openai_key.is_empty() {
             if let Some(provider) = config.providers.get_mut("openai") {
                 provider.api_key = openai_key;
@@ -143,7 +167,7 @@ pub async fn run() -> Result<()> {
         config.providers.remove("openai");
     }
     println!();
-    
+
     // Local / llama-swap
     if prompt_bool("Enable local models (llama-swap on port 8080)", true)? {
         let local_url = prompt("Local base URL:", Some("http://127.0.0.1:8080/v1"))?;
@@ -155,21 +179,26 @@ pub async fn run() -> Result<()> {
         config.providers.remove("local");
     }
     println!();
-    
+
     // OpenRouter
     if prompt_bool("Enable OpenRouter", false)? {
-        let or_key = prompt("OpenRouter API key (or leave blank to use ~/.config/openshark/openrouter.env):", None)?;
+        let or_key = prompt(
+            "OpenRouter API key (or leave blank to use ~/.config/openshark/openrouter.env):",
+            None,
+        )?;
         let mut or_provider = config.providers.get("openrouter").unwrap().clone();
         if !or_key.is_empty() {
             or_provider.api_key = or_key;
         }
-        config.providers.insert("openrouter".to_string(), or_provider);
+        config
+            .providers
+            .insert("openrouter".to_string(), or_provider);
         println!("✅ OpenRouter configured");
     } else {
         config.providers.remove("openrouter");
     }
     println!();
-    
+
     // Nous / Hermes proxy
     if prompt_bool("Enable Nous/Hermes proxy (port 8645)", false)? {
         println!("✅ Nous proxy configured for DeepSeek V4 Flash, Minimax");
@@ -177,10 +206,13 @@ pub async fn run() -> Result<()> {
         config.providers.remove("nous");
     }
     println!();
-    
+
     // Z.AI (GLM)
     if prompt_bool("Enable Z.AI (GLM-5.1)", false)? {
-        let zai_key = prompt("Z.AI API key (or leave blank to use ~/.config/openshark/zai.env):", None)?;
+        let zai_key = prompt(
+            "Z.AI API key (or leave blank to use ~/.config/openshark/zai.env):",
+            None,
+        )?;
         let mut zai_provider = config.providers.get("zai").unwrap().clone();
         if !zai_key.is_empty() {
             zai_provider.api_key = zai_key;
@@ -191,10 +223,13 @@ pub async fn run() -> Result<()> {
         config.providers.remove("zai");
     }
     println!();
-    
+
     // Anthropic
     if prompt_bool("Enable Anthropic (Claude)", false)? {
-        let anthropic_key = prompt("Anthropic API key (or leave blank to use env ANTHROPIC_API_KEY):", None)?;
+        let anthropic_key = prompt(
+            "Anthropic API key (or leave blank to use env ANTHROPIC_API_KEY):",
+            None,
+        )?;
         if let Some(provider) = config.providers.get_mut("anthropic") {
             if !anthropic_key.is_empty() {
                 provider.api_key = anthropic_key;
@@ -205,10 +240,13 @@ pub async fn run() -> Result<()> {
         config.providers.remove("anthropic");
     }
     println!();
-    
+
     // Gemini
     if prompt_bool("Enable Google Gemini", false)? {
-        let gemini_key = prompt("Gemini API key (or leave blank to use env GEMINI_API_KEY):", None)?;
+        let gemini_key = prompt(
+            "Gemini API key (or leave blank to use env GEMINI_API_KEY):",
+            None,
+        )?;
         if let Some(provider) = config.providers.get_mut("gemini") {
             if !gemini_key.is_empty() {
                 provider.api_key = gemini_key;
@@ -219,15 +257,15 @@ pub async fn run() -> Result<()> {
         config.providers.remove("gemini");
     }
     println!();
-    
+
     // ── Gateway Configuration ───────────────────────────────────────────────
     println!("🔗 Gateway Configuration");
     println!("────────────────────────");
     println!("Connect OpenShark to Discord, Telegram, Slack, Matrix, and MCP servers.");
     println!();
-    
+
     let mut gateway = GatewayConfig::default();
-    
+
     // Discord
     if prompt_bool("Enable Discord bot", false)? {
         let token = prompt("Discord bot token (or ${DISCORD_BOT_TOKEN} for env):", None)?;
@@ -235,7 +273,11 @@ pub async fn run() -> Result<()> {
         gateway.discord = DiscordConfig {
             enabled: true,
             bot_token: if token.is_empty() { None } else { Some(token) },
-            application_id: if app_id.is_empty() { None } else { Some(app_id) },
+            application_id: if app_id.is_empty() {
+                None
+            } else {
+                Some(app_id)
+            },
             guild_ids: vec![],
             allowed_channels: vec![],
             require_mention: false,
@@ -248,58 +290,96 @@ pub async fn run() -> Result<()> {
         println!("✅ Discord gateway configured");
     }
     println!();
-    
+
     // Telegram
     if prompt_bool("Enable Telegram bot", false)? {
-        let token = prompt("Telegram bot token (from @BotFather, or ${TELEGRAM_BOT_TOKEN} for env):", None)?;
+        let token = prompt(
+            "Telegram bot token (from @BotFather, or ${TELEGRAM_BOT_TOKEN} for env):",
+            None,
+        )?;
         gateway.telegram.enabled = true;
         gateway.telegram.bot_token = if token.is_empty() { None } else { Some(token) };
         println!("✅ Telegram gateway configured");
     }
     println!();
-    
+
     // Slack
     if prompt_bool("Enable Slack bot", false)? {
-        let bot_token = prompt("Slack bot token (xoxb-..., or ${SLACK_BOT_TOKEN} for env):", None)?;
-        let app_token = prompt("Slack app token (xapp-..., or ${SLACK_APP_TOKEN} for env):", None)?;
+        let bot_token = prompt(
+            "Slack bot token (xoxb-..., or ${SLACK_BOT_TOKEN} for env):",
+            None,
+        )?;
+        let app_token = prompt(
+            "Slack app token (xapp-..., or ${SLACK_APP_TOKEN} for env):",
+            None,
+        )?;
         gateway.slack.enabled = true;
-        gateway.slack.bot_token = if bot_token.is_empty() { None } else { Some(bot_token) };
-        gateway.slack.app_token = if app_token.is_empty() { None } else { Some(app_token) };
+        gateway.slack.bot_token = if bot_token.is_empty() {
+            None
+        } else {
+            Some(bot_token)
+        };
+        gateway.slack.app_token = if app_token.is_empty() {
+            None
+        } else {
+            Some(app_token)
+        };
         println!("✅ Slack gateway configured (Socket Mode)");
     }
     println!();
-    
+
     // Matrix
     if prompt_bool("Enable Matrix bot", false)? {
         let homeserver = prompt("Matrix homeserver URL (e.g., https://matrix.org):", None)?;
         let user_id = prompt("Matrix user ID (e.g., @openshark:matrix.org):", None)?;
-        let access_token = prompt("Matrix access token (or ${MATRIX_ACCESS_TOKEN} for env):", None)?;
+        let access_token = prompt(
+            "Matrix access token (or ${MATRIX_ACCESS_TOKEN} for env):",
+            None,
+        )?;
         gateway.matrix.enabled = true;
-        gateway.matrix.homeserver = if homeserver.is_empty() { None } else { Some(homeserver) };
-        gateway.matrix.user_id = if user_id.is_empty() { None } else { Some(user_id) };
-        gateway.matrix.access_token = if access_token.is_empty() { None } else { Some(access_token) };
+        gateway.matrix.homeserver = if homeserver.is_empty() {
+            None
+        } else {
+            Some(homeserver)
+        };
+        gateway.matrix.user_id = if user_id.is_empty() {
+            None
+        } else {
+            Some(user_id)
+        };
+        gateway.matrix.access_token = if access_token.is_empty() {
+            None
+        } else {
+            Some(access_token)
+        };
         println!("✅ Matrix gateway configured");
     }
     println!();
-    
+
     // MCP
     if prompt_bool("Enable MCP (Model Context Protocol) servers", false)? {
         gateway.mcp.enabled = true;
         println!("✅ MCP enabled — add servers manually to config.toml");
         println!("   Example: [[gateway.mcp.servers]]");
         println!("   name = \"filesystem\"");
-        println!("   transport = {{ stdio = {{ command = \"npx\", args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/home\"] }} }}");
+        println!(
+            "   transport = {{ stdio = {{ command = \"npx\", args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/home\"] }} }}"
+        );
     }
     println!();
-    
+
     config.gateway = gateway;
-    
+
     // Default model selection
     let available_models: Vec<String> = config.all_models().into_iter().map(|(m, _)| m).collect();
     if !available_models.is_empty() {
         println!("Available models:");
         for (i, model) in available_models.iter().enumerate() {
-            let marker = if model == &config.default_model { "●" } else { "○" };
+            let marker = if model == &config.default_model {
+                "●"
+            } else {
+                "○"
+            };
             println!("  {} {}: {}", marker, i, model);
         }
         let default_idx = prompt("Select default model (number):", Some("0"))?;
@@ -310,14 +390,14 @@ pub async fn run() -> Result<()> {
         }
     }
     println!();
-    
+
     // Cost limit
     let cost_limit = prompt("Monthly cost limit (USD):", Some("10.0"))?;
     if let Ok(limit) = cost_limit.parse::<f64>() {
         config.cost_limit_usd = limit;
     }
     println!();
-    
+
     // ── Filesystem Access ─────────────────────────────────────────────────────
     println!();
     println!("📁 Filesystem Access");
@@ -357,9 +437,12 @@ pub async fn run() -> Result<()> {
     println!();
 
     config.save()?;
-    
+
     println!("✅ Config saved to ~/.config/openshark/config.toml");
-    println!("✅ Agent: {} {}", config.agent.emoji, config.agent.display_name);
+    println!(
+        "✅ Agent: {} {}",
+        config.agent.emoji, config.agent.display_name
+    );
     println!("✅ Default model: {}", config.default_model);
     if config.gateway.discord.enabled {
         println!("✅ Discord gateway: enabled");
@@ -367,7 +450,7 @@ pub async fn run() -> Result<()> {
     println!();
     println!("Run `openshark` to start the TUI.");
     println!("Run `openshark config` to view your configuration.");
-    
+
     Ok(())
 }
 

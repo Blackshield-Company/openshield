@@ -2,17 +2,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{debug, info, warn};
 
-pub mod consensus;
-pub mod roles;
 pub mod agent_runner;
+pub mod consensus;
 pub mod persona_filter;
+pub mod roles;
 
-use consensus::{ConsensusMemory, ConsensusEntry};
-use roles::{AgentRole, RoleTemplate};
 use crate::config::Config;
+use consensus::{ConsensusEntry, ConsensusMemory};
+use roles::{AgentRole, RoleTemplate};
 
 /// Unique identifier for an agent in the swarm.
 pub type AgentId = String;
@@ -21,11 +21,23 @@ pub type AgentId = String;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AgentStatus {
     Idle,
-    Working { task: String, started_at: u64 },
-    Reviewing { target_agent: AgentId, started_at: u64 },
-    WaitingForConsensus { started_at: u64 },
-    Error { message: String },
-    Completed { result: String },
+    Working {
+        task: String,
+        started_at: u64,
+    },
+    Reviewing {
+        target_agent: AgentId,
+        started_at: u64,
+    },
+    WaitingForConsensus {
+        started_at: u64,
+    },
+    Error {
+        message: String,
+    },
+    Completed {
+        result: String,
+    },
 }
 
 impl std::fmt::Display for AgentStatus {
@@ -83,20 +95,11 @@ pub enum SwarmEvent {
         approved_by: Vec<AgentId>,
     },
     /// An agent encountered an error.
-    AgentError {
-        agent_id: AgentId,
-        error: String,
-    },
+    AgentError { agent_id: AgentId, error: String },
     /// A heartbeat from an agent.
-    Heartbeat {
-        agent_id: AgentId,
-        timestamp: u64,
-    },
+    Heartbeat { agent_id: AgentId, timestamp: u64 },
     /// An agent is actively working on a task (progress update).
-    AgentActivity {
-        agent_id: AgentId,
-        activity: String,
-    },
+    AgentActivity { agent_id: AgentId, activity: String },
     /// An agent is calling a tool.
     AgentToolCall {
         agent_id: AgentId,
@@ -111,10 +114,7 @@ pub enum SwarmEvent {
         success: bool,
     },
     /// An agent produced an intermediate result/thought.
-    AgentThinking {
-        agent_id: AgentId,
-        thought: String,
-    },
+    AgentThinking { agent_id: AgentId, thought: String },
     /// Real-time streaming chunk from an agent's LLM response.
     AgentChunk {
         agent_id: AgentId,
@@ -146,11 +146,21 @@ pub struct SwarmConfig {
     pub auto_spawn: bool,
 }
 
-fn default_max_agents() -> usize { 8 }
-fn default_consensus_required() -> bool { true }
-fn default_consensus_mode() -> String { "majority".to_string() }
-fn default_cycle_limit() -> usize { 50 }
-fn default_auto_spawn() -> bool { false }
+fn default_max_agents() -> usize {
+    8
+}
+fn default_consensus_required() -> bool {
+    true
+}
+fn default_consensus_mode() -> String {
+    "majority".to_string()
+}
+fn default_cycle_limit() -> usize {
+    50
+}
+fn default_auto_spawn() -> bool {
+    false
+}
 
 impl Default for SwarmConfig {
     fn default() -> Self {
@@ -209,7 +219,10 @@ impl SwarmEngine {
 
     /// Initialize the swarm with a seed prompt and spawn initial agents.
     pub async fn init(&self, seed_prompt: &str, global_config: &Config) -> Result<()> {
-        info!("🐝 Initializing swarm with prompt: {}", seed_prompt.chars().take(60).collect::<String>());
+        info!(
+            "🐝 Initializing swarm with prompt: {}",
+            seed_prompt.chars().take(60).collect::<String>()
+        );
 
         *self.seed_prompt.write().await = seed_prompt.to_string();
 
@@ -223,7 +236,10 @@ impl SwarmEngine {
         // Spawn agents for each configured role
         for (i, role_name) in self.config.roles.iter().enumerate() {
             if i >= self.config.max_agents {
-                warn!("Max agents ({}) reached, skipping remaining roles", self.config.max_agents);
+                warn!(
+                    "Max agents ({}) reached, skipping remaining roles",
+                    self.config.max_agents
+                );
                 break;
             }
 
@@ -265,7 +281,10 @@ impl SwarmEngine {
             info!("  ✓ Spawned agent: {}", role.name());
         }
 
-        info!("🐝 Swarm initialized with {} agents", self.agents.read().await.len());
+        info!(
+            "🐝 Swarm initialized with {} agents",
+            self.agents.read().await.len()
+        );
         Ok(())
     }
 
@@ -304,13 +323,27 @@ impl SwarmEngine {
                     if let Some(agent) = agents_lock.get(&agent_id) {
                         match agent.role.name.as_str() {
                             "Architect" => format!("Design the system architecture for: {}", seed),
-                            "Implementer" => format!("Implement the core functionality for: {}", seed),
-                            "Reviewer" => format!("Review the approach for: {}. What are the risks and improvements needed?", seed),
-                            "Tester" => format!("Design test cases and verify requirements for: {}", seed),
-                            "DevOps" => format!("Design deployment and CI/CD strategy for: {}", seed),
-                            "Security" => format!("Perform security audit of the design for: {}", seed),
+                            "Implementer" => {
+                                format!("Implement the core functionality for: {}", seed)
+                            }
+                            "Reviewer" => format!(
+                                "Review the approach for: {}. What are the risks and improvements needed?",
+                                seed
+                            ),
+                            "Tester" => {
+                                format!("Design test cases and verify requirements for: {}", seed)
+                            }
+                            "DevOps" => {
+                                format!("Design deployment and CI/CD strategy for: {}", seed)
+                            }
+                            "Security" => {
+                                format!("Perform security audit of the design for: {}", seed)
+                            }
                             "Documentation" => format!("Write documentation outline for: {}", seed),
-                            "Project Manager" => format!("Break down the project into tasks and milestones for: {}", seed),
+                            "Project Manager" => format!(
+                                "Break down the project into tasks and milestones for: {}",
+                                seed
+                            ),
                             _ => format!("Analyze and provide insights on: {}", seed),
                         }
                     } else {
@@ -320,7 +353,11 @@ impl SwarmEngine {
 
                 match runner.execute_task(&task, &agents, &agent_id).await {
                     Ok(result) => {
-                        info!("🐝 Agent {} completed initial task ({} chars)", agent_id, result.len());
+                        info!(
+                            "🐝 Agent {} completed initial task ({} chars)",
+                            agent_id,
+                            result.len()
+                        );
                     }
                     Err(e) => {
                         warn!("🐝 Agent {} failed initial task: {}", agent_id, e);
@@ -348,7 +385,11 @@ impl SwarmEngine {
                         let _ = broadcast_tx.send(event.clone());
 
                         match event {
-                            SwarmEvent::WorkCompleted { agent_id, task, result } => {
+                            SwarmEvent::WorkCompleted {
+                                agent_id,
+                                task,
+                                result,
+                            } => {
                                 debug!("Agent {} completed work on: {}", agent_id, task);
 
                                 // Update agent status
@@ -385,8 +426,11 @@ impl SwarmEngine {
                                 // Trigger cross-agent review: find a Reviewer agent and assign review
                                 let reviewer_id = {
                                     let agents_lock = agents.read().await;
-                                    agents_lock.iter()
-                                        .find(|(_, a)| a.role.name == "Reviewer" && a.id != agent_id)
+                                    agents_lock
+                                        .iter()
+                                        .find(|(_, a)| {
+                                            a.role.name == "Reviewer" && a.id != agent_id
+                                        })
                                         .map(|(id, _)| id.clone())
                                 };
 
@@ -404,12 +448,19 @@ impl SwarmEngine {
 
                                 // Check cycle limit
                                 if *cycle_count.read().await >= config.cycle_limit {
-                                    info!("🐝 Swarm cycle limit ({}) reached, stopping", config.cycle_limit);
+                                    info!(
+                                        "🐝 Swarm cycle limit ({}) reached, stopping",
+                                        config.cycle_limit
+                                    );
                                     *running_flag.write().await = false;
                                 }
                             }
 
-                            SwarmEvent::ReviewRequested { from_agent, to_agent, content: _ } => {
+                            SwarmEvent::ReviewRequested {
+                                from_agent,
+                                to_agent,
+                                content: _,
+                            } => {
                                 debug!("Review requested from {} to {}", from_agent, to_agent);
                                 if let Some(agent) = agents.write().await.get_mut(&to_agent) {
                                     agent.status = AgentStatus::Reviewing {
@@ -419,17 +470,29 @@ impl SwarmEngine {
                                             .unwrap_or_default()
                                             .as_secs(),
                                     };
-                                    agent.last_activity = Some(format!("Reviewing {}'s work", from_agent));
+                                    agent.last_activity =
+                                        Some(format!("Reviewing {}'s work", from_agent));
                                 }
                             }
 
-                            SwarmEvent::ReviewCompleted { reviewer, target_agent, approval, feedback } => {
-                                debug!("Review completed by {} for {}: approved={}", reviewer, target_agent, approval);
+                            SwarmEvent::ReviewCompleted {
+                                reviewer,
+                                target_agent,
+                                approval,
+                                feedback,
+                            } => {
+                                debug!(
+                                    "Review completed by {} for {}: approved={}",
+                                    reviewer, target_agent, approval
+                                );
 
                                 if let Some(agent) = agents.write().await.get_mut(&reviewer) {
                                     agent.status = AgentStatus::Idle;
-                                    agent.last_activity = Some(format!("Reviewed {}: {}", target_agent,
-                                        if approval { "approved" } else { "rejected" }));
+                                    agent.last_activity = Some(format!(
+                                        "Reviewed {}: {}",
+                                        target_agent,
+                                        if approval { "approved" } else { "rejected" }
+                                    ));
                                 }
 
                                 // Update consensus entry
@@ -445,19 +508,28 @@ impl SwarmEngine {
                             SwarmEvent::AgentError { agent_id, error } => {
                                 warn!("Agent {} error: {}", agent_id, error);
                                 if let Some(agent) = agents.write().await.get_mut(&agent_id) {
-                                    agent.status = AgentStatus::Error { message: error.clone() };
+                                    agent.status = AgentStatus::Error {
+                                        message: error.clone(),
+                                    };
                                     agent.errors_count += 1;
                                     agent.success_rate = agent.cycles_completed as f64
-                                        / (agent.cycles_completed + agent.errors_count).max(1) as f64;
+                                        / (agent.cycles_completed + agent.errors_count).max(1)
+                                            as f64;
                                     agent.last_activity = Some(format!("Error: {}", error));
                                 }
                             }
 
-                            SwarmEvent::Heartbeat { agent_id, timestamp } => {
+                            SwarmEvent::Heartbeat {
+                                agent_id,
+                                timestamp,
+                            } => {
                                 debug!("Heartbeat from {} at {}", agent_id, timestamp);
                             }
 
-                            SwarmEvent::ConsensusReached { entry_id, approved_by } => {
+                            SwarmEvent::ConsensusReached {
+                                entry_id,
+                                approved_by,
+                            } => {
                                 debug!("Consensus reached on {} by {:?}", entry_id, approved_by);
                             }
 
@@ -518,9 +590,18 @@ impl SwarmEngine {
     pub async fn status(&self) -> SwarmStatus {
         let agents = self.agents.read().await;
         let total = agents.len();
-        let working = agents.values().filter(|a| matches!(a.status, AgentStatus::Working { .. })).count();
-        let idle = agents.values().filter(|a| matches!(a.status, AgentStatus::Idle)).count();
-        let errors = agents.values().filter(|a| matches!(a.status, AgentStatus::Error { .. })).count();
+        let working = agents
+            .values()
+            .filter(|a| matches!(a.status, AgentStatus::Working { .. }))
+            .count();
+        let idle = agents
+            .values()
+            .filter(|a| matches!(a.status, AgentStatus::Idle))
+            .count();
+        let errors = agents
+            .values()
+            .filter(|a| matches!(a.status, AgentStatus::Error { .. }))
+            .count();
         let cycles = *self.cycle_count.read().await;
         let running = *self.running.read().await;
 
@@ -543,7 +624,8 @@ impl SwarmEngine {
 
     /// Send an event into the swarm.
     pub fn send_event(&self, event: SwarmEvent) -> Result<()> {
-        self.event_tx.send(event)
+        self.event_tx
+            .send(event)
             .context("Swarm event channel closed")?;
         Ok(())
     }
@@ -571,9 +653,16 @@ impl std::fmt::Display for SwarmStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "🐝 Swarm Status")?;
         writeln!(f, "  Running: {}", if self.running { "✅" } else { "⏹️" })?;
-        writeln!(f, "  Agents: {} total, {} working, {} idle, {} errors",
-            self.total_agents, self.working_agents, self.idle_agents, self.error_agents)?;
-        writeln!(f, "  Cycles: {}/{}", self.cycles_completed, self.cycle_limit)?;
+        writeln!(
+            f,
+            "  Agents: {} total, {} working, {} idle, {} errors",
+            self.total_agents, self.working_agents, self.idle_agents, self.error_agents
+        )?;
+        writeln!(
+            f,
+            "  Cycles: {}/{}",
+            self.cycles_completed, self.cycle_limit
+        )?;
         writeln!(f, "  Consensus entries: {}", self.consensus_entries)?;
         Ok(())
     }
@@ -624,11 +713,13 @@ mod tests {
         engine.start().await.unwrap();
 
         // Send a work completed event
-        engine.send_event(SwarmEvent::WorkCompleted {
-            agent_id: "architect-1".to_string(),
-            task: "Design API".to_string(),
-            result: "API designed".to_string(),
-        }).unwrap();
+        engine
+            .send_event(SwarmEvent::WorkCompleted {
+                agent_id: "architect-1".to_string(),
+                task: "Design API".to_string(),
+                result: "API designed".to_string(),
+            })
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 

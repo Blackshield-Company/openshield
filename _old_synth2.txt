@@ -1,0 +1,79 @@
+let follow_up = ChatRequest::new(model.to_string(), follow_messages, true);
+    match provider.chat_stream(follow_up).await {
+        Ok((follow_chunks, _metrics)) => {
+            let follow_content: String = follow_chunks.join("");
+            let trimmed = follow_content.trim();
+            if trimmed.is_empty() {
+                let _ = tx.send(StreamEvent::Error(
+                    "Model returned empty follow-up after tool execution. Re-prompting for synthesis...".to_string()
+                ));
+                // Re-prompt with stronger mandate
+                let mut retry_messages = model_messages.to_vec();
+                retry_messages.push(Message {
+                    role: "user".to_string(),
+                    content: "The previous response was empty. You MUST provide a complete synthesis of the tool results. \
+                              Explain what was found, what it means, and the next step. Do not skip this.".to_string(),
+                    images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+                });
+                let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
+                match provider.chat_stream(retry_req).await {
+                    Ok((retry_chunks, _retry_metrics)) => {
+                        let retry_content: String = retry_chunks.join("");
+                        let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                    Err(e) => {
+                        let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                }
+            } else if trimmed.split_whitespace().count() < 15 {
+                // Too short — treat as incomplete and re-prompt
+                let _ = tx.send(StreamEvent::SystemMessage(
+                    "⚠️ Follow-up too brief — requesting complete synthesis...".to_string()
+                ));
+                let mut retry_messages = model_messages.to_vec();
+                retry_messages.push(Message {
+                    role: "assistant".to_string(),
+                    content: follow_content.clone(),
+                    images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+                });
+                retry_messages.push(Message {
+                    role: "user".to_string(),
+                    content: "That was too brief. Provide a thorough synthesis: what did the tools reveal, what does it mean, and what's next?".to_string(),
+                    images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+                });
+                let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
+                match provider.chat_stream(retry_req).await {
+                    Ok((retry_chunks, _retry_metrics)) => {
+                        let retry_content: String = retry_chunks.join("");
+                        let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                    Err(e) => {
+                        let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ = tx.send(StreamEvent::Done);
+                    }
+                }
+            } else {
+                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+            }
+            let _ = tx.send(StreamEvent::Done);
+        }
+        Err(e) => {
+            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+            let _ = tx.send(StreamEvent::Done);
+        }
+    }
+
+    Ok(())
+}

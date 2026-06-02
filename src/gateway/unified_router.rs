@@ -10,10 +10,10 @@ use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::gateway::discord::DiscordEvent;
-use crate::gateway::message_router::MessageRouter;
-use crate::gateway::telegram::TelegramReplySender;
-use crate::gateway::slack::SlackReplySender;
 use crate::gateway::matrix::MatrixReplySender;
+use crate::gateway::message_router::MessageRouter;
+use crate::gateway::slack::SlackReplySender;
+use crate::gateway::telegram::TelegramReplySender;
 
 /// Unified event router that handles all platforms.
 pub struct UnifiedRouter {
@@ -39,9 +39,16 @@ impl UnifiedRouter {
         reply_sender: &TelegramReplySender,
     ) {
         match event {
-            crate::gateway::telegram::TelegramEvent::UserMessage { chat_id, user_id, username, content } => {
-                let (reply_tx, mut reply_rx): (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) =
-                    mpsc::unbounded_channel();
+            crate::gateway::telegram::TelegramEvent::UserMessage {
+                chat_id,
+                user_id,
+                username,
+                content,
+            } => {
+                let (reply_tx, mut reply_rx): (
+                    mpsc::UnboundedSender<String>,
+                    mpsc::UnboundedReceiver<String>,
+                ) = mpsc::unbounded_channel();
 
                 // Spawn a task to send replies back to Telegram
                 let sender = reply_sender.clone();
@@ -76,10 +83,17 @@ impl UnifiedRouter {
         reply_sender: &SlackReplySender,
     ) {
         match event {
-            crate::gateway::slack::SlackEvent::UserMessage { channel_id, user_id, username, content } => {
+            crate::gateway::slack::SlackEvent::UserMessage {
+                channel_id,
+                user_id,
+                username,
+                content,
+            } => {
                 let channel_id_clone = channel_id.clone();
-                let (reply_tx, mut reply_rx): (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) =
-                    mpsc::unbounded_channel();
+                let (reply_tx, mut reply_rx): (
+                    mpsc::UnboundedSender<String>,
+                    mpsc::UnboundedReceiver<String>,
+                ) = mpsc::unbounded_channel();
 
                 let sender = reply_sender.clone();
                 tokio::spawn(async move {
@@ -113,10 +127,17 @@ impl UnifiedRouter {
         reply_sender: &MatrixReplySender,
     ) {
         match event {
-            crate::gateway::matrix::MatrixEvent::UserMessage { room_id, user_id, username, content } => {
+            crate::gateway::matrix::MatrixEvent::UserMessage {
+                room_id,
+                user_id,
+                username,
+                content,
+            } => {
                 let room_id_clone = room_id.clone();
-                let (reply_tx, mut reply_rx): (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) =
-                    mpsc::unbounded_channel();
+                let (reply_tx, mut reply_rx): (
+                    mpsc::UnboundedSender<String>,
+                    mpsc::UnboundedReceiver<String>,
+                ) = mpsc::unbounded_channel();
 
                 let sender = reply_sender.clone();
                 tokio::spawn(async move {

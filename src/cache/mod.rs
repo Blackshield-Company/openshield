@@ -175,8 +175,8 @@ impl ResponseCache {
             .inner
             .lock()
             .map_err(|e| anyhow::anyhow!("Cache lock poisoned: {}", e))?;
-        let json = serde_json::to_string_pretty(&*map)
-            .with_context(|| "Failed to serialize cache")?;
+        let json =
+            serde_json::to_string_pretty(&*map).with_context(|| "Failed to serialize cache")?;
         let cache_file = self.cache_file.clone();
         drop(map);
         fs::write(&cache_file, json)

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::Config;
 use crate::providers::{Message, Provider};
-use crate::skills::{format_skills_prompt, SkillRegistry};
+use crate::skills::{SkillRegistry, format_skills_prompt};
 
 /// Per-channel conversation state.
 #[derive(Clone)]
@@ -92,9 +92,9 @@ impl ChannelState {
                 skills_prompt
             ),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         };
 
         Self {
@@ -128,9 +128,9 @@ impl ChannelState {
                     .join("\n")
             ),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         };
         self.history = vec![system_msg];
         self.custom_system_prompt = None;
@@ -150,9 +150,9 @@ impl ChannelState {
                         role: "system".to_string(),
                         content: prompt.to_string(),
                         images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
                     },
                 );
             }
@@ -183,9 +183,9 @@ impl ChannelState {
             role: "user".to_string(),
             content,
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
         self.trim_history();
     }
@@ -196,9 +196,9 @@ impl ChannelState {
             role: "assistant".to_string(),
             content,
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
         self.trim_history();
     }
@@ -209,9 +209,9 @@ impl ChannelState {
             role: "user".to_string(),
             content: format!("Tool '{}' result: {}", tool_name, result),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         });
         self.trim_history();
     }
