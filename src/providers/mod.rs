@@ -628,8 +628,8 @@ impl Provider {
                 let line = buffer[..pos].trim().to_string();
                 buffer = buffer[pos + 1..].to_string();
 
-                if line.starts_with("data:") {
-                    let data = line["data:".len()..].trim_start();
+                if let Some(data) = line.strip_prefix("data:") {
+                    let data = data.trim_start();
                     if data == "[DONE]" {
                         continue;
                     }
@@ -832,8 +832,8 @@ impl Provider {
                     let line = buffer[..pos].trim().to_string();
                     buffer = buffer[pos + 1..].to_string();
 
-                    if line.starts_with("data:") {
-                        let data = line["data:".len()..].trim_start();
+                    if let Some(data) = line.strip_prefix("data:") {
+                        let data = data.trim_start();
                         if data == "[DONE]" {
                             continue;
                         }

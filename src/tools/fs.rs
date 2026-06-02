@@ -329,7 +329,7 @@ fn format_size(bytes: u64) -> String {
 
 fn format_time(unix_secs: u64) -> String {
     let dt = chrono::DateTime::from_timestamp(unix_secs as i64, 0)
-        .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
     dt.format("%Y-%m-%d %H:%M").to_string()
 }
 

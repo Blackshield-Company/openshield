@@ -30,7 +30,7 @@ pub fn detect() -> bool {
         .unwrap_or(false)
 }
 
-pub fn delegate(task: &str, timeout: u64) -> anyhow::Result<String> {
+pub fn delegate(task: &str, _timeout: u64) -> anyhow::Result<String> {
     if !detect() {
         anyhow::bail!("Claw Code not installed. Install: cargo install claw-code");
     }

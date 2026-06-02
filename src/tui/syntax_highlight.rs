@@ -330,7 +330,7 @@ fn highlight_json(lines: &[&str]) -> Vec<Line<'static>> {
                     }
                     '"' => {
                         let mut string = String::from('"');
-                        while let Some(c) = chars.next() {
+                        for c in chars.by_ref() {
                             string.push(c);
                             if c == '"' {
                                 break;
@@ -546,7 +546,7 @@ fn tokenize_and_highlight(
             // Comments
             '/' if chars.peek() == Some(&'/') => {
                 let mut comment = String::from("//");
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     comment.push(c);
                 }
                 spans.push(Span::styled(
@@ -559,7 +559,7 @@ fn tokenize_and_highlight(
             }
             '#' => {
                 let mut comment = String::from('#');
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     comment.push(c);
                 }
                 spans.push(Span::styled(
@@ -573,7 +573,7 @@ fn tokenize_and_highlight(
             // Strings
             '"' => {
                 let mut string = String::from('"');
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     string.push(c);
                     if c == '"' && !string.ends_with("\\\"") {
                         break;
@@ -583,7 +583,7 @@ fn tokenize_and_highlight(
             }
             '\'' => {
                 let mut string = String::from('\'');
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     string.push(c);
                     if c == '\'' {
                         break;
@@ -602,25 +602,21 @@ fn tokenize_and_highlight(
                 if chars.peek() == Some(&'"') {
                     raw.push(chars.next().unwrap());
                     // Read until closing "#
-                    loop {
-                        if let Some(c) = chars.next() {
-                            raw.push(c);
-                            if c == '"' {
-                                let mut close_hashes = 0;
-                                while close_hashes < hash_count {
-                                    if chars.peek() == Some(&'#') {
-                                        raw.push(chars.next().unwrap());
-                                        close_hashes += 1;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                if close_hashes == hash_count {
+                    while let Some(c) = chars.next() {
+                        raw.push(c);
+                        if c == '"' {
+                            let mut close_hashes = 0;
+                            while close_hashes < hash_count {
+                                if chars.peek() == Some(&'#') {
+                                    raw.push(chars.next().unwrap());
+                                    close_hashes += 1;
+                                } else {
                                     break;
                                 }
                             }
-                        } else {
-                            break;
+                            if close_hashes == hash_count {
+                                break;
+                            }
                         }
                     }
                 }
@@ -809,7 +805,7 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
             '*' | '_' => {
                 let marker = ch;
                 let mut text = String::new();
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == marker {
                         break;
                     }
@@ -825,7 +821,7 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
             // Inline code: `text`
             '`' => {
                 let mut text = String::new();
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == '`' {
                         break;
                     }
@@ -859,7 +855,7 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
             // Link: [text](url)
             '[' => {
                 let mut text = String::new();
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ']' {
                         break;
                     }
@@ -868,7 +864,7 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
                 // Skip (url)
                 if chars.peek() == Some(&'(') {
                     chars.next();
-                    while let Some(c) = chars.next() {
+                    for c in chars.by_ref() {
                         if c == ')' {
                             break;
                         }

@@ -131,7 +131,7 @@ impl MessageRouter {
             .map(|r| r.find_triggered(&content))
             .unwrap_or_default();
         let skills_prompt = if !triggered_skills.is_empty() {
-            let skill_refs: Vec<_> = triggered_skills.iter().copied().collect();
+            let skill_refs: Vec<_> = triggered_skills.to_vec();
             format_skills_prompt(&skill_refs)
         } else {
             String::new()
