@@ -1,281 +1,197 @@
+//! Plugin / Hook System — Register custom tools at runtime.
+//!
+//! Loads `.openshark/hooks/` directory for user-defined tool scripts.
+//! Scripts are executable files named `<tool_name>.sh` or `<tool_name>.py`.
+//! Plugin / Hook System — Load custom tools from `.openshark/hooks/`
+
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
-/// Plugin manifest — every plugin has one.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginManifest {
+/// A user-defined plugin tool.
+#[derive(Debug, Clone)]
+pub struct PluginTool {
     pub name: String,
-    pub version: String,
     pub description: String,
-    pub author: Option<String>,
-    /// Entry point: a shell command or script to run.
-    pub entry: String,
-    /// Hooks this plugin registers.
-    #[serde(default)]
-    pub hooks: Vec<HookType>,
-    /// Configuration schema (key -> default value).
-    #[serde(default)]
-    pub config: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum HookType {
-    /// Called before a user message is processed.
-    PreMessage,
-    /// Called after an assistant response is received.
-    PostResponse,
-    /// Called when a tool is about to execute.
-    PreTool,
-    /// Called after a tool executes.
-    PostTool,
-    /// Called on session export.
-    OnExport,
-    /// Called on session import.
-    OnImport,
-}
-
-/// A loaded plugin with its manifest and runtime state.
-#[derive(Debug, Clone)]
-pub struct Plugin {
-    pub manifest: PluginManifest,
     pub path: PathBuf,
-    pub enabled: bool,
+    pub interpreter: Option<String>,
 }
 
-/// Plugin registry — manages all loaded plugins.
-#[derive(Debug, Clone)]
+/// Registry of loaded plugins.
+#[derive(Debug, Default)]
 pub struct PluginRegistry {
-    plugins: HashMap<String, Plugin>,
-    plugin_dir: PathBuf,
+    plugins: HashMap<String, PluginTool>,
 }
 
 impl PluginRegistry {
-    /// Create a new registry and load all plugins from the default directory.
-    pub fn new() -> Result<Self> {
-        let plugin_dir = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("openshark")
-            .join("plugins");
-        std::fs::create_dir_all(&plugin_dir)?;
-
-        let mut registry = Self {
-            plugins: HashMap::new(),
-            plugin_dir,
-        };
-        registry.discover_and_load()?;
-        Ok(registry)
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Discover and load all plugins from the plugin directory.
-    pub fn discover_and_load(&mut self) -> Result<usize> {
-        self.plugins.clear();
+    /// Scan `~/.config/openshark/hooks/` and `.openshark/hooks/` for plugin scripts.
+    pub fn load_from_disk(&mut self) -> Result<usize> {
+        let mut count = 0;
 
-        if !self.plugin_dir.exists() {
-            return Ok(0);
-        }
+        let dirs = [
+            dirs::config_dir().map(|d| d.join("openshark").join("hooks")),
+            Some(PathBuf::from(".openshark/hooks")),
+        ];
 
-        let mut loaded = 0;
-        for entry in std::fs::read_dir(&self.plugin_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                let manifest_path = path.join("plugin.toml");
-                if manifest_path.exists() {
-                    match self.load_from_manifest(&manifest_path) {
-                        Ok(plugin) => {
-                            self.plugins.insert(plugin.manifest.name.clone(), plugin);
-                            loaded += 1;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to load plugin from {:?}: {}", path, e);
-                        }
-                    }
+        for dir in dirs.iter().flatten() {
+            if !dir.exists() {
+                continue;
+            }
+            for entry in std::fs::read_dir(dir)?.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
                 }
+                let ext = path.extension().and_then(|e| e.to_str());
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if name.is_empty() || name.starts_with('.') {
+                    continue;
+                }
+
+                let interpreter = match ext {
+                    Some("sh") => Some("bash".to_string()),
+                    Some("py") => Some("python3".to_string()),
+                    Some("js") => Some("node".to_string()),
+                    Some("rb") => Some("ruby".to_string()),
+                    _ => None,
+                };
+
+                let description = Self::extract_description(&path).unwrap_or_else(|| {
+                    format!("User-defined plugin: {}", name)
+                });
+
+                self.plugins.insert(
+                    name.clone(),
+                    PluginTool {
+                        name,
+                        description,
+                        path,
+                        interpreter,
+                    },
+                );
+                count += 1;
             }
         }
 
-        Ok(loaded)
+        Ok(count)
     }
 
-    fn load_from_manifest(&self, path: &Path) -> Result<Plugin> {
-        let content = std::fs::read_to_string(path)
-            .context("Failed to read plugin manifest")?;
-        let manifest: PluginManifest = toml::from_str(&content)
-            .context("Failed to parse plugin manifest")?;
-
-        Ok(Plugin {
-            manifest,
-            path: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            enabled: true,
-        })
+    fn extract_description(path: &Path) -> Option<String> {
+        let content = std::fs::read_to_string(path).ok()?;
+        for line in content.lines().take(5) {
+            if let Some(desc) = line.strip_prefix("# desc:") {
+                return Some(desc.trim().to_string());
+            }
+            if let Some(desc) = line.strip_prefix("// desc:") {
+                return Some(desc.trim().to_string());
+            }
+        }
+        None
     }
 
-    /// Get a plugin by name.
-    pub fn get(&self, name: &str) -> Option<&Plugin> {
+    pub fn get(&self, name: &str) -> Option<&PluginTool> {
         self.plugins.get(name)
     }
 
-    /// Get a mutable plugin by name.
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut Plugin> {
-        self.plugins.get_mut(name)
-    }
-
-    /// List all loaded plugins.
-    pub fn list(&self) -> Vec<&Plugin> {
+    pub fn list(&self) -> Vec<&PluginTool> {
         self.plugins.values().collect()
     }
 
-    /// List enabled plugins.
-    pub fn enabled_plugins(&self) -> Vec<&Plugin> {
-        self.plugins.values().filter(|p| p.enabled).collect()
-    }
-
-    /// Enable a plugin.
-    pub fn enable(&mut self, name: &str) -> Result<()> {
-        if let Some(plugin) = self.plugins.get_mut(name) {
-            plugin.enabled = true;
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Plugin '{}' not found", name))
-        }
-    }
-
-    /// Disable a plugin.
-    pub fn disable(&mut self, name: &str) -> Result<()> {
-        if let Some(plugin) = self.plugins.get_mut(name) {
-            plugin.enabled = false;
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Plugin '{}' not found", name))
-        }
-    }
-
-    /// Execute a plugin's entry point with optional input data.
-    /// Returns the stdout output.
-    pub fn execute(&self, name: &str, input: Option<&str>) -> Result<String> {
-        let plugin = self.plugins.get(name)
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
-
-        if !plugin.enabled {
-            return Err(anyhow::anyhow!("Plugin '{}' is disabled", name));
-        }
-
-        let entry_path = plugin.path.join(&plugin.manifest.entry);
-        let output = if entry_path.exists() {
-            // It's a file — execute it
-            let mut cmd = std::process::Command::new(&entry_path);
-            if let Some(data) = input {
-                cmd.arg(data);
-            }
-            cmd.current_dir(&plugin.path)
-                .output()
-                .context("Failed to execute plugin")?
-        } else {
-            // Treat as a shell command
-            let mut cmd = std::process::Command::new("sh");
-            cmd.arg("-c")
-                .arg(&plugin.manifest.entry)
-                .current_dir(&plugin.path);
-            if let Some(data) = input {
-                cmd.arg(data);
-            }
-            cmd.output()
-                .context("Failed to execute plugin shell command")?
-        };
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("Plugin failed: {}", stderr));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    /// Run all plugins that registered a given hook.
-    pub fn run_hook(&self, hook: HookType, input: Option<&str>) -> Vec<(String, Result<String>)> {
-        let mut results = Vec::new();
-        for plugin in self.enabled_plugins() {
-            if plugin.manifest.hooks.contains(&hook) {
-                let result = self.execute(&plugin.manifest.name, input);
-                results.push((plugin.manifest.name.clone(), result));
-            }
-        }
-        results
-    }
-
-    /// Create a new plugin scaffold in the plugin directory.
     pub fn create_scaffold(&self, name: &str) -> Result<PathBuf> {
-        let plugin_path = self.plugin_dir.join(name);
-        std::fs::create_dir_all(&plugin_path)?;
-
-        let manifest = PluginManifest {
-            name: name.to_string(),
-            version: "0.1.0".to_string(),
-            description: format!("{} plugin for OpenShark", name),
-            author: None,
-            entry: "plugin.sh".to_string(),
-            hooks: vec![HookType::PreMessage, HookType::PostResponse],
-            config: HashMap::new(),
-        };
-
-        let manifest_toml = toml::to_string_pretty(&manifest)?;
-        std::fs::write(plugin_path.join("plugin.toml"), manifest_toml)?;
-
-        let shell_script = format!(
-            "#!/bin/bash\n# {} plugin for OpenShark\n# This script receives data via stdin or $1\n\necho \"Hello from {} plugin!\"\n",
-            name, name
+        let hook_dir = PathBuf::from(".openshark/hooks");
+        std::fs::create_dir_all(&hook_dir)?;
+        let path = hook_dir.join(format!("{}.sh", name));
+        let template = format!(
+            "#!/bin/bash\n# desc: User-defined plugin: {{name}}\n# Args are passed via stdin\n\nread -r args\necho \"Running {{name}} with args: $args\"\n",
         );
-        std::fs::write(plugin_path.join("plugin.sh"), shell_script)?;
-
+        std::fs::write(&path, template)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(plugin_path.join("plugin.sh"))?.permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(plugin_path.join("plugin.sh"), perms)?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(path)
+    }
+
+    pub fn enable(&mut self, _name: &str) -> Result<()> {
+        // Placeholder: in full impl, would toggle a config flag
+        Ok(())
+    }
+
+    pub fn disable(&mut self, _name: &str) -> Result<()> {
+        // Placeholder: in full impl, would toggle a config flag
+        Ok(())
+    }
+
+    /// Execute a plugin with the given arguments.
+    pub async fn execute(&self, name: &str, args: &str) -> Result<String> {
+        let plugin = self
+            .plugins
+            .get(name)
+            .with_context(|| format!("Plugin '{}' not found", name))?;
+
+        let mut cmd = tokio::process::Command::new(
+            plugin.interpreter.as_deref().unwrap_or("bash"),
+        );
+        if plugin.interpreter.is_some() {
+            cmd.arg(&plugin.path);
+        } else {
+            cmd.arg(&plugin.path);
+        }
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd.spawn()?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(args.as_bytes()).await?;
         }
 
-        Ok(plugin_path)
+        let output = child.wait_with_output().await?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "Plugin '{}' exited with {}: {}",
+                name,
+                output.status,
+                if stderr.is_empty() { stdout } else { stderr }
+            );
+        }
+
+        Ok(stdout)
     }
 }
 
-/// CLI helper: list all plugins with their status.
 pub fn list_plugins_cli() {
-    match PluginRegistry::new() {
-        Ok(registry) => {
-            let plugins = registry.list();
-            if plugins.is_empty() {
-                println!("🦈 No plugins installed.");
-                println!("   Create one with: openshark plugins create <name>");
-                return;
-            }
-
-            println!("🦈 OpenShark Plugins ({} total)\n", plugins.len());
-            for plugin in plugins {
-                let status = if plugin.enabled {
-                    "● enabled"
-                } else {
-                    "○ disabled"
-                };
-                println!(
-                    "  {} {} v{} — {}",
-                    status,
-                    plugin.manifest.name,
-                    plugin.manifest.version,
-                    plugin.manifest.description
-                );
-                println!(
-                    "    Entry: {} | Hooks: {:?}",
-                    plugin.manifest.entry,
-                    plugin.manifest.hooks
-                );
+    let mut registry = PluginRegistry::new();
+    match registry.load_from_disk() {
+        Ok(count) => {
+            if count == 0 {
+                println!("📭 No plugins found.");
+                println!("Create one: openshark plugins create <name>");
+            } else {
+                println!("🔌 {} plugin(s) loaded:", count);
+                for p in registry.list() {
+                    println!("  - {}: {}", p.name, p.description);
+                }
             }
         }
-        Err(e) => println!("❌ Failed to load plugins: {}", e),
+        Err(e) => eprintln!("❌ Failed to load plugins: {}", e),
     }
 }

@@ -3,10 +3,69 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::cache::{ResponseCache, compute_cache_key};
 use crate::config::ProviderKind;
+
+/// Global counter for total tokens spent across all providers (session-wide).
+static TOTAL_TOKENS_SPENT: AtomicU64 = AtomicU64::new(0);
+static TOTAL_ESTIMATED_COST_USD: AtomicU64 = AtomicU64::new(0);
+
+/// Per-request cost tracking info.
+#[derive(Debug, Clone)]
+pub struct CostInfo {
+    #[allow(dead_code)]
+    pub prompt_tokens: u32,
+    #[allow(dead_code)]
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    /// Estimated cost in USD (input + output).
+    pub estimated_cost_usd: f64,
+}
+
+/// Increment global token/cost counters.
+pub fn track_usage(cost: &CostInfo) {
+    TOTAL_TOKENS_SPENT.fetch_add(cost.total_tokens as u64, Ordering::Relaxed);
+    let cents = (cost.estimated_cost_usd * 1_000_000.0) as u64;
+    TOTAL_ESTIMATED_COST_USD.fetch_add(cents, Ordering::Relaxed);
+}
+
+/// Get session-wide totals.
+pub fn get_session_usage() -> (u64, f64) {
+    let tokens = TOTAL_TOKENS_SPENT.load(Ordering::Relaxed);
+    let cost_cents = TOTAL_ESTIMATED_COST_USD.load(Ordering::Relaxed);
+    (tokens, cost_cents as f64 / 1_000_000.0)
+}
+
+/// Reset session-wide counters.
+#[allow(dead_code)]
+pub fn reset_session_usage() {
+    TOTAL_TOKENS_SPENT.store(0, Ordering::Relaxed);
+    TOTAL_ESTIMATED_COST_USD.store(0, Ordering::Relaxed);
+}
+
+/// Estimate cost in USD based on model name and token counts.
+fn estimate_cost(model: &str, prompt_tokens: u32, completion_tokens: u32) -> f64 {
+    let (input_per_1k, output_per_1k): (f64, f64) = match model {
+        m if m.contains("gpt-4o") => (0.0025, 0.01),
+        m if m.contains("gpt-4") => (0.03, 0.06),
+        m if m.contains("gpt-3.5") || m.contains("gpt-35") => (0.0005, 0.0015),
+        m if m.contains("claude-3-opus") => (0.015, 0.075),
+        m if m.contains("claude-3-sonnet") => (0.003, 0.015),
+        m if m.contains("claude-3-haiku") => (0.00025, 0.00125),
+        m if m.contains("claude") => (0.003, 0.015),
+        m if m.contains("gemini-1.5-pro") => (0.00125, 0.005),
+        m if m.contains("gemini") => (0.00035, 0.0014),
+        m if m.contains("deepseek") => (0.00014, 0.00028),
+        m if m.contains("llama") || m.contains("qwen") => (0.0, 0.0),
+        _ => (0.001, 0.003),
+    };
+    let prompt_cost = prompt_tokens as f64 / 1000.0 * input_per_1k;
+    let completion_cost = completion_tokens as f64 / 1000.0 * output_per_1k;
+    prompt_cost + completion_cost
+}
 
 /// A chunk from a streaming response, tagged as reasoning or content.
 #[derive(Debug, Clone)]
@@ -541,26 +600,24 @@ impl Provider {
                 return Ok(chat_response);
             }
 
-        let body = self.build_chat_body(&request);
-        let response = self
-            .build_request_builder(reqwest::Method::POST, "/chat/completions")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| format!("Failed to send request to {}", self.base_url))?;
-
-        let status = response.status();
+        let response = self.send_with_retry(&request, 3).await?;
         let body_text = response
             .text()
             .await
             .with_context(|| "Failed to read response body")?;
 
-        if !status.is_success() {
-            anyhow::bail!("API error {}: {}", status, body_text);
-        }
-
         let chat_response = self.parse_chat_response(&body_text)?;
+
+        // Track cost
+        if let Some(ref usage) = chat_response.usage {
+            let cost = CostInfo {
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                total_tokens: usage.total_tokens,
+                estimated_cost_usd: estimate_cost(&request.model, usage.prompt_tokens, usage.completion_tokens),
+            };
+            track_usage(&cost);
+        }
 
         if let Some(ref cache) = self.cache {
             let ttl_secs = if request.stream { 3600 } else { 86400 };
@@ -570,11 +627,64 @@ impl Provider {
         Ok(chat_response)
     }
 
-    pub async fn chat_stream(&self, request: ChatRequest) -> Result<(Vec<String>, StreamMetrics)> {
+    /// Retry a request with exponential backoff on rate limits (429) and transient errors (5xx).
+    async fn send_with_retry(
+        &self,
+        request: &ChatRequest,
+        max_retries: u32,
+    ) -> Result<reqwest::Response> {
+        let body = self.build_chat_body(request);
+        let mut last_error = String::new();
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                let delay_ms = 500u64 * (2u64.pow(attempt - 1)).min(30000);
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
+
+            let response = match self
+                .build_request_builder(reqwest::Method::POST, "/chat/completions")
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    last_error = e.to_string();
+                    if e.is_timeout() || e.is_connect() {
+                        continue;
+                    }
+                    return Err(e).with_context(|| format!("Request failed after {} retries", attempt));
+                }
+            };
+
+            let status = response.status();
+            if status.is_success() {
+                return Ok(response);
+            }
+
+            let body_text = response.text().await.unwrap_or_default();
+            last_error = format!("{}: {}", status, body_text);
+
+            // Retry on rate limit or server errors
+            if status.as_u16() == 429 || status.is_server_error() {
+                continue;
+            }
+
+            // Client errors (4xx except 429) are not retryable
+            anyhow::bail!("API error {}: {}", status, body_text);
+        }
+
+        anyhow::bail!("API error after {} retries: {}", max_retries, last_error)
+    }
+
+    pub async fn chat_stream(&self,
+        request: ChatRequest,
+    ) -> Result<(Vec<String>, StreamMetrics)> {
         let start_time = Instant::now();
-        let body = self.build_chat_body(&request);
-        let messages_json = serde_json::to_string(&body.get("messages").unwrap_or(&json!([])))
-            .with_context(|| "Failed to serialize messages for cache key")?;
+        let messages_json = serde_json::to_string(&request.model)
+            .with_context(|| "Failed to serialize model for cache key")?;
         let cache_key = compute_cache_key(&request.model, &messages_json);
 
         if let Some(ref cache) = self.cache
@@ -593,21 +703,7 @@ impl Provider {
                 ));
             }
 
-        let body = self.build_chat_body(&request);
-        let response = self
-            .build_request_builder(reqwest::Method::POST, "/chat/completions")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| format!("Failed to send request to {}", self.base_url))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
-            anyhow::bail!("API error {}: {}", status, body_text);
-        }
-
+        let response = self.send_with_retry(&request, 3).await?;
         let mut stream = response.bytes_stream();
         let mut chunks = Vec::new();
         let mut first_token_time: Option<Instant> = None;
