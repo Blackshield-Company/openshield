@@ -15,6 +15,9 @@ pub struct MouseState {
     pub enabled: bool,
     pub last_click: Option<(u16, u16)>, // (column, row)
     pub drag_start: Option<(u16, u16)>,
+    pub selection_start: Option<(u16, u16)>,
+    pub selection_end: Option<(u16, u16)>,
+    pub selecting: bool,
 }
 
 impl MouseState {
@@ -23,6 +26,9 @@ impl MouseState {
             enabled: true,
             last_click: None,
             drag_start: None,
+            selection_start: None,
+            selection_end: None,
+            selecting: false,
         }
     }
 
@@ -88,7 +94,50 @@ pub fn translate_mouse_event(event: MouseEvent, _app: &crate::tui::App) -> Mouse
     }
 }
 
-/// Process a mouse event and determine the action.
+/// Copy the given text to the system clipboard using arboard.
+pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
+    use arboard::Clipboard;
+    let mut clipboard = Clipboard::new().map_err(|e| anyhow::anyhow!("Clipboard access failed: {}", e))?;
+    clipboard.set_text(text).map_err(|e| anyhow::anyhow!("Clipboard write failed: {}", e))?;
+    Ok(())
+}
+
+/// Extract visible text from chat messages that would appear at the given row range.
+/// This is a heuristic — we approximate which message content is at which row.
+pub fn extract_selection_text(
+    messages: &[crate::tui::ChatMessage],
+    scroll: usize,
+    start_row: usize,
+    end_row: usize,
+    term_width: usize,
+) -> String {
+    let mut result = String::new();
+    let mut current_row = 0usize;
+
+    for msg in messages.iter().skip(scroll) {
+        if current_row > end_row {
+            break;
+        }
+        let content = &msg.content;
+        // Rough wrap estimate: each line is term_width chars
+        let lines_needed = content.len().div_ceil(term_width.max(1));
+        let msg_end_row = current_row + lines_needed;
+
+        if msg_end_row >= start_row {
+            let overlap_start = start_row.saturating_sub(current_row);
+            let overlap_end = (end_row - current_row + 1).min(lines_needed);
+            let start_char = overlap_start * term_width;
+            let end_char = (overlap_end * term_width).min(content.len());
+            if start_char < content.len() {
+                result.push_str(&content[start_char..end_char.min(content.len())]);
+                result.push('\n');
+            }
+        }
+        current_row = msg_end_row + 1; // +1 for separator
+    }
+
+    result.trim_end().to_string()
+}
 pub fn handle_mouse_event(
     event: MouseEvent,
     chat_area: Rect,

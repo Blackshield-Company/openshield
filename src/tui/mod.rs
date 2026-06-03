@@ -1578,9 +1578,43 @@ async fn run_app(
                             mouse::MouseAction::ScrollDown => {
                                 app.scroll_down(3);
                             }
-                            mouse::MouseAction::DragStart { .. } |
-                            mouse::MouseAction::DragEnd { .. } => {
-                                // Selection support TBD
+                            mouse::MouseAction::DragStart { x, y } => {
+                                app.mouse_state.selecting = true;
+                                app.mouse_state.selection_start = Some((x, y));
+                                app.mouse_state.selection_end = Some((x, y));
+                            }
+                            mouse::MouseAction::DragEnd { x, y } => {
+                                if app.mouse_state.selecting {
+                                    app.mouse_state.selection_end = Some((x, y));
+                                    app.mouse_state.selecting = false;
+                                    // Copy-on-select: extract text and copy to clipboard
+                                    if let (Some(start), Some(end)) = (
+                                        app.mouse_state.selection_start,
+                                        app.mouse_state.selection_end,
+                                    ) {
+                                        let start_row = start.1.min(end.1) as usize;
+                                        let end_row = start.1.max(end.1) as usize;
+                                        if end_row > start_row {
+                                            let term_width = terminal.size().map(|s| s.width as usize).unwrap_or(80);
+                                            let text = mouse::extract_selection_text(
+                                                &app.messages,
+                                                app.scroll,
+                                                start_row,
+                                                end_row,
+                                                term_width,
+                                            );
+                                            if !text.is_empty() {
+                                                let _ = mouse::copy_to_clipboard(&text);
+                                                app.add_system_message(format!(
+                                                    "📋 Copied {} chars to clipboard",
+                                                    text.len()
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    app.mouse_state.selection_start = None;
+                                    app.mouse_state.selection_end = None;
+                                }
                             }
                             mouse::MouseAction::None => {}
                         }
@@ -2037,10 +2071,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     last.content.clone()
                 };
                 let text_len = text.len();
-                // OSC 52: ]52;c;<base64>
+                // OSC 52: write to system clipboard via terminal escape sequence
                 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
                 let b64 = BASE64.encode(text.as_bytes());
-                print!("]52;c;{}", b64);
+                print!("\x1b]52;c;{}\x07", b64);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 app.add_system_message(format!(
                     "📋 Copied ({} chars)", text_len
@@ -4394,10 +4428,21 @@ async fn handle_slash_result(
                     let provider = app.provider.clone();
                     let model = app.model.clone();
                     let task = args.clone();
+                    let project_path = app.project_path.clone();
 
                     tokio::spawn(async move {
+                        // Create a git worktree for isolated background execution
+                        let worktree_path = match create_worktree(&project_path, &task).await {
+                            Ok(path) => path,
+                            Err(e) => {
+                                tracing::error!("[headless] Worktree creation failed: {}", e);
+                                // Fall back to running in-place
+                                project_path.clone()
+                            }
+                        };
+
                         let config = crate::headless::HeadlessConfig {
-                            task,
+                            task: format!("{}", task),
                             yolo: true,
                             json: false,
                             timeout_secs: 300,
@@ -4408,14 +4453,17 @@ async fn handle_slash_result(
                         match crate::headless::run_headless(config, provider, model, None).await {
                             Ok(summary) => {
                                 tracing::info!("[headless] Complete: {}", summary);
+                                // Clean up worktree after completion
+                                let _ = remove_worktree(&project_path, &worktree_path).await;
                             }
                             Err(e) => {
                                 tracing::error!("[headless] Failed: {}", e);
+                                let _ = remove_worktree(&project_path, &worktree_path).await;
                             }
                         }
                     });
 
-                    app.add_system_message("🤖 Headless task spawned in background.".to_string());
+                    app.add_system_message("🤖 Headless task spawned in background (worktree isolated).".to_string());
                 }
                 _ => {
                     app.add_system_message(format!("⚠️ Tool '/{}' not yet wired in registry", name));
@@ -6513,5 +6561,69 @@ async fn auto_run_tests(app: &mut App) -> Result<()> {
     };
 
     app.add_system_message(format!("🧪 Auto-test results: {}\n```\n{}\n```", status, result));
+    Ok(())
+}
+
+/// Create a git worktree for isolated background task execution.
+/// Returns the path to the new worktree directory.
+async fn create_worktree(project_path: &str, task: &str) -> anyhow::Result<String> {
+    // Sanitize task name for directory
+    let sanitized: String = task
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .take(40)
+        .collect();
+    let branch_name = format!("openshark-headless-{}", sanitized);
+    let worktree_path = format!("{}/.openshark-worktrees/{}", project_path, branch_name);
+
+    // Ensure the worktrees directory exists
+    let _ = tokio::fs::create_dir_all(format!("{}/.openshark-worktrees", project_path)).await;
+
+    // Create worktree from current HEAD
+    let output = tokio::process::Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            "-B",
+            &branch_name,
+            &worktree_path,
+            "HEAD",
+        ])
+        .current_dir(project_path)
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("git worktree add failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("git worktree add failed: {}", stderr));
+    }
+
+    tracing::info!("[worktree] Created {} at {}", branch_name, worktree_path);
+    Ok(worktree_path)
+}
+
+/// Remove a git worktree and clean up.
+async fn remove_worktree(project_path: &str, worktree_path: &str) -> anyhow::Result<()> {
+    let output = tokio::process::Command::new("git")
+        .args(["worktree", "remove", "--force", worktree_path])
+        .current_dir(project_path)
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("git worktree remove failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        tracing::warn!("[worktree] Remove warning: {}", stderr);
+    }
+
+    // Prune orphaned worktrees
+    let _ = tokio::process::Command::new("git")
+        .args(["worktree", "prune"])
+        .current_dir(project_path)
+        .output()
+        .await;
+
+    tracing::info!("[worktree] Removed {}", worktree_path);
     Ok(())
 }
