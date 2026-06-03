@@ -4675,6 +4675,61 @@ async fn handle_slash_result(
                     }
                     return Ok(true);
                 }
+                if name == "archive" || name == "hide" || name == "stash" {
+                    match app.memory.archive_session(&app.session_id) {
+                        Ok(()) => {
+                            app.add_system_message("📦 Session archived. It will no longer appear in the active sessions list. Use /archived to see archived sessions.".to_string());
+                        }
+                        Err(e) => {
+                            app.add_system_message(format!("❌ Failed to archive session: {}", e));
+                        }
+                    }
+                    return Ok(true);
+                }
+                if name.starts_with("unarchive") || name == "unhide" || name == "restore-session" {
+                    let args = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                    if args.is_empty() {
+                        app.add_system_message("Usage: /unarchive <session-id>".to_string());
+                    } else {
+                        match app.memory.unarchive_session(args) {
+                            Ok(()) => {
+                                app.add_system_message(format!("📦 Session {} unarchived. It will now appear in the active sessions list.", args));
+                            }
+                            Err(e) => {
+                                app.add_system_message(format!("❌ Failed to unarchive session: {}", e));
+                            }
+                        }
+                    }
+                    return Ok(true);
+                }
+                if name == "archived" || name == "hidden" || name == "stashed" {
+                    match app.memory.get_archived_sessions(50) {
+                        Ok(sessions) => {
+                            if sessions.is_empty() {
+                                app.add_system_message("📭 No archived sessions.".to_string());
+                            } else {
+                                let mut lines = vec![
+                                    format!("📦 Archived Sessions ({}):", sessions.len()),
+                                    "─".repeat(50),
+                                ];
+                                for s in sessions {
+                                    let date = s.started_at.format("%Y-%m-%d %H:%M");
+                                    lines.push(format!(
+                                        "  {} | {} | {} | {}",
+                                        s.id, date, s.model, s.task_type
+                                    ));
+                                }
+                                lines.push("".to_string());
+                                lines.push("Use /unarchive <session-id> to restore.".to_string());
+                                app.add_system_message(lines.join("\n"));
+                            }
+                        }
+                        Err(e) => {
+                            app.add_system_message(format!("❌ Failed to list archived sessions: {}", e));
+                        }
+                    }
+                    return Ok(true);
+                }
             }
             Ok(false) // Fall through for now
         }
