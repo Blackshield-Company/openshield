@@ -19,6 +19,7 @@ mod integrations;
 mod image_utils;
 mod json_output;
 mod linting;
+mod guardian;
 mod lsp;
 mod mcp;
 mod mcp_server;
