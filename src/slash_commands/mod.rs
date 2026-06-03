@@ -622,6 +622,21 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "effort",
+                aliases: &["thinking", "depth"],
+                description: "Set effort level: low, medium, high, xhigh",
+                usage: "/effort <low|medium|high|xhigh>",
+                category: SlashCategory::Agent,
+                requires_args: true,
+                handler: |args| {
+                    let level = args.trim().to_lowercase();
+                    match level.as_str() {
+                        "low" | "medium" | "high" | "xhigh" => SlashResult::SwitchMode(format!("effort:{}", level)),
+                        _ => SlashResult::Error("Usage: /effort <low|medium|high|xhigh>".to_string()),
+                    }
+                },
+            },
+            SlashCommand {
                 name: "headless",
                 aliases: &["ci", "batch", "auto"],
                 description: "Run a task in headless/background mode — non-interactive execution",

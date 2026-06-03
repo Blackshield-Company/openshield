@@ -159,6 +159,15 @@ pub struct Config {
     /// Uses default_model if None.
     #[serde(default)]
     pub editor_model: Option<String>,
+    /// Auto-run tests after file edits.
+    #[serde(default)]
+    pub auto_run_tests: bool,
+    /// Custom test command. Uses framework auto-detect if None.
+    #[serde(default)]
+    pub test_command: Option<String>,
+    /// Effort level: low, medium, high, xhigh.
+    #[serde(default = "default_effort")]
+    pub effort_level: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -197,6 +206,10 @@ pub struct KeybindingsConfig {
 
 fn default_theme() -> String {
     "synthwave84".to_string()
+}
+
+fn default_effort() -> String {
+    "medium".to_string()
 }
 
 // Deprecated: kept for backward compatibility. Use gateway instead.
@@ -711,6 +724,9 @@ impl Default for Config {
             weak_model: None,
             architect_model: None,
             editor_model: None,
+            auto_run_tests: false,
+            test_command: None,
+            effort_level: "medium".to_string(),
         }
     }
 }
@@ -799,6 +815,9 @@ mod tests {
             weak_model: None,
             architect_model: None,
             editor_model: None,
+            auto_run_tests: false,
+            test_command: None,
+            effort_level: "medium".to_string(),
         }
     }
 
