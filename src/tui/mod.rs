@@ -4423,8 +4423,29 @@ async fn handle_slash_result(
                         }
                     }
                 }
+                "guardian" => {
+                    let target = if args.is_empty() { "recent".to_string() } else { args.to_string() };
+                    app.add_system_message(format!("🛡️  Guardian reviewing: {}...", target));
+                    let provider = app.provider.clone();
+                    let model = app.model.clone();
+                    let project_path = app.project_path.clone();
+                    let target = target.to_string();
+
+                    tokio::spawn(async move {
+                        match crate::guardian::review(&target, &project_path, provider, model
+                        ).await {
+                            Ok(report) => {
+                                tracing::info!("[guardian] Review complete: {}", report.summary);
+                            }
+                            Err(e) => {
+                                tracing::error!("[guardian] Review failed: {}", e);
+                            }
+                        }
+                    });
+
+                    app.add_system_message("🛡️  Guardian review started — results will appear in logs.".to_string());
+                }
                 "headless" => {
-                    app.add_system_message(format!("🤖 Starting headless task: {}", args));
                     let provider = app.provider.clone();
                     let model = app.model.clone();
                     let task = args.clone();

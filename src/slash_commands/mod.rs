@@ -461,14 +461,15 @@ impl SlashRegistry {
                 requires_args: false,
                 handler: |args| {
                     if args.is_empty() {
-                        SlashResult::Prompt(
-                            "Please review the recent changes for code quality, bugs, security issues, and best practices. Provide specific, actionable feedback.".to_string(),
-                        )
+                        SlashResult::Tool {
+                            name: "guardian".to_string(),
+                            args: "review recent".to_string(),
+                        }
                     } else {
-                        SlashResult::Prompt(format!(
-                            "Please review {} for code quality, bugs, security issues, and best practices. Provide specific, actionable feedback.",
-                            args
-                        ))
+                        SlashResult::Tool {
+                            name: "guardian".to_string(),
+                            args: format!("review {}", args),
+                        }
                     }
                 },
             },
