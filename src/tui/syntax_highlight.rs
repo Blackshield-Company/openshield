@@ -775,9 +775,71 @@ pub fn extract_and_highlight(text: &str) -> Vec<(bool, Vec<Line<'static>>)> {
     result
 }
 
-/// Render inline markdown within a plain text line.
-/// Supports: **bold**, *italic*, `code`, [links](url), ~~strikethrough~~
+/// Wrap bare URLs in OSC 8 hyperlink escape sequences.
+/// Format: \x1b]8;;URL\x07TEXT\x1b]8;;\x07
+pub fn hyperlink_urls(text: &str) -> String {
+    // Simple regex-like scan for http:// and https:// URLs
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == 'h' {
+            let mut potential = String::from('h');
+            while let Some(&c) = chars.peek() {
+                if c.is_alphanumeric()
+                    || c == ':'
+                    || c == '/'
+                    || c == '.'
+                    || c == '-'
+                    || c == '_'
+                    || c == '?'
+                    || c == '&'
+                    || c == '='
+                    || c == '%'
+                    || c == '#'
+                    || c == '@'
+                    || c == '+'
+                    || c == '~'
+                    || c == '['
+                    || c == ']'
+                    || c == '!'
+                    || c == '$'
+                    || c == '\''
+                    || c == '('
+                    || c == ')'
+                    || c == '*'
+                    || c == ','
+                    || c == ';'
+                {
+                    potential.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if potential.starts_with("http://") || potential.starts_with("https://") {
+                // OSC 8 hyperlink
+                result.push_str("\x1b]8;;");
+                result.push_str(&potential);
+                result.push_str("\x07");
+                result.push_str(&potential);
+                result.push_str("\x1b]8;;\x07");
+            } else {
+                result.push_str(&potential);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
+}
+
+/// Render inline markdown within a plain text line, with OSC 8 hyperlink support.
+/// Supports: **bold**, *italic*, `code`, [links](url), ~~strikethrough~~, bare URLs
 pub fn render_markdown_line(line: &str) -> Line<'static> {
+    // First, wrap bare URLs in OSC 8 hyperlink sequences
+    let line = hyperlink_urls(line);
     let mut spans = Vec::new();
     let mut chars = line.chars().peekable();
 
