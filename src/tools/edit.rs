@@ -1,5 +1,6 @@
 use super::Tool;
 use anyhow::{Context, Result};
+use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -44,7 +45,8 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Multi-file editing: read, write, replace, patch. Usage: edit <read|write|replace|patch> <path> [args]"
+        "Multi-file editing: read, write, replace, patch, diff, rewrite, lines. \
+         Usage: edit <read|write|replace|patch|diff|rewrite|lines> <path> [args]"
     }
 
     fn execute(&self, args: &str) -> Result<String> {
@@ -61,6 +63,9 @@ impl Tool for EditTool {
             "write" => self.write_file(rest),
             "replace" => self.replace_in_file(rest),
             "patch" => self.apply_patch(rest),
+            "diff" => self.apply_unified_diff(rest),
+            "rewrite" => self.rewrite_file(rest),
+            "lines" => self.replace_lines(rest),
             _ => Ok(format!("Unknown edit command: {}\n{}", cmd, self.usage())),
         }
     }
@@ -185,12 +190,227 @@ impl EditTool {
         Ok(format!("Patched {}", path))
     }
 
+    /// Apply a unified diff (git diff format) to a file.
+    ///
+    /// Format: edit diff <path>
+    /// --- <content with unified diff markers>
+    ///
+    /// The diff must be a unified diff with @@ -start,count +start,count @@ headers.
+    fn apply_unified_diff(&self, args: &str) -> Result<String> {
+        // First line is path, rest is the diff content
+        let mut lines = args.lines();
+        let path = lines.next().unwrap_or("").trim();
+        if path.is_empty() {
+            return Ok("Usage: edit diff <path>\n<unified diff content>".to_string());
+        }
+
+        let diff_content: String = lines.collect::<Vec<_>>().join("\n");
+        if diff_content.trim().is_empty() {
+            return Ok("No diff content provided.".to_string());
+        }
+
+        let file_content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
+
+        let file_lines: Vec<&str> = file_content.lines().collect();
+        let mut result_lines: Vec<String> = file_lines.iter().map(|s| s.to_string()).collect();
+
+        // Parse unified diff hunks: @@ -start,count +start,count @@
+        let hunk_re = Regex::new(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@").unwrap();
+
+        let diff_lines: Vec<&str> = diff_content.lines().collect();
+        let mut i = 0;
+        let mut hunk_count = 0;
+
+        // We process hunks in reverse order so line numbers stay valid
+        let mut hunks: Vec<(usize, usize, Vec<&str>)> = Vec::new();
+
+        while i < diff_lines.len() {
+            let line = diff_lines[i];
+            if let Some(cap) = hunk_re.captures(line) {
+                let old_start: usize = cap[1].parse().unwrap_or(1);
+                let _old_count: usize = cap
+                    .get(2)
+                    .map(|m| m.as_str().parse().unwrap_or(0))
+                    .unwrap_or(0);
+                let new_start: usize = cap[3].parse().unwrap_or(1);
+                let _new_count: usize = cap
+                    .get(4)
+                    .map(|m| m.as_str().parse().unwrap_or(0))
+                    .unwrap_or(0);
+
+                // Collect hunk body lines
+                let mut hunk_body: Vec<&str> = Vec::new();
+                i += 1;
+                while i < diff_lines.len() && !diff_lines[i].starts_with("@@") {
+                    hunk_body.push(diff_lines[i]);
+                    i += 1;
+                }
+
+                hunks.push((old_start, new_start, hunk_body));
+                hunk_count += 1;
+            } else {
+                i += 1;
+            }
+        }
+
+        if hunk_count == 0 {
+            return Ok(
+                "No valid diff hunks found. Expected @@ -start,count +start,count @@ headers."
+                    .to_string(),
+            );
+        }
+
+        // Process hunks in reverse order (by old_start descending) so line numbers don't shift
+        hunks.sort_by(|a, b| b.0.cmp(&a.0));
+
+        for (old_start, _new_start, hunk_body) in hunks {
+            let start_idx = old_start.saturating_sub(1); // 1-based to 0-based
+            let mut offset: isize = 0;
+
+            for hunk_line in &hunk_body {
+                let idx = (start_idx as isize + offset) as usize;
+                if hunk_line.starts_with('-') {
+                    // Remove line at current position
+                    if idx < result_lines.len() {
+                        result_lines.remove(idx);
+                    }
+                    // offset stays same since we removed current line
+                } else if hunk_line.starts_with('+') {
+                    // Insert after current position
+                    result_lines.insert(idx, hunk_line[1..].to_string());
+                    offset += 1; // we added a line, so advance
+                } else if hunk_line.starts_with(' ') {
+                    // Context line — just advance
+                    offset += 1;
+                }
+            }
+        }
+
+        backup_before_edit(Path::new(path))?;
+
+        let new_content = result_lines.join("\n");
+        fs::write(path, new_content).with_context(|| format!("Failed to write {}", path))?;
+
+        Ok(format!("Applied diff to {} ({} hunks)", path, hunk_count))
+    }
+
+    /// Rewrite an entire file with new content.
+    ///
+    /// Format: edit rewrite <path>
+    /// ---
+    /// <new content>
+    fn rewrite_file(&self, args: &str) -> Result<String> {
+        // First line is path, rest is content
+        let mut lines = args.lines();
+        let path = lines.next().unwrap_or("").trim();
+        if path.is_empty() {
+            return Ok("Usage: edit rewrite <path>\n<new content>".to_string());
+        }
+
+        let content: String = lines.collect::<Vec<_>>().join("\n");
+
+        // Create parent dirs if needed
+        if let Some(parent) = Path::new(path).parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory for {}", path))?;
+        }
+
+        // Backup existing file
+        if Path::new(path).exists() {
+            backup_before_edit(Path::new(path))?;
+        }
+
+        fs::write(path, &content).with_context(|| format!("Failed to write {}", path))?;
+
+        Ok(format!(
+            "Rewrote {} ({} bytes, {} lines)",
+            path,
+            content.len(),
+            content.lines().count()
+        ))
+    }
+
+    /// Replace a range of lines by line numbers.
+    ///
+    /// Format: edit lines <path> <start>-<end> ||| <new_lines>
+    /// Replaces lines start through end (1-based, inclusive) with new_lines.
+    fn replace_lines(&self, args: &str) -> Result<String> {
+        let delimiter = " ||| ";
+        let parts: Vec<&str> = args.splitn(2, delimiter).collect();
+        if parts.len() < 2 {
+            return Ok(format!(
+                "Usage: edit lines <path> <start>-<end>{}<new_lines>",
+                delimiter
+            ));
+        }
+
+        let path_range = parts[0].trim();
+        let new_lines = parts[1];
+
+        // Parse path and range
+        let space_idx = path_range.rfind(' ').unwrap_or(0);
+        let path = &path_range[..space_idx].trim();
+        let range_str = &path_range[space_idx..].trim();
+
+        if path.is_empty() || range_str.is_empty() {
+            return Ok("Usage: edit lines <path> <start>-<end> ||| <new_lines>".to_string());
+        }
+
+        let range_parts: Vec<&str> = range_str.split('-').collect();
+        if range_parts.len() != 2 {
+            return Ok("Range must be <start>-<end> (e.g., 5-10)".to_string());
+        }
+
+        let start: usize = range_parts[0].parse().unwrap_or(0);
+        let end: usize = range_parts[1].parse().unwrap_or(0);
+
+        if start == 0 || end == 0 || start > end {
+            return Ok("Invalid line range. Must be 1-based and start <= end.".to_string());
+        }
+
+        let content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
+        let mut file_lines: Vec<&str> = content.lines().collect();
+
+        let start_idx = start.saturating_sub(1);
+        let end_idx = end.saturating_sub(1);
+
+        if start_idx >= file_lines.len() {
+            return Ok(format!(
+                "Start line {} is beyond file length ({} lines)",
+                start,
+                file_lines.len()
+            ));
+        }
+
+        backup_before_edit(Path::new(path))?;
+
+        // Replace the range
+        let new_lines_vec: Vec<&str> = new_lines.lines().collect();
+        file_lines.splice(start_idx..=end_idx.min(file_lines.len() - 1), new_lines_vec);
+
+        let new_content = file_lines.join("\n");
+        fs::write(path, new_content).with_context(|| format!("Failed to write {}", path))?;
+
+        Ok(format!(
+            "Replaced lines {}-{} in {} (now {} lines)",
+            start,
+            end,
+            path,
+            file_lines.len()
+        ))
+    }
+
     fn usage(&self) -> String {
         "Edit tool usage:\n\
-         edit read <path>                    - Read file with line numbers\n\
-         edit write <path> <content>         - Write file (creates dirs)\n\
-         edit replace <path> <old> ||| <new> - Replace first occurrence\n\
-         edit patch <path> <old> ||| <new>   - Multi-line patch"
+         edit read <path>                              - Read file with line numbers\n\
+         edit write <path> <content>                   - Write file (creates dirs)\n\
+         edit replace <path> <old> ||| <new>           - Replace first occurrence\n\
+         edit patch <path> <old> ||| <new>             - Multi-line patch\n\
+         edit diff <path>\n<unified diff>             - Apply unified diff\n\
+         edit rewrite <path>\n<new content>            - Rewrite entire file\n\
+         edit lines <path> <start>-<end> ||| <new>     - Replace line range"
             .to_string()
     }
 }
@@ -338,5 +558,114 @@ mod tests {
         let tool = EditTool;
         let result = tool.execute("").unwrap();
         assert!(result.contains("Edit tool usage"));
+    }
+
+    #[test]
+    fn test_rewrite_file() {
+        let dir = temp_dir();
+        let path = format!("{}/test_rewrite.txt", dir);
+        fs::write(&path, "old content").unwrap();
+
+        let tool = EditTool;
+        let result = tool
+            .execute(&format!("rewrite {}\nnew line 1\nnew line 2", path))
+            .unwrap();
+
+        assert!(result.contains("Rewrote"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("new line 1"));
+        assert!(content.contains("new line 2"));
+        assert!(!content.contains("old content"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_rewrite_file_creates_new() {
+        let dir = temp_dir();
+        let path = format!("{}/new_file.txt", dir);
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("rewrite {}\nbrand new content", path)).unwrap();
+
+        assert!(result.contains("Rewrote"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "brand new content");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_replace_lines() {
+        let dir = temp_dir();
+        let path = format!("{}/test_lines.txt", dir);
+        fs::write(&path, "line1\nline2\nline3\nline4\nline5").unwrap();
+
+        let tool = EditTool;
+        let result = tool
+            .execute(&format!("lines {} 2-4 ||| new2\nnew3\nnew4", path))
+            .unwrap();
+
+        assert!(result.contains("Replaced lines 2-4"));
+        let content = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines[0], "line1");
+        assert_eq!(lines[1], "new2");
+        assert_eq!(lines[2], "new3");
+        assert_eq!(lines[3], "new4");
+        assert_eq!(lines[4], "line5");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_replace_lines_invalid_range() {
+        let dir = temp_dir();
+        let path = format!("{}/test_lines_invalid.txt", dir);
+        fs::write(&path, "line1\nline2").unwrap();
+
+        let tool = EditTool;
+        let result = tool
+            .execute(&format!("lines {} 5-10 ||| new", path))
+            .unwrap();
+
+        assert!(result.contains("beyond file length"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_apply_unified_diff() {
+        let dir = temp_dir();
+        let path = format!("{}/test_diff.txt", dir);
+        fs::write(&path, "line1\nline2\nline3\nline4\nline5").unwrap();
+
+        let diff = format!(
+            "{}\n@@ -2,3 +2,3 @@\n-line2\n+line2_modified\n line3\n-line4\n+line4_modified",
+            path
+        );
+
+        let tool = EditTool;
+        let result = tool.execute(&format!("diff {}", diff)).unwrap();
+
+        assert!(result.contains("Applied diff"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("line2_modified"));
+        assert!(content.contains("line4_modified"));
+        assert!(content.contains("line1"));
+        assert!(content.contains("line3"));
+        assert!(content.contains("line5"));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_apply_unified_diff_no_hunks() {
+        let dir = temp_dir();
+        let path = format!("{}/test_diff_nohunks.txt", dir);
+        fs::write(&path, "some content").unwrap();
+
+        let tool = EditTool;
+        let result = tool
+            .execute(&format!("diff {}\nnot a valid diff", path))
+            .unwrap();
+
+        assert!(result.contains("No valid diff hunks"));
+        cleanup(&dir);
     }
 }
