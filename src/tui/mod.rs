@@ -864,6 +864,14 @@ impl App {
             ""
         };
 
+        let effort_instruction = match self.config.effort_level.as_str() {
+            "low" => "\n\n⚡ EFFORT: LOW. Be concise. Minimal explanation. One sentence if it fits. No fluff.",
+            "medium" => "\n\n⚡ EFFORT: MEDIUM. Standard detail level. Balance thoroughness with brevity.",
+            "high" => "\n\n⚡ EFFORT: HIGH. Thorough analysis with reasoning. Explain your thinking. Explore implications.",
+            "xhigh" => "\n\n⚡ EFFORT: XHIGH. Extremely thorough. Explore edge cases, alternatives, trade-offs. Deep dive.",
+            _ => "",
+        };
+
         let system_msg = Message {
             role: "system".to_string(),
             content: format!(
@@ -882,11 +890,12 @@ impl App {
                  \n\
                  After tool results come back, you will be prompted to synthesize. \
                  When synthesizing: explain what was found, what it means, and the next step. \
-                 Be complete. No one-liners. No catchphrases.{}",
+                 Be complete. No one-liners. No catchphrases.{}{}",
                 soul.system_prompt(),
                 fs_capabilities,
                 tool_descriptions,
-                plan_instruction
+                plan_instruction,
+                effort_instruction
             ),
             images: None,
             tool_call_id: None,
@@ -4474,6 +4483,15 @@ async fn handle_slash_result(
                         model
                     ));
                 }
+                mode_str if mode_str.starts_with("effort:") => {
+                    let level = mode_str.strip_prefix("effort:").unwrap_or("medium");
+                    app.config.effort_level = level.to_string();
+                    app.rebuild_system_prompt();
+                    app.add_system_message(format!(
+                        "⚡ Effort level set to: {}. System prompt updated.",
+                        level.to_uppercase()
+                    ));
+                }
                 "autonomous" => {
                     app.autonomous_mode = value;
                     app.add_system_message(format!(
@@ -4783,6 +4801,13 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
             if app.config.auto_commit && is_edit_tool(&suggestion.tool_name) {
                 if let Err(e) = auto_commit_changes(app).await {
                     app.add_system_message(format!("⚠️ Auto-commit failed: {}", e));
+                }
+            }
+
+            // Auto-run tests if enabled and tool was an edit
+            if app.config.auto_run_tests && is_edit_tool(&suggestion.tool_name) {
+                if let Err(e) = auto_run_tests(app).await {
+                    app.add_system_message(format!("⚠️ Auto-test failed: {}", e));
                 }
             }
         }
@@ -6455,5 +6480,38 @@ async fn auto_commit_changes(app: &mut App) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Auto-run tests after a successful edit.
+async fn auto_run_tests(app: &mut App) -> Result<()> {
+    let test_tool = crate::tools::test_runner::TestTool;
+    let result = match app.config.test_command.as_ref() {
+        Some(cmd) => {
+            // Run custom test command
+            let output = tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .output()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to run test command: {} — {}", cmd, e))?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            format!("Test command: {}\n\nstdout:\n{}\n\nstderr:\n{}\n\nExit code: {:?}",
+                cmd, stdout, stderr, output.status.code())
+        }
+        None => {
+            // Auto-detect and run
+            test_tool.execute("run .")?
+        }
+    };
+
+    let status = if result.contains("FAILED") || result.contains("error[") {
+        "❌ FAILED"
+    } else {
+        "✅ PASSED"
+    };
+
+    app.add_system_message(format!("🧪 Auto-test results: {}\n```\n{}\n```", status, result));
     Ok(())
 }
