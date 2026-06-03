@@ -665,6 +665,45 @@ impl SlashRegistry {
                 handler: |_args| SlashResult::Handled,
             },
             SlashCommand {
+                name: "archive",
+                aliases: &["hide", "stash"],
+                description: "Archive the current session (hide from active list)",
+                usage: "/archive",
+                category: SlashCategory::Session,
+                requires_args: false,
+                handler: |_args| SlashResult::Toggle {
+                    setting: "archive_session".to_string(),
+                    value: true,
+                },
+            },
+            SlashCommand {
+                name: "unarchive",
+                aliases: &["restore-session", "unhide"],
+                description: "Unarchive a session by ID",
+                usage: "/unarchive <session-id>",
+                category: SlashCategory::Session,
+                requires_args: true,
+                handler: |args| {
+                    if args.is_empty() {
+                        SlashResult::Error("Usage: /unarchive <session-id>".to_string())
+                    } else {
+                        SlashResult::Toggle {
+                            setting: format!("unarchive_session:{}", args),
+                            value: true,
+                        }
+                    }
+                },
+            },
+            SlashCommand {
+                name: "archived",
+                aliases: &["hidden", "stashed"],
+                description: "List archived sessions",
+                usage: "/archived",
+                category: SlashCategory::Session,
+                requires_args: false,
+                handler: |_args| SlashResult::Handled,
+            },
+            SlashCommand {
                 name: "vim",
                 aliases: &["vi"],
                 description: "Toggle vim mode for input editing",

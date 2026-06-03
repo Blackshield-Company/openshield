@@ -14,6 +14,8 @@ pub struct Session {
     pub model: String,
     pub task_type: String,
     pub project_path: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +62,10 @@ impl MemoryStore {
         let _ = self
             .conn
             .execute("ALTER TABLE sessions ADD COLUMN project_path TEXT", []);
+        // Migration: add archived column if it doesn't exist
+        let _ = self
+            .conn
+            .execute("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0", []);
 
         self.conn
             .execute_batch(
@@ -68,7 +74,8 @@ impl MemoryStore {
                 started_at TEXT NOT NULL,
                 model TEXT NOT NULL,
                 task_type TEXT NOT NULL DEFAULT 'general',
-                project_path TEXT
+                project_path TEXT,
+                archived INTEGER NOT NULL DEFAULT 0
             );
             
             CREATE TABLE IF NOT EXISTS messages (
@@ -131,8 +138,8 @@ impl MemoryStore {
 
     pub fn create_session(&self, id: &str, model: &str, task_type: &str) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO sessions (id, started_at, model, task_type, project_path) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, Utc::now().to_rfc3339(), model, task_type, None::<String>],
+            "INSERT INTO sessions (id, started_at, model, task_type, project_path, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, Utc::now().to_rfc3339(), model, task_type, None::<String>, 0],
         ).context("Failed to create session")?;
         Ok(())
     }
@@ -145,17 +152,17 @@ impl MemoryStore {
         project_path: &str,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO sessions (id, started_at, model, task_type, project_path) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, Utc::now().to_rfc3339(), model, task_type, project_path],
+            "INSERT INTO sessions (id, started_at, model, task_type, project_path, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, Utc::now().to_rfc3339(), model, task_type, project_path, 0],
         ).context("Failed to create session with project")?;
         Ok(())
     }
 
     pub fn get_sessions_by_project(&self, project_path: &str) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, started_at, model, task_type, project_path
+            "SELECT id, started_at, model, task_type, project_path, archived
              FROM sessions
-             WHERE project_path = ?1
+             WHERE project_path = ?1 AND archived = 0
              ORDER BY started_at DESC",
         )?;
 
@@ -170,6 +177,7 @@ impl MemoryStore {
                     model: row.get(2)?,
                     task_type: row.get(3)?,
                     project_path: row.get(4)?,
+                    archived: row.get::<_, i32>(5).unwrap_or(0) != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -366,8 +374,9 @@ impl MemoryStore {
 
     pub fn get_recent_sessions(&self, limit: usize) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, started_at, model, task_type, project_path
+            "SELECT id, started_at, model, task_type, project_path, archived
              FROM sessions
+             WHERE archived = 0
              ORDER BY started_at DESC
              LIMIT ?1",
         )?;
@@ -383,12 +392,58 @@ impl MemoryStore {
                     model: row.get(2)?,
                     task_type: row.get(3)?,
                     project_path: row.get(4)?,
+                    archived: row.get::<_, i32>(5).unwrap_or(0) != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
             .context("Failed to get sessions")?;
 
         Ok(sessions)
+    }
+
+    pub fn get_archived_sessions(&self, limit: usize) -> Result<Vec<Session>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, model, task_type, project_path, archived
+             FROM sessions
+             WHERE archived = 1
+             ORDER BY started_at DESC
+             LIMIT ?1",
+        )?;
+
+        let sessions = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(Session {
+                    id: row.get(0)?,
+                    started_at: row
+                        .get::<_, String>(1)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    model: row.get(2)?,
+                    task_type: row.get(3)?,
+                    project_path: row.get(4)?,
+                    archived: row.get::<_, i32>(5).unwrap_or(0) != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to get archived sessions")?;
+
+        Ok(sessions)
+    }
+
+    pub fn archive_session(&self, session_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET archived = 1 WHERE id = ?1",
+            params![session_id],
+        ).context("Failed to archive session")?;
+        Ok(())
+    }
+
+    pub fn unarchive_session(&self, session_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET archived = 0 WHERE id = ?1",
+            params![session_id],
+        ).context("Failed to unarchive session")?;
+        Ok(())
     }
 
     pub fn search_tool_calls_by_session(&self, session_id: &str) -> Result<Vec<ToolCall>> {
@@ -473,7 +528,7 @@ impl MemoryStore {
         let mut stmt = self.conn.prepare(
             "SELECT
                 tc.id, tc.session_id, tc.tool_name, tc.args, tc.result, tc.success, tc.created_at,
-                s.id, s.started_at, s.model, s.task_type, s.project_path
+                s.id, s.started_at, s.model, s.task_type, s.project_path, s.archived
              FROM tool_calls tc
              JOIN sessions s ON tc.session_id = s.id
              ORDER BY tc.created_at DESC
@@ -503,6 +558,7 @@ impl MemoryStore {
                     model: row.get(9)?,
                     task_type: row.get(10)?,
                     project_path: row.get(11)?,
+                    archived: row.get::<_, i32>(12).unwrap_or(0) != 0,
                 };
                 Ok((tool_call, session))
             })?

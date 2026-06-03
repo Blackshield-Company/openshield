@@ -950,6 +950,7 @@ mod tests {
             model: "model-a".to_string(),
             task_type: "code".to_string(),
             project_path: None,
+            archived: false,
         }];
         let mut tool_calls: HashMap<String, Vec<ToolCall>> = HashMap::new();
         // Need 5+ samples for full trust
