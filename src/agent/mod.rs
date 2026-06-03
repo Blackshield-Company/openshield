@@ -522,6 +522,9 @@ impl Agent {
             weak_model: None,
             architect_model: None,
             editor_model: None,
+            auto_run_tests: false,
+            test_command: None,
+            effort_level: "medium".to_string(),
         }
     }
 }
