@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 use tracing::info;
 
@@ -11,24 +13,31 @@ mod config;
 mod diff;
 mod doctor;
 mod evolution;
-
 mod gateway;
+mod headless;
 mod integrations;
 mod image_utils;
+mod json_output;
+mod linting;
 mod lsp;
 mod mcp;
+mod mcp_server;
 mod memory;
 mod plugins;
 mod providers;
+mod repo_map;
 mod sandbox;
 mod router;
 mod security;
+mod self_correction;
 mod self_improve;
 mod session;
 mod skills;
+mod slash_commands;
 mod swarm;
 mod tools;
 mod tui;
+mod watch;
 
 use crate::tools::Tool;
 use config::Config;
@@ -109,6 +118,9 @@ enum Commands {
         message: String,
         #[arg(short, long)]
         model: Option<String>,
+        /// Attach a file to the conversation context
+        #[arg(short, long)]
+        file: Option<String>,
     },
     Config,
     Security {
@@ -154,6 +166,63 @@ enum Commands {
     Hermes {
         #[arg(default_value = "status")]
         cmd: String,
+    },
+    /// Run in headless / CI-CD mode (non-interactive)
+    Headless {
+        /// Task to execute
+        #[arg(default_value = "")]
+        task: String,
+        /// Auto-approve all tool calls
+        #[arg(short, long, default_value_t = false)]
+        yolo: bool,
+        /// Output NDJSON for structured consumption
+        #[arg(short, long, default_value_t = false)]
+        json: bool,
+        /// Max seconds to run
+        #[arg(short, long, default_value_t = 300)]
+        timeout: u64,
+        /// Max agent turns
+        #[arg(short = 'n', long, default_value_t = 50)]
+        max_turns: usize,
+        /// Override model for this run
+        #[arg(short, long)]
+        model: Option<String>,
+        /// Write output to file
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Build a repo map of the codebase
+    RepoMap {
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Run linter on project
+    Lint {
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Run as an MCP server
+    McpServer,
+    /// Show git diff of AI-made changes
+    Diff,
+    /// Export session to markdown
+    Export {
+        #[arg(default_value = "session")]
+        name: String,
+    },
+    /// Watch files and auto-run commands
+    Watch {
+        #[arg(default_value = ".")]
+        path: String,
+        #[arg(short, long, default_value = "test")]
+        cmd: String,
+        #[arg(short, long, default_value_t = 1000)]
+        debounce: u64,
+    },
+    /// Use a config profile
+    Profile {
+        #[arg(default_value = "")]
+        name: String,
     },
 }
 
@@ -673,11 +742,12 @@ async fn main() -> anyhow::Result<()> {
                 println!();
             }
         }
-        Some(Commands::Chat { message, model }) => {
-            if message.is_empty() {
+        Some(Commands::Chat { message, model, file }) => {
+            if message.is_empty() && file.is_none() {
                 println!("🦈 One-shot Chat");
                 println!("Usage: openshark chat 'your message here'");
                 println!("       openshark chat 'hello' --model kimi-k2.6");
+                println!("       openshark chat 'review this' --file src/main.rs");
             } else {
                 let model_name = model.as_deref().unwrap_or(&config.default_model);
                 let (provider_name, provider_config) = config
@@ -720,6 +790,22 @@ async fn main() -> anyhow::Result<()> {
                     tool_descriptions
                 );
 
+                let mut user_content = message.clone();
+
+                // Attach file content if provided
+                if let Some(ref path) = file {
+                    match std::fs::read_to_string(path) {
+                        Ok(content) => {
+                            println!("📎 Attached file: {} ({} bytes)", path, content.len());
+                            user_content.push_str(&format!("\n\n--- File: {} ---\n```\n{}\n```", path, content));
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to read file {}: {}", path, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
                 let messages = vec![
                     providers::Message {
                         role: "system".to_string(),
@@ -731,7 +817,7 @@ async fn main() -> anyhow::Result<()> {
                     },
                     providers::Message {
                         role: "user".to_string(),
-                        content: message.clone(),
+                        content: user_content,
                         images: None,
                         tool_call_id: None,
                         tool_calls: None,
@@ -1068,36 +1154,24 @@ async fn main() -> anyhow::Result<()> {
                 crate::plugins::list_plugins_cli();
             }
             "create" if !name.is_empty() => {
-                match crate::plugins::PluginRegistry::new() {
-                    Ok(registry) => {
-                        match registry.create_scaffold(&name) {
-                            Ok(path) => println!("✅ Plugin scaffold created at {}", path.display()),
-                            Err(e) => println!("❌ Failed to create plugin: {}", e),
-                        }
-                    }
-                    Err(e) => println!("❌ Failed to initialize plugin registry: {}", e),
+                let registry = crate::plugins::PluginRegistry::new();
+                match registry.create_scaffold(&name) {
+                    Ok(path) => println!("✅ Plugin scaffold created at {}", path.display()),
+                    Err(e) => println!("❌ Failed to create plugin: {}", e),
                 }
             }
             "enable" if !name.is_empty() => {
-                match crate::plugins::PluginRegistry::new() {
-                    Ok(mut registry) => {
-                        match registry.enable(&name) {
-                            Ok(()) => println!("✅ Plugin '{}' enabled", name),
-                            Err(e) => println!("❌ {}", e),
-                        }
-                    }
-                    Err(e) => println!("❌ Failed to initialize plugin registry: {}", e),
+                let mut registry = crate::plugins::PluginRegistry::new();
+                match registry.enable(&name) {
+                    Ok(()) => println!("✅ Plugin '{}' enabled", name),
+                    Err(e) => println!("❌ {}", e),
                 }
             }
             "disable" if !name.is_empty() => {
-                match crate::plugins::PluginRegistry::new() {
-                    Ok(mut registry) => {
-                        match registry.disable(&name) {
-                            Ok(()) => println!("✅ Plugin '{}' disabled", name),
-                            Err(e) => println!("❌ {}", e),
-                        }
-                    }
-                    Err(e) => println!("❌ Failed to initialize plugin registry: {}", e),
+                let mut registry = crate::plugins::PluginRegistry::new();
+                match registry.disable(&name) {
+                    Ok(()) => println!("✅ Plugin '{}' disabled", name),
+                    Err(e) => println!("❌ {}", e),
                 }
             }
             _ => {
@@ -1169,6 +1243,178 @@ async fn main() -> anyhow::Result<()> {
                 println!("  openshark hermes push   - Push skills to Hermes");
             }
         },
+        Some(Commands::Headless { task, yolo, json, timeout, max_turns, model, output }) => {
+            println!("🦈 OpenShark Headless Mode");
+            let mut cfg = config.clone();
+            if let Some(ref m) = model {
+                cfg.default_model = m.clone();
+            }
+            let headless_config = crate::headless::HeadlessConfig {
+                task,
+                yolo,
+                json,
+                max_turns,
+                timeout_secs: timeout,
+                model,
+                output_file: output,
+            };
+            let provider = match crate::swarm::agent_runner::build_agent_provider(&cfg) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("❌ Failed to initialize provider: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            if let Err(e) = crate::headless::run_headless(headless_config, provider, cfg.default_model, None).await {
+                eprintln!("❌ Headless run failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::RepoMap { path }) => {
+            println!("🦈 Repo Map");
+            match crate::repo_map::build_repo_map(&path) {
+                Ok(map) => {
+                    println!("{}", crate::repo_map::format_repo_map(&map));
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to build repo map: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Lint { path }) => {
+            println!("🦈 Lint");
+            match crate::linting::detect_linter(&path) {
+                Some(linter) => {
+                    println!("Detected linter: {}", linter);
+                    match crate::linting::run_linter(&path).await {
+                        Ok(results) => {
+                            for result in &results {
+                                println!("[{}] {}:{} — {}", result.severity, result.file, result.line, result.message);
+                            }
+                            if results.iter().any(|r| r.severity == crate::linting::Severity::Error) {
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Linter failed: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                None => {
+                    eprintln!("❌ No supported linter detected in {}", path);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::McpServer) => {
+            println!("🦈 OpenShark MCP Server");
+            let server = crate::mcp_server::McpServer::new();
+            if let Err(e) = server.run_stdio().await {
+                eprintln!("❌ MCP server error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Diff) => {
+            println!("🦈 Diff — AI-made changes");
+            let git_tool = crate::tools::GitTool;
+            match git_tool.execute("diff") {
+                Ok(diff) => {
+                    if diff.trim().is_empty() {
+                        println!("📭 No unstaged changes.");
+                    } else {
+                        println!("{}", diff);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ git diff failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Watch { path, cmd, debounce }) => {
+            let command = match cmd.as_str() {
+                "test" => crate::watch::WatchCommand::Test,
+                "lint" => crate::watch::WatchCommand::Lint,
+                "build" => crate::watch::WatchCommand::Build,
+                _ => crate::watch::WatchCommand::Custom(cmd),
+            };
+            let config = crate::watch::WatchConfig {
+                path,
+                debounce_ms: debounce,
+                command,
+            };
+            if let Err(e) = crate::watch::run_watch(config) {
+                eprintln!("❌ Watch mode error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Profile { name }) => {
+            if name.is_empty() {
+                println!("🦈 Config Profiles");
+                println!("Usage: openshark profile <name>");
+                println!();
+                println!("Profiles are stored in ~/.config/openshark/profiles/");
+                println!("Each profile is a separate config.json with its own model, provider, and settings.");
+            } else {
+                let profile_dir = dirs::config_dir()
+                    .map(|d| d.join("openshark").join("profiles"))
+                    .unwrap_or_else(|| PathBuf::from(".openshark/profiles"));
+                let profile_path = profile_dir.join(format!("{}.json", name));
+                if profile_path.exists() {
+                    println!("✅ Profile '{}' found at {}", name, profile_path.display());
+                    println!("   To use: set OPENSHARK_PROFILE={} or use --profile flag (coming soon)", name);
+                } else {
+                    println!("📭 Profile '{}' not found.", name);
+                    println!("   Create one by copying your config:");
+                    println!("   cp ~/.config/openshark/config.json {}", profile_path.display());
+                }
+            }
+        }
+        Some(Commands::Export { name }) => {
+            println!("🦈 Export session to markdown");
+            let memory = match memory::MemoryStore::new(&config.memory_db_path) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("❌ Failed to open memory store: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            match memory.get_recent_sessions(1) {
+                Ok(sessions) => {
+                    if let Some(session) = sessions.first() {
+                        let filename = format!("{}_{}.md", name, session.id);
+                        let mut md = format!("# Session Export: {}\n\n", session.id);
+                        md.push_str(&format!("- **Model:** {}\n", session.model));
+                        md.push_str(&format!("- **Started:** {}\n", session.started_at));
+                        md.push_str("---\n\n");
+                        match memory.get_session_messages(&session.id) {
+                            Ok(messages) => {
+                                for msg in messages {
+                                    md.push_str(&format!("## {}\n\n{}", msg.role, msg.content));
+                                    md.push_str("\n\n---\n\n");
+                                }
+                            }
+                            Err(e) => eprintln!("⚠️ Failed to load messages: {}", e),
+                        }
+                        match std::fs::write(&filename, md) {
+                            Ok(_) => println!("✅ Exported to {}", filename),
+                            Err(e) => {
+                                eprintln!("❌ Failed to write {}: {}", filename, e);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        println!("📭 No sessions found to export.");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to get sessions: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     Ok(())

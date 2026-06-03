@@ -141,6 +141,24 @@ pub struct Config {
     pub context_compression: crate::memory::compression::ContextCompressionConfig,
     #[serde(default)]
     pub keybindings: KeybindingsConfig,
+    /// Auto-commit changes after file edits.
+    #[serde(default)]
+    pub auto_commit: bool,
+    /// Model to use for generating commit messages. Uses default_model if None.
+    #[serde(default)]
+    pub auto_commit_model: Option<String>,
+    /// Weak/cheap model for simple tasks (routing, summarization, classification).
+    /// Uses default_model if None.
+    #[serde(default)]
+    pub weak_model: Option<String>,
+    /// Architect model for planning and high-level design.
+    /// Uses default_model if None.
+    #[serde(default)]
+    pub architect_model: Option<String>,
+    /// Editor model for code generation and edits.
+    /// Uses default_model if None.
+    #[serde(default)]
+    pub editor_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -688,6 +706,11 @@ impl Default for Config {
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: KeybindingsConfig::default(),
+            auto_commit: false,
+            auto_commit_model: None,
+            weak_model: None,
+            architect_model: None,
+            editor_model: None,
         }
     }
 }
@@ -771,6 +794,11 @@ mod tests {
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: KeybindingsConfig::default(),
+            auto_commit: false,
+            auto_commit_model: None,
+            weak_model: None,
+            architect_model: None,
+            editor_model: None,
         }
     }
 
