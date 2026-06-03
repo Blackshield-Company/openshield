@@ -1,3 +1,4 @@
+pub mod checkpoint;
 pub mod r#async;
 pub mod detection;
 pub mod edit;
@@ -11,7 +12,8 @@ pub mod terminal;
 pub mod test_runner;
 
 pub use r#async::AsyncToolExecutor;
-pub use detection::{ToolSuggestion, detect_tool_suggestions};
+pub use checkpoint::{CheckpointStack, save_checkpoint, restore_checkpoint};
+pub use detection::{ToolSuggestion, ToolBatch, detect_tool_suggestions};
 pub use git::GitTool;
 
 use anyhow::Result;

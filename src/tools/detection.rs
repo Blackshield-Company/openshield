@@ -6,7 +6,48 @@
 /// - Natural language patterns like "I should use [tool] to..."
 use regex::Regex;
 
-/// A detected tool suggestion with metadata.
+/// A batch of tool suggestions for multi-file edit approval.
+#[derive(Debug, Clone, Default)]
+pub struct ToolBatch {
+    pub suggestions: Vec<ToolSuggestion>,
+    pub approved: Vec<bool>,
+}
+
+impl ToolBatch {
+    pub fn new(suggestions: Vec<ToolSuggestion>) -> Self {
+        let len = suggestions.len();
+        Self {
+            suggestions,
+            approved: vec![false; len],
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.suggestions.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.suggestions.len()
+    }
+
+    pub fn approve_all(&mut self) {
+        self.approved.fill(true);
+    }
+
+    pub fn reject_all(&mut self) {
+        self.approved.fill(false);
+    }
+
+    #[allow(dead_code)]
+    pub fn approved_suggestions(&self) -> impl Iterator<Item = &ToolSuggestion> {
+        self.suggestions
+            .iter()
+            .zip(&self.approved)
+            .filter(|(_, a)| **a)
+            .map(|(s, _)| s)
+    }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSuggestion {
     /// The name of the suggested tool.

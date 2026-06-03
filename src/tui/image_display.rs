@@ -72,11 +72,11 @@ impl ImageInfo {
         let target_height = target_height.clamp(3, 12);
 
         let mut lines = Vec::new();
-        lines.push("┌".to_string() + &"─".repeat(target_width as usize) + "┐");
+        lines.push(format!("┌{}┐", "─".repeat(target_width as usize)));
         for _ in 0..target_height {
-            lines.push("│".to_string() + &"░".repeat(target_width as usize) + "│");
+            lines.push(format!("│{}│", "░".repeat(target_width as usize)));
         }
-        lines.push("└".to_string() + &"─".repeat(target_width as usize) + "┘");
+        lines.push(format!("└{}┘", "─".repeat(target_width as usize)));
         lines.push(format!("  {}x{} px", w, h));
 
         lines

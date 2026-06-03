@@ -115,6 +115,75 @@ impl GitTool {
          git branch-create <n> - Create and switch to branch"
             .to_string()
     }
+
+    /// Check if we're inside a git repository.
+    pub fn in_repo() -> bool {
+        Command::new("git")
+            .args(["rev-parse", "--git-dir"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Get the diff of unstaged changes.
+    #[allow(dead_code)]
+    pub fn get_unstaged_diff() -> Result<String> {
+        let output = Command::new("git")
+            .args(["diff"])
+            .output()
+            .context("Failed to run git diff")?;
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Get the diff of staged changes.
+    #[allow(dead_code)]
+    pub fn get_staged_diff() -> Result<String> {
+        let output = Command::new("git")
+            .args(["diff", "--staged"])
+            .output()
+            .context("Failed to run git diff --staged")?;
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Stage all changes.
+    #[allow(dead_code)]
+    pub fn stage_all() -> Result<()> {
+        let output = Command::new("git")
+            .args(["add", "-A"])
+            .output()
+            .context("Failed to stage all changes")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "git add -A failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    /// Commit staged changes with the given message.
+    #[allow(dead_code)]
+    pub fn commit(message: &str) -> Result<String> {
+        let output = Command::new("git")
+            .args(["commit", "-m", message])
+            .output()
+            .context("Failed to run git commit")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "git commit failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Check if there are any changes (staged or unstaged).
+    pub fn has_changes() -> bool {
+        let Ok(output) = Command::new("git").args(["status", "--porcelain"]).output() else {
+            return false;
+        };
+        !output.stdout.is_empty()
+    }
 }
 
 #[cfg(test)]

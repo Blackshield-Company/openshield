@@ -517,6 +517,11 @@ impl Agent {
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: crate::config::KeybindingsConfig::default(),
+            auto_commit: false,
+            auto_commit_model: None,
+            weak_model: None,
+            architect_model: None,
+            editor_model: None,
         }
     }
 }

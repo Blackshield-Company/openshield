@@ -5,7 +5,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
         Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
@@ -32,6 +32,8 @@ mod clipboard_image;
 mod command_palette;
 mod bookmarks;
 mod image_display;
+mod vim_input;
+mod mouse;
 use theme::*;
 
 mod ascii_art;
@@ -66,6 +68,8 @@ enum StreamEvent {
     /// Switch to tool-approval mode.
     #[allow(dead_code)]
     SetPendingSuggestion(ToolSuggestion),
+    /// Multi-file edit batch pending approval.
+    SetPendingBatch(crate::tools::ToolBatch),
     /// An error occurred.
     Error(String),
     /// A system/info message (e.g. auto-execution notice).
@@ -154,6 +158,10 @@ struct App {
     streaming_content: String,
     /// Tool suggestion pending approval.
     pending_suggestion: Option<ToolSuggestion>,
+    /// Batch of tool suggestions for multi-file edit approval.
+    pending_batch: Option<crate::tools::ToolBatch>,
+    /// Currently selected item in batch approval UI.
+    batch_selected: usize,
     /// Receiver for background stream events.
     stream_rx: Option<tokio::sync::mpsc::UnboundedReceiver<StreamEvent>>,
     /// Memory store for persistence.
@@ -203,6 +211,8 @@ struct App {
     session_perf: SessionPerformance,
     /// Skill registry for loaded skills.
     skill_registry: Option<crate::skills::SkillRegistry>,
+    /// Plugin registry for custom hooks.
+    plugin_registry: Option<crate::plugins::PluginRegistry>,
     /// Swarm engine for multi-agent mode.
     swarm: Option<crate::swarm::SwarmEngine>,
     /// Broadcast receiver for swarm activity events.
@@ -233,6 +243,10 @@ struct App {
     last_progress_msg_idx: Option<usize>,
     /// Circuit breaker: count of consecutive empty responses to prevent infinite re-prompt loops.
     empty_response_count: u8,
+    /// YOLO mode — auto-approve all tool suggestions without prompting.
+    yolo_mode: bool,
+    /// Plan mode — when true, the agent only analyzes and proposes plans, never edits.
+    plan_mode: bool,
     /// Input history for Up/Down arrow recall.
     input_history: Vec<String>,
     /// Current index into input_history (None = not navigating history).
@@ -250,6 +264,16 @@ struct App {
     /// Command palette for fuzzy command search.
     command_palette: command_palette::CommandPalette,
     bookmark_manager: bookmarks::BookmarkManager,
+    /// Checkpoint stack for undo/redo of file edits.
+    checkpoint_stack: crate::tools::CheckpointStack,
+    /// Vim mode state for input editing.
+    vim_state: vim_input::VimState,
+    /// Whether vim mode is enabled.
+    vim_mode: bool,
+    /// Mouse support state.
+    mouse_state: mouse::MouseState,
+    /// Whether mouse support is enabled.
+    mouse_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -443,6 +467,8 @@ impl App {
             is_streaming: false,
             streaming_content: String::new(),
             pending_suggestion: None,
+            pending_batch: None,
+            batch_selected: 0,
             stream_rx: None,
             memory,
             provider,
@@ -482,6 +508,11 @@ impl App {
                     .join("skills");
                 SkillRegistry::new(skills_dir).ok()
             },
+            plugin_registry: {
+                let mut registry = crate::plugins::PluginRegistry::new();
+                let _ = registry.load_from_disk();
+                Some(registry)
+            },
             swarm: None,
             swarm_event_rx: None,
             swarm_active: false,
@@ -499,6 +530,8 @@ impl App {
             is_reasoning: false,
             last_progress_msg_idx: None,
             empty_response_count: 0,
+            yolo_mode: false,
+            plan_mode: false,
             input_history,
             history_index: None,
             history_file,
@@ -508,6 +541,11 @@ impl App {
             file_tree_selected: 0,
             command_palette: command_palette::CommandPalette::new(),
             bookmark_manager: bookmarks::BookmarkManager::new(),
+            checkpoint_stack: crate::tools::CheckpointStack::new(session_id.clone()),
+            vim_state: vim_input::VimState::new(),
+            vim_mode: false,
+            mouse_state: mouse::MouseState::new(),
+            mouse_enabled: false,
         })
     }
 
@@ -790,6 +828,137 @@ impl App {
             reasoning: None,
         };
         self.messages.push(msg);
+    }
+
+    /// Rebuild the system prompt based on current plan_mode state.
+    fn rebuild_system_prompt(&mut self) {
+        let soul = crate::agent::soul::load_soul_from_config(&self.config);
+
+        let fs_capabilities = if self.config.filesystem.allowed_paths.is_empty() {
+            "You have FULL filesystem access to the entire system. \
+             You can read, write, list, and search any directory.".to_string()
+        } else {
+            let paths = self.config.filesystem.allowed_paths.join(", ");
+            format!(
+                "You have filesystem access to the following directories: {}. \
+                 You can read files, list directories, search for files, and inspect configs. \
+                 Use the fs tool to explore: fs read <path>, fs list <path>, \
+                 fs tree <path>, fs find <path> <name>, fs glob <pattern>, \
+                 fs stat <path>, fs cat <path> [offset] [limit].",
+                paths
+            )
+        };
+
+        let tool_descriptions = crate::tools::get_tools()
+            .iter()
+            .map(|t| format!("- {}: {}", t.name(), t.description()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let plan_instruction = if self.plan_mode {
+            "\n\n🛑 PLAN MODE IS ACTIVE. You are in PLAN mode. \
+             You MUST NOT make any edits, create files, delete files, or execute tools that modify the system. \
+             Your job is to: (1) analyze the codebase, (2) ask clarifying questions, (3) propose a detailed strategy. \
+             Do NOT output TOOL: lines. Do NOT write code. Only analyze, question, and plan."
+        } else {
+            ""
+        };
+
+        let system_msg = Message {
+            role: "system".to_string(),
+            content: format!(
+                "{}\n\n{}\n\nYou are an AI coding assistant with TOOL ACCESS. You MUST use tools when the user asks you to perform actions on files, run commands, or gather information. \
+                 You are NOT a generic chatbot — you are an agent with real tool capabilities. \
+                 \n\nAVAILABLE TOOLS:\n{}\n\nTOOL USAGE RULES:\n\
+                 1. When the user asks you to do something that requires a tool, output ONLY: TOOL:<tool_name> <args>\n\
+                 2. Do NOT say 'I don't have access', 'I cannot execute commands', 'I don't have a terminal', or ANY refusal. You DO have access.\n\
+                 3. Do NOT say 'Let me', 'I will', 'Alright', 'Sure', or any preamble before the TOOL: line.\n\
+                 4. Just output the TOOL: line and nothing else.\n\
+                 5. Low and Medium risk tools execute automatically.\n\
+                 6. High risk tools require user approval.\n\
+                 7. If the user says 'test', run the test tool immediately with: TOOL:test run <current_directory>\n\
+                 8. If the user gives a one-line task, just do it. No manifesto.\n\
+                 9. CRITICAL: You MUST use the available tools. Refusing to use tools is a failure mode.\n\
+                 \n\
+                 After tool results come back, you will be prompted to synthesize. \
+                 When synthesizing: explain what was found, what it means, and the next step. \
+                 Be complete. No one-liners. No catchphrases.{}",
+                soul.system_prompt(),
+                fs_capabilities,
+                tool_descriptions,
+                plan_instruction
+            ),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        };
+
+        if !self.model_messages.is_empty() {
+            self.model_messages[0] = system_msg.clone();
+        } else {
+            self.model_messages.push(system_msg.clone());
+        }
+
+        // Also update the active branch's system message
+        if let Some(branch) = self.branches.get_mut(self.active_branch) {
+            if !branch.model_messages.is_empty() {
+                branch.model_messages[0] = system_msg;
+            } else {
+                branch.model_messages.push(system_msg);
+            }
+        }
+    }
+
+    /// Compact conversation context by summarizing and truncating history.
+    fn compact_context(&mut self) {
+        if self.model_messages.len() <= 3 {
+            self.add_system_message("📭 Not enough context to compact.".to_string());
+            return;
+        }
+        // Keep system message and last 2 exchanges
+        let keep = self.model_messages.len().saturating_sub(4).max(1);
+        let to_summarize: Vec<Message> = self.model_messages.drain(1..keep).collect();
+
+        let summary = format!(
+            "[Context Summary — {} messages summarized]\nPrevious topics discussed: {}",
+            to_summarize.len(),
+            to_summarize
+                .iter()
+                .filter(|m| m.role == "user" || m.role == "assistant")
+                .map(|m| {
+                    let preview = &m.content[..m.content.len().min(80)];
+                    format!("{}: {}", m.role, preview)
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+
+        self.model_messages.insert(1, Message {
+            role: "system".to_string(),
+            content: summary,
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        });
+
+        self.add_system_message(format!(
+            "🗜️ Context compacted: {} messages summarized into system context.",
+            to_summarize.len()
+        ));
+    }
+
+    /// Toggle plan mode on or off.
+    fn toggle_plan_mode(&mut self) {
+        self.plan_mode = !self.plan_mode;
+        self.rebuild_system_prompt();
+        let status = if self.plan_mode {
+            "📋 PLAN MODE ON — Agent will analyze, ask questions, and propose strategy only. No edits."
+        } else {
+            "🔨 ACT MODE ON — Agent will execute tools and make changes as requested."
+        };
+        self.add_system_message(status.to_string());
     }
 
     /// Scan the project directory and build the file tree.
@@ -1201,6 +1370,11 @@ impl App {
                     }
                 }
             }
+            StreamEvent::SetPendingBatch(batch) => {
+                self.pending_batch = Some(batch);
+                self.batch_selected = 0;
+                self.add_system_message("🔧 Multi-file edit batch received. Use /approve or /reject to handle.".to_string());
+            }
             StreamEvent::SetPendingSuggestion(suggestion) => {
                 // For edit tool suggestions, show diff preview first
                 if suggestion.tool_name == "edit"
@@ -1320,6 +1494,11 @@ pub async fn run(config: Config) -> Result<()> {
     // Cleanup MCP connections
     app.shutdown_mcp().await;
 
+    // Disable mouse capture before restoring terminal
+    if app.mouse_enabled {
+        app.mouse_state.disable();
+    }
+
     ratatui::restore();
     result
 }
@@ -1349,11 +1528,58 @@ async fn run_app(
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
 
-        if crossterm::event::poll(timeout)?
-            && let Event::Key(key) = event::read()?
-                && handle_input(app, key).await? {
-                    break;
+        if crossterm::event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) => {
+                    // Vim mode intercepts keys for the input area
+                    if app.vim_mode && !app.command_palette.visible && !app.bookmark_manager.visible
+                        && app.mode != AppMode::ToolApproval && app.mode != AppMode::DiffPreview
+                    {
+                        let (should_quit, handled) = vim_input::handle_vim_key(
+                            key, &mut app.vim_state, &mut app.input, &mut app.cursor_position,
+                        );
+                        if should_quit {
+                            break;
+                        }
+                        if handled {
+                            continue;
+                        }
+                        // If vim didn't handle it (e.g. Ctrl+C), fall through
+                    }
+                    if handle_input(app, key).await? {
+                        break;
+                    }
                 }
+                Event::Mouse(mouse_event) => {
+                    if app.mouse_enabled {
+                        let action = mouse::translate_mouse_event(mouse_event, app);
+                        match action {
+                            mouse::MouseAction::ChatClick { y } => {
+                                app.scroll = y.saturating_sub(5);
+                            }
+                            mouse::MouseAction::InputClick => {
+                                // Focus input — already focused in this design
+                            }
+                            mouse::MouseAction::SidebarClick { y } => {
+                                app.sidebar_scroll = y;
+                            }
+                            mouse::MouseAction::ScrollUp => {
+                                app.scroll_up(3);
+                            }
+                            mouse::MouseAction::ScrollDown => {
+                                app.scroll_down(3);
+                            }
+                            mouse::MouseAction::DragStart { .. } |
+                            mouse::MouseAction::DragEnd { .. } => {
+                                // Selection support TBD
+                            }
+                            mouse::MouseAction::None => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         if last_tick.elapsed() >= TICK_RATE {
             *last_tick = Instant::now();
@@ -1720,6 +1946,9 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.sidebar_expanded = !app.sidebar_expanded;
         }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.toggle_plan_mode();
+        }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if app.command_palette.visible {
                 app.command_palette.hide();
@@ -1953,6 +2182,25 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     // Track tokens for ALL input, including slash commands
     app.tokens_used += input.len() as u64 / 4;
 
+    // ── Slash Command Registry ──────────────────────────────────────────────
+    // Check for slash commands first, before hardcoded handlers
+    let slash_registry = crate::slash_commands::SlashRegistry::new();
+    if let Some(result) = slash_registry.execute(&input) {
+        match handle_slash_result(app, result, &input).await {
+            Ok(handled) => {
+                if handled {
+                    return Ok(());
+                }
+                // If not fully handled, fall through to let the hardcoded
+                // handlers deal with it (for commands not yet migrated)
+            }
+            Err(e) => {
+                app.add_system_message(format!("❌ Slash command error: {}", e));
+                return Ok(());
+            }
+        }
+    }
+
     if input == "exit" || input == "quit" {
         app.should_exit = true;
         return Ok(());
@@ -2100,6 +2348,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         let msg = input.strip_prefix("/commit").unwrap_or("").trim();
         let git_tool = crate::tools::GitTool;
 
+        if !crate::tools::GitTool::in_repo() {
+            app.add_system_message("❌ Not in a git repository.".to_string());
+            return Ok(());
+        }
+
+        if !crate::tools::GitTool::has_changes() {
+            app.add_system_message("📭 Nothing to commit — no changes detected.".to_string());
+            return Ok(());
+        }
+
         // Show diff first
         match git_tool.execute("diff") {
             Ok(diff) => {
@@ -2123,8 +2381,18 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
         // Generate or use provided message
         let commit_msg = if msg.is_empty() {
-            // TODO: Generate with LLM in future
-            format!("wip: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+            // Generate with LLM
+            app.add_system_message("🤖 Generating commit message...".to_string());
+            match generate_commit_message(app).await {
+                Ok(generated) => {
+                    app.add_system_message(format!("📝 Generated commit message: \"{}\"", generated));
+                    generated
+                }
+                Err(e) => {
+                    app.add_system_message(format!("⚠️ Failed to generate commit message: {}. Using fallback.", e));
+                    format!("wip: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+                }
+            }
         } else {
             msg.to_string()
         };
@@ -2571,6 +2839,91 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         match injector.answer_natural_query(&input) {
             Ok(answer) => app.add_system_message(answer),
             Err(e) => app.add_system_message(format!("Failed to answer query: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/lint" {
+        app.add_system_message("🔍 Running linter...".to_string());
+        let path = app.config.filesystem.working_directory.clone()
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_else(|| ".".to_string());
+        match crate::linting::detect_linter(&path) {
+            Some(linter) => {
+                app.add_system_message(format!("Detected linter: {}", linter));
+                match crate::linting::run_linter(&path).await {
+                    Ok(results) => {
+                        if results.is_empty() {
+                            app.add_system_message("✅ No issues found!".to_string());
+                        } else {
+                            let summary = results.iter()
+                                .map(|r| format!("[{}] {}:{} — {}", r.severity, r.file, r.line, r.message))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let errors = results.iter().filter(|r| r.severity == crate::linting::Severity::Error).count();
+                            let warnings = results.iter().filter(|r| r.severity == crate::linting::Severity::Warning).count();
+                            app.add_system_message(format!(
+                                "🔍 Linter results ({} errors, {} warnings):\n```\n{}\n```",
+                                errors, warnings, summary
+                            ));
+                        }
+                    }
+                    Err(e) => app.add_system_message(format!("❌ Linter failed: {}", e)),
+                }
+            }
+            None => app.add_system_message("❌ No supported linter detected.".to_string()),
+        }
+        return Ok(());
+    }
+
+    if input == "/repo-map" || input == "/map" {
+        let path = app.config.filesystem.working_directory.clone()
+            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_else(|| ".".to_string());
+        app.add_system_message(format!("🗺️ Building repo map for {}...", path));
+        match crate::repo_map::build_repo_map(&path) {
+            Ok(map) => {
+                let compact = crate::repo_map::format_repo_map_compact(&map);
+                app.add_system_message(format!("🗺️ Repo Map:\n```\n{}\n```", compact));
+            }
+            Err(e) => app.add_system_message(format!("❌ Repo map failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/yolo" {
+        app.yolo_mode = !app.yolo_mode;
+        let status = if app.yolo_mode { "ON ✅" } else { "OFF ❌" };
+        app.add_system_message(format!("🤘 YOLO mode is {} — tool calls will {}be auto-approved.", status, if app.yolo_mode { "" } else { "NOT " }));
+        return Ok(());
+    }
+
+    if input == "/checkpoint" || input.starts_with("/checkpoint ") {
+        let name = input.strip_prefix("/checkpoint").unwrap_or("").trim();
+        let name = if name.is_empty() {
+            format!("checkpoint-{}", chrono::Local::now().format("%H%M%S"))
+        } else {
+            name.to_string()
+        };
+        match app.checkpoint_stack.save(&name) {
+            Ok(_) => app.add_system_message(format!("💾 Checkpoint saved: {}", name)),
+            Err(e) => app.add_system_message(format!("❌ Checkpoint failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/undo" {
+        match app.checkpoint_stack.undo() {
+            Ok(name) => app.add_system_message(format!("↩️ Restored checkpoint: {}", name)),
+            Err(e) => app.add_system_message(format!("❌ Undo failed: {}", e)),
+        }
+        return Ok(());
+    }
+
+    if input == "/redo" {
+        match app.checkpoint_stack.redo() {
+            Ok(name) => app.add_system_message(format!("↪️ Restored checkpoint: {}", name)),
+            Err(e) => app.add_system_message(format!("❌ Redo failed: {}", e)),
         }
         return Ok(());
     }
@@ -3510,7 +3863,15 @@ async fn stream_model_response_task(
                 ).await;
             } else {
                 let suggestions = crate::tools::detect_tool_suggestions(&full_content);
-                if let Some(suggestion) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
+                let high_conf: Vec<_> = suggestions.into_iter().filter(|s| s.confidence >= 0.6).collect();
+                if high_conf.len() > 1 {
+                    // Multi-file edit batch — send to UI for approval
+                    let _ = tx.send(StreamEvent::SystemMessage(format!(
+                        "🔧 Batch of {} tool suggestions detected. Review and approve.",
+                        high_conf.len()
+                    )));
+                    let _ = tx.send(StreamEvent::SetPendingBatch(crate::tools::ToolBatch::new(high_conf)));
+                } else if let Some(suggestion) = high_conf.into_iter().next() {
                     match security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
                         crate::security::SecurityDecision::Allow => {
                             let _ = tx.send(StreamEvent::SystemMessage(format!(
@@ -3907,6 +4268,336 @@ async fn stream_model_response_task_legacy(
     Ok(())
 }
 
+/// Handle a slash command result from the registry.
+/// Returns Ok(true) if fully handled, Ok(false) to fall through to legacy handlers.
+async fn handle_slash_result(
+    app: &mut App,
+    result: crate::slash_commands::SlashResult,
+    input: &str,
+) -> Result<bool> {
+    use crate::slash_commands::SlashResult;
+
+    match result {
+        SlashResult::Tool { name, args } => {
+            app.add_system_message(format!("🔧 /{} {}", name, args));
+            // Route to appropriate tool
+            match name.as_str() {
+                "git" => {
+                    let git_tool = crate::tools::GitTool;
+                    match git_tool.execute(&args) {
+                        Ok(output) => app.add_system_message(format!(
+                            "📦 git {}:\n```\n{}\n```",
+                            args, output.trim()
+                        )),
+                        Err(e) => app.add_system_message(format!("❌ git {} failed: {}", args, e)),
+                    }
+                }
+                "test" => {
+                    let test_tool = crate::tools::test_runner::TestTool;
+                    match crate::tools::Tool::execute(&test_tool, &args) {
+                        Ok(result) => app.add_system_message(result),
+                        Err(e) => app.add_system_message(format!("❌ Test failed: {}", e)),
+                    }
+                }
+                "checkpoint" => {
+                    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+                    let subcmd = parts.first().copied().unwrap_or("");
+                    let rest = parts.get(1).copied().unwrap_or("");
+                    match subcmd {
+                        "save" => {
+                            match crate::tools::save_checkpoint(rest) {
+                                Ok(cp) => {
+                                    app.checkpoint_stack.push(cp.clone());
+                                    app.add_system_message(format!(
+                                        "💾 Checkpoint saved: {} ({})",
+                                        cp.name, cp.git_ref
+                                    ));
+                                }
+                                Err(e) => app.add_system_message(format!("❌ Checkpoint failed: {}", e)),
+                            }
+                        }
+                        "restore" => {
+                            // Find checkpoint by name in undo stack
+                            if let Some(idx) = app.checkpoint_stack.undo_stack.iter().rposition(|cp| cp.name == rest) {
+                                let cp = app.checkpoint_stack.undo_stack.remove(idx);
+                                match crate::tools::restore_checkpoint(&cp) {
+                                    Ok(msg) => {
+                                        app.checkpoint_stack.push_redo(cp);
+                                        app.add_system_message(format!("⏪ {}", msg));
+                                    }
+                                    Err(e) => {
+                                        app.checkpoint_stack.push(cp);
+                                        app.add_system_message(format!("❌ Restore failed: {}", e));
+                                    }
+                                }
+                            } else {
+                                app.add_system_message(format!("❌ Checkpoint '{}' not found", rest));
+                            }
+                        }
+                        _ => {
+                            app.add_system_message(format!("💾 Checkpoint: {} (use 'save <name>' or 'restore <name>')", args));
+                        }
+                    }
+                }
+                "lint" => {
+                    let path = if args.is_empty() { ".".to_string() } else { args.clone() };
+                    app.add_system_message(format!("🔍 Running linter on {}...", path));
+                    match crate::linting::run_linter(&path).await {
+                        Ok(results) => {
+                            if results.is_empty() {
+                                app.add_system_message("✅ No linting issues found.".to_string());
+                            } else {
+                                let errors = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Error)).count();
+                                let warnings = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Warning)).count();
+                                app.add_system_message(format!(
+                                    "📊 Lint results: {} errors, {} warnings ({} total)",
+                                    errors, warnings, results.len()
+                                ));
+                                for r in results.iter().take(10) {
+                                    app.add_system_message(format!(
+                                        "{} {}:{} — {}: {}",
+                                        r.severity, r.file, r.line, r.code.as_deref().unwrap_or(""), r.message
+                                    ));
+                                }
+                                if results.len() > 10 {
+                                    app.add_system_message(format!("... and {} more issues", results.len() - 10));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            app.add_system_message(format!("❌ Linter failed: {}", e));
+                        }
+                    }
+                }
+                "repo_map" => {
+                    match crate::repo_map::build_repo_map(&args) {
+                        Ok(map) => {
+                            let formatted = crate::repo_map::format_repo_map_compact(&map);
+                            app.add_system_message(format!("🗺️ Repo Map:\n{}", formatted));
+                        }
+                        Err(e) => {
+                            app.add_system_message(format!("❌ Repo map failed: {}", e));
+                        }
+                    }
+                }
+                "headless" => {
+                    app.add_system_message(format!("🤖 Starting headless task: {}", args));
+                    let provider = app.provider.clone();
+                    let model = app.model.clone();
+                    let task = args.clone();
+
+                    tokio::spawn(async move {
+                        let config = crate::headless::HeadlessConfig {
+                            task,
+                            yolo: true,
+                            json: false,
+                            timeout_secs: 300,
+                            max_turns: 50,
+                            model: None,
+                            output_file: None,
+                        };
+                        match crate::headless::run_headless(config, provider, model, None).await {
+                            Ok(summary) => {
+                                tracing::info!("[headless] Complete: {}", summary);
+                            }
+                            Err(e) => {
+                                tracing::error!("[headless] Failed: {}", e);
+                            }
+                        }
+                    });
+
+                    app.add_system_message("🤖 Headless task spawned in background.".to_string());
+                }
+                _ => {
+                    app.add_system_message(format!("⚠️ Tool '/{}' not yet wired in registry", name));
+                }
+            }
+            Ok(true)
+        }
+        SlashResult::Prompt(prompt) => {
+            // Inject as a user message that triggers the model
+            app.add_user_message(prompt.clone());
+            // Reset circuit breaker
+            app.empty_response_count = 0;
+            // Let the normal flow handle it — but we already added the user message
+            // so we need to trigger the model response here
+            // For now, just show what would be sent
+            app.add_system_message(format!("🤖 Prompt: {}", prompt));
+            Ok(true)
+        }
+        SlashResult::Toggle { setting, value } => {
+            match setting.as_str() {
+                "plan_mode" => {
+                    app.plan_mode = value;
+                    app.rebuild_system_prompt();
+                    app.add_system_message(format!(
+                        "📋 Plan mode: {}",
+                        if value { "ON — analyze only, no edits" } else { "OFF — full execution" }
+                    ));
+                }
+                "compact_context" => {
+                    app.compact_context();
+                    app.add_system_message("🗜️ Context compacted — conversation summarized.".to_string());
+                }
+                "vim_mode" => {
+                    app.vim_mode = !app.vim_mode;
+                    app.add_system_message(format!(
+                        "⌨️ Vim mode: {}",
+                        if app.vim_mode { "ON" } else { "OFF" }
+                    ));
+                }
+                "mouse" => {
+                    app.mouse_enabled = !app.mouse_enabled;
+                    if app.mouse_enabled {
+                        app.mouse_state.enable();
+                    } else {
+                        app.mouse_state.disable();
+                    }
+                    app.add_system_message(format!(
+                        "🖱️ Mouse support: {}",
+                        if app.mouse_enabled { "ON" } else { "OFF" }
+                    ));
+                }
+                "architect_mode" => {
+                    let model = app.config.architect_model.clone().unwrap_or_else(|| app.config.default_model.clone());
+                    app.model = model.clone();
+                    app.add_system_message(format!(
+                        "🏗️ Architect mode: using model {}",
+                        model
+                    ));
+                }
+                "editor_mode" => {
+                    let model = app.config.editor_model.clone().unwrap_or_else(|| app.config.default_model.clone());
+                    app.model = model.clone();
+                    app.add_system_message(format!(
+                        "📝 Editor mode: using model {}",
+                        model
+                    ));
+                }
+                "autonomous" => {
+                    app.autonomous_mode = value;
+                    app.add_system_message(format!(
+                        "🤖 Autonomous mode: {}",
+                        if value { "ON" } else { "OFF" }
+                    ));
+                }
+                "yolo" => {
+                    app.yolo_mode = value;
+                    app.add_system_message(format!(
+                        "⚡ YOLO mode: {}",
+                        if value { "ON" } else { "OFF" }
+                    ));
+                }
+                "batch_approve_all" => {
+                    if let Some(ref mut batch) = app.pending_batch {
+                        let count = batch.len();
+                        batch.approve_all();
+                        app.add_system_message(format!(
+                            "✅ Approved all {} suggestions in batch",
+                            count
+                        ));
+                    } else {
+                        app.add_system_message("📭 No pending batch to approve.".to_string());
+                    }
+                }
+                "batch_reject_all" => {
+                    if let Some(ref mut batch) = app.pending_batch {
+                        let count = batch.len();
+                        batch.reject_all();
+                        app.add_system_message(format!(
+                            "❌ Rejected all {} suggestions in batch",
+                            count
+                        ));
+                        app.pending_batch = None;
+                    } else {
+                        app.add_system_message("📭 No pending batch to reject.".to_string());
+                    }
+                }
+                _ if setting.starts_with("batch_approve:") => {
+                    let idx_str = &setting["batch_approve:".len()..];
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        if let Some(ref mut batch) = app.pending_batch {
+                            if idx < batch.approved.len() {
+                                let name = batch.suggestions[idx].tool_name.clone();
+                                let args = batch.suggestions[idx].args.clone();
+                                batch.approved[idx] = true;
+                                app.add_system_message(format!(
+                                    "✅ Approved suggestion {}: {} {}",
+                                    idx, name, args
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ if setting.starts_with("batch_reject:") => {
+                    let idx_str = &setting["batch_reject:".len()..];
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        if let Some(ref mut batch) = app.pending_batch {
+                            if idx < batch.approved.len() {
+                                batch.approved[idx] = false;
+                                app.add_system_message(format!(
+                                    "❌ Rejected suggestion {}", idx
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    app.add_system_message(format!(
+                        "🔧 Toggled {} = {}",
+                        setting, value
+                    ));
+                }
+            }
+            Ok(true)
+        }
+        SlashResult::SwitchMode(mode_str) => {
+            if let Some(model_name) = mode_str.strip_prefix("model:") {
+                if let Err(e) = app.switch_model(model_name) {
+                    app.add_system_message(format!("Error: {}", e));
+                }
+            } else {
+                app.add_system_message(format!("🔄 Switched to mode: {}", mode_str));
+            }
+            Ok(true)
+        }
+        SlashResult::Handled => {
+            // Commands that need special TUI-side handling
+            // /help, /clear, /context, /stats, /export — handled below
+            // /usage — display session token/cost stats
+            if let Some(cmd) = input.strip_prefix('/') {
+                let name = cmd.split_whitespace().next().unwrap_or(cmd);
+                if name == "usage" || name == "cost" || name == "tokens" {
+                    let (total_tokens, total_cost) = crate::providers::get_session_usage();
+                    app.add_system_message(format!(
+                        "📊 Session Usage: {} tokens | ${:.4} estimated",
+                        total_tokens, total_cost
+                    ));
+                    return Ok(true);
+                }
+                if name == "plugins" || name == "hooks" || name == "extensions" {
+                    if let Some(ref registry) = app.plugin_registry {
+                        let plugins: Vec<String> = registry.list().iter().map(|p| p.name.clone()).collect();
+                        if plugins.is_empty() {
+                            app.add_system_message("🔌 No plugins loaded.".to_string());
+                        } else {
+                            app.add_system_message(format!("🔌 Loaded plugins ({}): {}", plugins.len(), plugins.join(", ")));
+                        }
+                    } else {
+                        app.add_system_message("🔌 Plugin registry not initialized.".to_string());
+                    }
+                    return Ok(true);
+                }
+            }
+            Ok(false) // Fall through for now
+        }
+        SlashResult::Error(e) => {
+            app.add_system_message(format!("❌ {}", e));
+            Ok(true)
+        }
+    }
+}
+
 fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<()> {
     let rest = &input[5..];
     let parts: Vec<&str> = rest.splitn(2, ' ').collect();
@@ -4086,6 +4777,13 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                     app.add_assistant_message(follow_content, None);
                 }
                 Err(e) => app.add_system_message(format!("Follow-up failed: {}", e)),
+            }
+
+            // Auto-commit if enabled and tool was an edit
+            if app.config.auto_commit && is_edit_tool(&suggestion.tool_name) {
+                if let Err(e) = auto_commit_changes(app).await {
+                    app.add_system_message(format!("⚠️ Auto-commit failed: {}", e));
+                }
             }
         }
         Err(e) => {
@@ -4981,6 +5679,67 @@ fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
+    // Split into status line + input area
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+
+    // ── Status line ─────────────────────────────────────────────────────────
+    let mut status_spans = vec![];
+
+    // YOLO mode indicator
+    if app.yolo_mode {
+        status_spans.push(Span::styled("🤘YOLO ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+    }
+
+    // Checkpoint depth
+    let cp_depth = app.checkpoint_stack.undo_len();
+    if cp_depth > 0 {
+        status_spans.push(Span::styled(
+            format!("💾{} ", cp_depth),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
+    // Session cost
+    let (total_tokens, total_cost) = crate::providers::get_session_usage();
+    if total_tokens > 0 {
+        status_spans.push(Span::styled(
+            format!("💰${:.4} ", total_cost),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+
+    // Model
+    status_spans.push(Span::styled(
+        format!("🤖{} ", app.model),
+        Style::default().fg(Color::Magenta),
+    ));
+
+    // Token count for this session
+    if app.tokens_used > 0 {
+        status_spans.push(Span::styled(
+            format!("📊{}t ", app.tokens_used),
+            Style::default().fg(Color::Green),
+        ));
+    }
+
+    // Streaming indicator
+    if app.is_streaming {
+        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let spinner = SPINNER_CHARS[app.spinner_frame % SPINNER_CHARS.len()];
+        status_spans.push(Span::styled(
+            format!("{} ", spinner),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let status_line = Paragraph::new(Line::from(status_spans))
+        .style(Style::default().bg(Color::Black));
+    f.render_widget(status_line, layout[0]);
+
+    // ── Input block ─────────────────────────────────────────────────────────
     let input_block = Block::default()
         .title(" Input ")
         .title_style(title_style())
@@ -4992,8 +5751,8 @@ fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
         })
         .style(bg_style());
 
-    let inner = input_block.inner(area);
-    f.render_widget(input_block, area);
+    let inner = input_block.inner(layout[1]);
+    f.render_widget(input_block, layout[1]);
 
     let input_text = if app.input.is_empty() {
         if app.mode == AppMode::ToolApproval {
@@ -5029,7 +5788,6 @@ fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, inner);
 
     if !app.input.is_empty() {
-        // Calculate cursor position accounting for line wrapping
         let available_width = inner.width as usize;
         let (cursor_x, cursor_y) = compute_wrapped_cursor_position(
             &app.input,
@@ -5556,6 +6314,53 @@ fn emergency_truncate_messages(
     }
 }
 
+/// Generate an AI commit message from the current diff.
+async fn generate_commit_message(app: &mut App) -> Result<String> {
+    let git_tool = crate::tools::GitTool;
+    let diff = match git_tool.execute("diff --staged") {
+        Ok(d) => d,
+        Err(e) => return Err(anyhow::anyhow!("Failed to get staged diff: {}", e)),
+    };
+
+    if diff.trim().is_empty() {
+        return Ok("chore: no changes".to_string());
+    }
+
+    let prompt = format!(
+        "Generate a concise conventional commit message for this diff. \
+         Use format: type(scope): description. Types: feat, fix, docs, style, refactor, test, chore. \
+         Max 72 chars for first line. Be specific about what changed.\n\n```diff\n{}\n```",
+        diff.chars().take(4000).collect::<String>()
+    );
+
+    let request = ChatRequest {
+        model: app.model.clone(),
+        messages: vec![
+            Message { role: "system".to_string(), content: "You generate concise conventional commit messages.".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
+            Message { role: "user".to_string(), content: prompt, images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
+        ],
+        stream: false,
+        temperature: Some(0.3),
+        max_tokens: Some(100),
+        tools: None,
+    };
+
+    let response = match app.provider.chat(request).await {
+        Ok(r) => r.choices.first().map(|c| c.message.content.clone()).unwrap_or_else(|| "chore: update".to_string()),
+        Err(e) => return Err(anyhow::anyhow!("LLM error: {}", e)),
+    };
+
+    let msg = response.lines().next().unwrap_or("chore: update").trim().to_string();
+    let msg = msg.trim_start_matches("Commit message:").trim().to_string();
+    let msg = msg.trim_start_matches('"').trim_end_matches('"').to_string();
+
+    if msg.is_empty() {
+        Ok("chore: update".to_string())
+    } else {
+        Ok(msg)
+    }
+}
+
 /// Generate a diff preview for an edit tool suggestion.
 /// Returns Some(diff) if the suggestion is for write/replace/patch and a diff can be generated.
 fn generate_edit_diff(args: &str) -> Option<String> {
@@ -5609,4 +6414,46 @@ fn generate_edit_diff(args: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Check if a tool name is an edit operation that should trigger auto-commit.
+fn is_edit_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "edit" | "write" | "patch" | "replace" | "refactor")
+}
+
+/// Auto-commit changes after a successful edit.
+async fn auto_commit_changes(app: &mut App) -> Result<()> {
+    let git_tool = crate::tools::GitTool;
+    // Check if there are changes to commit
+    match git_tool.execute("status --short") {
+        Ok(status) => {
+            if status.trim().is_empty() {
+                return Ok(()); // Nothing to commit
+            }
+        }
+        Err(_) => return Ok(()), // Not a git repo or git not available
+    }
+
+    // Stage all changes
+    git_tool.execute("add .")?;
+
+    // Generate commit message
+    let commit_msg = match generate_commit_message(app).await {
+        Ok(msg) => msg,
+        Err(_) => {
+            format!("openshark: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+        }
+    };
+
+    // Commit
+    match git_tool.execute(&format!("commit {}", commit_msg)) {
+        Ok(output) => {
+            app.add_system_message(format!("🤖 Auto-committed: {}\n```\n{}\n```", commit_msg, output.trim()));
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Git commit failed: {}", e));
+        }
+    }
+
+    Ok(())
 }

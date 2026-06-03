@@ -1,6 +1,8 @@
 //! Unified Delegation Registry
-//! 
+//!
 //! Routes tasks to available external agents. All optional.
+
+#![allow(dead_code)]
 
 use super::{claw, claude, opencode};
 

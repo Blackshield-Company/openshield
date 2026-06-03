@@ -1,7 +1,9 @@
 //! OpenShark Integration Registry
-//! 
+//!
 //! Optional bridges to other AI harnesses and tools.
 //! All integrations are disabled by default and must be enabled via config.
+
+#![allow(dead_code)]
 
 pub mod hermes;
 pub mod claw;
