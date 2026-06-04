@@ -329,7 +329,7 @@ fn compute_prompt_effectiveness(memory: &MemoryStore) -> Result<Vec<PromptEffect
         .into_iter()
         .map(|(prompt, total, success, rate)| {
             let preview = if prompt.len() > 80 {
-                format!("{}...", &prompt[..80])
+                format!("{}...", crate::utils::truncate_str(&prompt, 80))
             } else {
                 prompt
             };
@@ -367,7 +367,7 @@ fn compute_common_errors(memory: &MemoryStore) -> Result<Vec<CommonError>> {
         .into_iter()
         .map(|(msg, count)| {
             let preview = if msg.len() > 100 {
-                format!("{}...", &msg[..100])
+                format!("{}...", crate::utils::truncate_str(&msg, 100))
             } else {
                 msg
             };

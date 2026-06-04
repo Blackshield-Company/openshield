@@ -227,7 +227,10 @@ mod tests {
     use super::*;
 
     fn temp_db() -> String {
-        format!("/tmp/openshark_code_index_test_{}.db", std::process::id())
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("/tmp/openshark_code_index_test_{}_{}.db", std::process::id(), id)
     }
 
     #[test]

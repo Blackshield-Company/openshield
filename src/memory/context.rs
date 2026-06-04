@@ -239,7 +239,7 @@ impl<'a> ContextInjector<'a> {
 
         for (i, (msg, _score)) in results.iter().take(5).enumerate() {
             let preview = if msg.content.len() > 200 {
-                format!("{}...", &msg.content[..200])
+                format!("{}...", crate::utils::truncate_str(&msg.content, 200))
             } else {
                 msg.content.clone()
             };

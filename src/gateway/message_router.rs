@@ -654,7 +654,7 @@ Use `/help` for the full slash command list.
                         match tool.execute(args) {
                             Ok(result) => {
                                 let display = if result.len() > 1800 {
-                                    format!("{}\n\n... (truncated)", &result[..1800])
+                                    format!("{}\n\n... (truncated)", crate::utils::truncate_str(&result, 1800))
                                 } else {
                                     result
                                 };
@@ -689,7 +689,7 @@ Use `/help` for the full slash command list.
                                     )];
                                     for msg in messages {
                                         let preview = if msg.content.len() > 200 {
-                                            format!("{}...", &msg.content[..200])
+                                            format!("{}...", crate::utils::truncate_str(&msg.content, 200))
                                         } else {
                                             msg.content.clone()
                                         };

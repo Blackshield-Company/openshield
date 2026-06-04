@@ -1096,7 +1096,7 @@ impl App {
         match std::fs::read_to_string(&file_path) {
             Ok(content) => {
                 let preview = if content.len() > 800 {
-                    format!("{}\n... ({} more chars)", &content[..800], content.len() - 800)
+                    format!("{}\n... ({} more chars)", crate::utils::truncate_str(&content, 800), content.len() - 800)
                 } else {
                     content
                 };
@@ -2348,7 +2348,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     ];
                     for (i, msg) in messages.iter().take(10).enumerate() {
                         let preview = if msg.content.len() > 120 {
-                            format!("{}...", &msg.content[..120])
+                            format!("{}...", crate::utils::truncate_str(&msg.content, 120))
                         } else {
                             msg.content.clone()
                         };
@@ -4639,21 +4639,15 @@ async fn handle_slash_result(
                     let provider = app.provider.clone();
                     let model = app.model.clone();
                     let project_path = app.project_path.clone();
-                    let target = target.to_string();
 
-                    tokio::spawn(async move {
-                        match crate::guardian::review(&target, &project_path, provider, model
-                        ).await {
-                            Ok(report) => {
-                                tracing::info!("[guardian] Review complete: {}", report.summary);
-                            }
-                            Err(e) => {
-                                tracing::error!("[guardian] Review failed: {}", e);
-                            }
+                    match crate::guardian::review(&target, &project_path, provider, model).await {
+                        Ok(report) => {
+                            app.add_system_message(report.format());
                         }
-                    });
-
-                    app.add_system_message("🛡️  Guardian review started — results will appear in logs.".to_string());
+                        Err(e) => {
+                            app.add_system_message(format!("❌ Guardian review failed: {}", e));
+                        }
+                    }
                 }
                 "headless" => {
                     let provider = app.provider.clone();

@@ -94,7 +94,7 @@ fn parse_duckduckgo_results(query: &str, body: &str) -> Result<String> {
         .map(|cap| {
             let s = strip_html_tags(cap.get(1).map(|m| m.as_str()).unwrap_or(""));
             if s.len() > 300 {
-                s[..300].to_string()
+                crate::utils::truncate_str(&s, 300)
             } else {
                 s
             }
@@ -148,7 +148,7 @@ fn scrape_url(url: &str) -> Result<String> {
     let truncated = if text.len() > 8000 {
         format!(
             "{}...\n[truncated {} chars]",
-            &text[..8000],
+            crate::utils::truncate_str(&text, 8000),
             text.len() - 8000
         )
     } else {
@@ -286,7 +286,7 @@ fn browser_navigate(url: &str) -> Result<String> {
     let truncated = if text.len() > 6000 {
         format!(
             "{}...\n[truncated {} chars]",
-            &text[..6000],
+            crate::utils::truncate_str(&text, 6000),
             text.len() - 6000
         )
     } else {
