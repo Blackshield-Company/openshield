@@ -78,7 +78,8 @@ setup_config() {
     local config_dir="$HOME/.config/openshark"
     mkdir -p "$config_dir"
     echo "✅ Config directory: $config_dir"
-    echo "   Set KIMI_API_KEY environment variable before running"
+    echo "   Set your provider API key environment variable before running"
+    echo "   Examples: OPENAI_API_KEY, ANTHROPIC_API_KEY, KIMI_API_KEY, XAI_API_KEY"
 }
 
 # Main
@@ -104,7 +105,10 @@ main() {
     echo "  openshark setup     Interactive setup"
     echo ""
     echo "Environment variables:"
+    echo "  OPENAI_API_KEY      Your OpenAI API key"
+    echo "  ANTHROPIC_API_KEY   Your Anthropic API key"
     echo "  KIMI_API_KEY        Your Kimi API key"
+    echo "  XAI_API_KEY         Your xAI API key"
     echo "  SOUL_NAME           Set to 'blank' for blank slate, or 'synthshark' (default)"
     echo ""
     echo "Run 'openshark' to start!"

@@ -11,9 +11,9 @@
 
 *Retro DOS title screen aesthetic — pixel art, neon, and shark fins.*
 
-[![Version](https://img.shields.io/badge/version-1.0.0-neonpink)](https://github.com/synthalorian/openshark)
+[![Version](https://img.shields.io/badge/version-1.1.0-neonpink)](https://github.com/synthalorian/openshark)
 [![License](https://img.shields.io/badge/license-MIT-neonblue)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange)](https://rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.91%2B-orange)](https://rust-lang.org)
 
 ---
 
@@ -274,7 +274,7 @@ stdio + SSE transport, JSON-RPC 2.0, tool discovery/execution. No external MCP b
 Run `openshark setup` to generate your config interactively, or create `~/.config/openshark/config.toml` manually:
 
 ```toml
-version = "1.0.0"
+version = "1.1.0"
 default_model = "gpt-4o"
 auto_route = true
 cost_limit_usd = 10.0
