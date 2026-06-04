@@ -612,7 +612,7 @@ pub fn redact_secrets(text: &str) -> String {
         (r"ghp_[a-zA-Z0-9]{36}", "ghp_***"),
         (r"gho_[a-zA-Z0-9]{36}", "gho_***"),
         (r"AKIA[0-9A-Z]{16}", "AKIA***"),
-        (r"[a-zA-Z0-9+/]{40}", "***"), // Generic long base64-like token
+        (r"\b[a-zA-Z0-9+/=]{80,}\b", "***"), // Generic long base64-like token
     ];
 
     for (pattern, replacement) in &patterns {

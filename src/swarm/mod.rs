@@ -83,6 +83,7 @@ pub enum SwarmEvent {
         from_agent: AgentId,
         to_agent: AgentId,
         content: String,
+        entry_id: String,
     },
     /// A review was completed.
     ReviewCompleted {
@@ -90,6 +91,7 @@ pub enum SwarmEvent {
         target_agent: AgentId,
         approval: bool,
         feedback: String,
+        entry_id: String,
     },
     /// Consensus was reached on an entry.
     ConsensusReached {
@@ -420,6 +422,7 @@ impl SwarmEngine {
                                         .unwrap_or_default()
                                         .as_secs(),
                                 };
+                                let entry_id = entry.id.clone();
 
                                 if let Ok(mut cons) = consensus.try_lock() {
                                     cons.add_entry(entry);
@@ -442,6 +445,7 @@ impl SwarmEngine {
                                         from_agent: agent_id.clone(),
                                         to_agent: reviewer_id,
                                         content: result.clone(),
+                                        entry_id,
                                     });
                                 }
 
@@ -462,6 +466,7 @@ impl SwarmEngine {
                                 from_agent,
                                 to_agent,
                                 content: _,
+                                entry_id: _,
                             } => {
                                 debug!("Review requested from {} to {}", from_agent, to_agent);
                                 if let Some(agent) = agents.write().await.get_mut(&to_agent) {
@@ -482,6 +487,7 @@ impl SwarmEngine {
                                 target_agent,
                                 approval,
                                 feedback,
+                                entry_id,
                             } => {
                                 debug!(
                                     "Review completed by {} for {}: approved={}",
@@ -500,9 +506,9 @@ impl SwarmEngine {
                                 // Update consensus entry
                                 if let Ok(mut cons) = consensus.try_lock() {
                                     if approval {
-                                        cons.approve_entry(&target_agent, &reviewer);
+                                        cons.approve_entry(&entry_id, &reviewer);
                                     } else {
-                                        cons.reject_entry(&target_agent, &reviewer, &feedback);
+                                        cons.reject_entry(&entry_id, &reviewer, &feedback);
                                     }
                                 }
                             }
