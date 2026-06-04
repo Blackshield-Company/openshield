@@ -7,6 +7,8 @@
 //! Insert mode: standard typing, Esc to normal
 //! Visual mode: h/j/k/l selection, y yank, d delete, x delete, Esc cancel
 
+#![allow(dead_code)]
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -63,7 +63,7 @@ impl TestTool {
 }
 
 #[derive(Debug, Clone)]
-enum TestFramework {
+pub(crate) enum TestFramework {
     Cargo,
     Jest,
     Pytest,

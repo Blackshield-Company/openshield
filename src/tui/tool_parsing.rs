@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub(crate) fn extract_thinking_from_chunk(chunk: &str) -> (Option<String>, String) {
     let mut reasoning = String::new();
     let mut content = String::new();
