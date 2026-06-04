@@ -5,9 +5,8 @@
 //!
 //! Persisted per-session to `~/.config/openshark/context/<session_id>.json`.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// A pinned file entry with optional metadata.
