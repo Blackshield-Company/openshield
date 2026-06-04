@@ -248,6 +248,12 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = Config::load_or_default()?;
 
+    // Load user-defined custom tools from config
+    let custom_tools = crate::tools::custom::load_custom_tools();
+    if !custom_tools.is_empty() {
+        info!("Loaded {} custom tool(s)", custom_tools.len());
+    }
+
     match cli.command {
         Some(Commands::Tui) | None => {
             info!("Starting OpenShark TUI");
