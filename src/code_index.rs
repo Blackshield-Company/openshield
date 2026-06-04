@@ -5,7 +5,6 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -112,7 +111,8 @@ impl CodeIndex {
 
     /// Search symbols by name (partial match).
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<IndexedSymbol>> {
-        let pattern = format!("%{}%", query);
+        let escaped = query.replace('%', "\\%").replace('_', "\\_");
+        let pattern = format!("%{}%", escaped);
         let conn = self.db.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT name, kind, file, line, context FROM symbols

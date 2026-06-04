@@ -16,7 +16,7 @@ pub use checkpoint::{CheckpointStack, save_checkpoint, restore_checkpoint};
 pub use detection::{ToolSuggestion, ToolBatch, detect_tool_suggestions};
 pub use git::GitTool;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
