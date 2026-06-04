@@ -267,6 +267,7 @@ pub struct SecurityEngine {
     #[allow(dead_code)]
     identity_manager: IdentityManager,
     /// Permission profile registry for switching presets.
+    #[allow(dead_code)]
     pub profile_registry: Arc<Mutex<ProfileRegistry>>,
 }
 

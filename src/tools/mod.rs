@@ -39,6 +39,7 @@ pub trait Tool: Send + Sync {
 #[async_trait::async_trait]
 pub trait AsyncTool: Send + Sync {
     fn name(&self) -> &str;
+    #[allow(dead_code)]
     fn description(&self) -> &str;
     async fn execute_async(&self, args: &str) -> anyhow::Result<String>;
 }

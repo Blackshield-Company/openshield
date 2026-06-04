@@ -1,27 +1,17 @@
-#![allow(dead_code)]
-
-use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::Backend,
-    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{
-        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
-    },
-    Frame, Terminal,
+    Terminal,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::agent::{Agent, AgentConfig};
+use anyhow::Result;
+use crate::agent::AgentConfig;
 use crate::config::Config;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, ToolCall};
 use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetrics};
-use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, Tool, ToolSuggestion};
+use crate::tools::{get_tools, AsyncToolExecutor, Tool, ToolSuggestion};
 use chrono::Utc;
 use uuid::Uuid;
 use crate::skills::SkillRegistry;
@@ -45,9 +35,9 @@ mod thinking;
 mod chat;
 
 pub(crate) use stream::{StreamEvent, ToolResultEntry, SecondaryResponse, AgentStreamState, apply_stream_event};
-pub(crate) use render::{draw_ui, draw_sidebar, draw_chat_area, draw_input_bar, input_bar_height, compute_wrapped_cursor_position, draw_tool_approval_popup, centered_rect, draw_diff_preview_popup, draw_comparison_overlay, draw_chat_header, draw_splash_screen};
-pub(crate) use tool_parsing::{extract_thinking_from_chunk, parse_embedded_tools, parse_json_tool_format, find_balanced_json, extract_args_from_json, extract_generic_args, strip_tool_lines, extract_thinking, strip_think_tags, generate_edit_diff, is_edit_tool};
-pub(crate) use thinking::{split_thinking_content, emergency_truncate_messages};
+pub(crate) use render::draw_ui;
+pub(crate) use tool_parsing::{parse_embedded_tools, extract_args_from_json, strip_tool_lines, strip_think_tags, generate_edit_diff, is_edit_tool};
+pub(crate) use thinking::{emergency_truncate_messages};
 pub(crate) use chat::{handle_user_tool_invocation, detect_high_confidence_suggestion};
 
 
@@ -73,7 +63,7 @@ struct ChatMessage {
 }
 
 /// Application state for the TUI.
-struct App {
+pub(crate) struct App {
     /// User input buffer.
     input: String,
     /// Cursor position in input.
@@ -250,8 +240,10 @@ enum AppMode {
 struct SessionPerformance {
     first_token_ms: Vec<u64>,
     total_latency_ms: Vec<u64>,
+    #[allow(dead_code)]
     tool_exec_ms: Vec<u64>,
     requests: usize,
+    #[allow(dead_code)]
     tools: usize,
 }
 
@@ -262,6 +254,7 @@ impl SessionPerformance {
         self.requests += 1;
     }
 
+    #[allow(dead_code)]
     fn record_tool_exec(&mut self, duration_ms: u64) {
         self.tool_exec_ms.push(duration_ms);
         self.tools += 1;
@@ -981,6 +974,7 @@ impl App {
     }
 
     /// Scan the project directory and build the file tree.
+    #[allow(dead_code)]
     fn refresh_file_tree(&mut self) {
         let project_path = self.config.filesystem.working_directory.clone()
             .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
@@ -4409,6 +4403,7 @@ async fn handle_slash_result(
 }
 
 
+#[allow(dead_code)]
 async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> Result<()> {
     // SECURITY GATE: Check before executing suggested tool
     match app.security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
@@ -4778,6 +4773,7 @@ async fn generate_commit_message(app: &mut App) -> Result<String> {
 /// Returns Some(diff) if the suggestion is for write/replace/patch and a diff can be generated.
 
 /// Auto-commit changes after a successful edit.
+#[allow(dead_code)]
 async fn auto_commit_changes(app: &mut App) -> Result<()> {
     let git_tool = crate::tools::GitTool;
     // Check if there are changes to commit
@@ -4984,9 +4980,6 @@ fn format_progress(progress: &crate::agent::coding::AgentProgress) -> String {
         }
         AgentProgress::LintCompleted { issues, output } => {
             format!("🧹 Lint: {} issues\n{}", issues, output)
-        }
-        AgentProgress::Committing { message } => {
-            format!("💾 Committing: {}", message)
         }
         AgentProgress::Committed { output } => {
             format!("💾 Committed\n{}", output)

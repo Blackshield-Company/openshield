@@ -6,6 +6,8 @@
 //! - Scroll wheel for chat history
 //! - Click messages to expand/collapse
 
+#![allow(dead_code)]
+
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 

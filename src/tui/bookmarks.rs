@@ -3,6 +3,8 @@
 //! Save and restore named checkpoints of the current session state.
 //! Triggered via `/bookmark` command or Ctrl+B shortcut.
 
+#![allow(dead_code)]
+
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},

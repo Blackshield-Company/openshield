@@ -39,7 +39,6 @@ pub enum AgentProgress {
     TestsCompleted { passed: usize, failed: usize, output: String },
     LintRunning { tool: String },
     LintCompleted { issues: usize, output: String },
-    Committing { message: String },
     Committed { output: String },
     Error(String),
     Done { success: bool, message: String },

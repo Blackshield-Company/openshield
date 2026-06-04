@@ -3,6 +3,8 @@
 //! Triggered by `/` in the input box or `Ctrl+P` anywhere.
 //! Shows all available commands with descriptions, filtered by fuzzy match.
 
+#![allow(dead_code)]
+
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},

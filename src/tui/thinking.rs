@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Split content into thinking/reasoning and regular content.
 /// Handles <think>...</think> blocks from Kimi models.
 pub(crate) fn split_thinking_content(content: &str) -> (String, String) {
