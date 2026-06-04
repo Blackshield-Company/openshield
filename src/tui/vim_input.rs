@@ -170,13 +170,12 @@ fn handle_normal_mode(
     cursor: &mut usize,
 ) -> (bool, bool) {
     // Number keys build count prefix
-    if let KeyCode::Char(c) = key.code {
-        if c.is_ascii_digit() && c != '0' {
+    if let KeyCode::Char(c) = key.code
+        && c.is_ascii_digit() && c != '0' {
             let digit = c.to_digit(10).unwrap() as usize;
             vim.count = Some(vim.count.unwrap_or(0) * 10 + digit);
             return (true, false);
         }
-    }
 
     let count = vim.count.take().unwrap_or(1);
 
@@ -460,7 +459,7 @@ fn handle_command_mode(
             let cmd = vim.command_buffer.clone();
             vim.command_buffer.clear();
             vim.mode = VimMode::Normal;
-            return execute_vim_command(&cmd, input, cursor);
+            execute_vim_command(&cmd, input, cursor)
         }
         KeyCode::Char(c) => {
             vim.command_buffer.push(c);
@@ -580,7 +579,7 @@ fn delete_to_end(input: &mut String, cursor: &mut usize, register: &mut String) 
     }
 }
 
-fn yank_line(input: &mut String, cursor: &mut usize, register: &mut String) {
+fn yank_line(input: &mut str, cursor: &mut usize, register: &mut String) {
     let line_start = input[..*cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let line_end = input[*cursor..]
         .find('\n')
@@ -589,7 +588,7 @@ fn yank_line(input: &mut String, cursor: &mut usize, register: &mut String) {
     *register = input[line_start..line_end].to_string();
 }
 
-fn yank_to_end(input: &mut String, cursor: &mut usize, register: &mut String) {
+fn yank_to_end(input: &mut str, cursor: &mut usize, register: &mut String) {
     if *cursor < input.len() {
         *register = input[*cursor..].to_string();
     }

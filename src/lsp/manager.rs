@@ -184,15 +184,13 @@ impl LspServer {
                             .and_then(|m| m.as_str())
                             .unwrap_or("");
 
-                        if method == "textDocument/publishDiagnostics" {
-                            if let Some(params) = notification.get("params") {
-                                if let Some((uri, diags)) =
+                        if method == "textDocument/publishDiagnostics"
+                            && let Some(params) = notification.get("params")
+                                && let Some((uri, diags)) =
                                     parse_diagnostics_notification(params)
                                 {
                                     diagnostics.update(&uri, diags).await;
                                 }
-                            }
-                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!("Diagnostics listener lagged, skipped {n} notifications");

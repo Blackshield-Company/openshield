@@ -158,14 +158,14 @@ fn parse_findings(content: &str) -> Vec<ReviewFinding> {
 
         for line_text in block.lines() {
             let trimmed = line_text.trim();
-            if trimmed.starts_with("SEVERITY:") {
-                severity = Some(match trimmed[9..].trim() {
+            if let Some(rest) = trimmed.strip_prefix("SEVERITY:") {
+                severity = Some(match rest.trim() {
                     "CRITICAL" => Severity::Critical,
                     "WARNING" => Severity::Warning,
                     _ => Severity::Info,
                 });
-            } else if trimmed.starts_with("CATEGORY:") {
-                category = Some(match trimmed[9..].trim() {
+            } else if let Some(rest) = trimmed.strip_prefix("CATEGORY:") {
+                category = Some(match rest.trim() {
                     "BUG" => Category::Bug,
                     "SECURITY" => Category::Security,
                     "PERFORMANCE" => Category::Performance,
@@ -174,20 +174,20 @@ fn parse_findings(content: &str) -> Vec<ReviewFinding> {
                     "TEST_COVERAGE" => Category::TestCoverage,
                     _ => Category::Maintainability,
                 });
-            } else if trimmed.starts_with("FILE:") {
-                file = trimmed[5..].trim().to_string();
-            } else if trimmed.starts_with("LINE:") {
-                let line_str = trimmed[5..].trim();
+            } else if let Some(rest) = trimmed.strip_prefix("FILE:") {
+                file = rest.trim().to_string();
+            } else if let Some(rest) = trimmed.strip_prefix("LINE:") {
+                let line_str = rest.trim();
                 line = line_str.parse().ok();
-            } else if trimmed.starts_with("MESSAGE:") {
-                message = trimmed[8..].trim().to_string();
-            } else if trimmed.starts_with("SUGGESTION:") {
-                suggestion = Some(trimmed[11..].trim().to_string());
+            } else if let Some(rest) = trimmed.strip_prefix("MESSAGE:") {
+                message = rest.trim().to_string();
+            } else if let Some(rest) = trimmed.strip_prefix("SUGGESTION:") {
+                suggestion = Some(rest.trim().to_string());
             }
         }
 
-        if let (Some(sev), Some(cat)) = (severity, category) {
-            if !message.is_empty() {
+        if let (Some(sev), Some(cat)) = (severity, category)
+            && !message.is_empty() {
                 findings.push(ReviewFinding {
                     severity: sev,
                     category: cat,
@@ -197,7 +197,6 @@ fn parse_findings(content: &str) -> Vec<ReviewFinding> {
                     suggestion,
                 });
             }
-        }
     }
 
     findings

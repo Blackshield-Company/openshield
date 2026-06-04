@@ -821,7 +821,7 @@ pub fn hyperlink_urls(text: &str) -> String {
                 // OSC 8 hyperlink
                 result.push_str("\x1b]8;;");
                 result.push_str(&potential);
-                result.push_str("\x07");
+                result.push('\x07');
                 result.push_str(&potential);
                 result.push_str("\x1b]8;;\x07");
             } else {

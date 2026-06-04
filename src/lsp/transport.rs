@@ -277,11 +277,10 @@ async fn read_one_message<R: tokio::io::AsyncBufRead + Unpin>(
             break;
         }
 
-        if let Some(len_str) = trimmed.strip_prefix("Content-Length:") {
-            if let Ok(len) = len_str.trim().parse::<usize>() {
+        if let Some(len_str) = trimmed.strip_prefix("Content-Length:")
+            && let Ok(len) = len_str.trim().parse::<usize>() {
                 content_length = Some(len);
             }
-        }
         // Silently ignore other headers (e.g. Content-Type)
     }
 

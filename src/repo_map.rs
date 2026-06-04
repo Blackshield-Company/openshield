@@ -157,8 +157,8 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
 
     for (line_num, line) in content.lines().enumerate() {
         for (kind, re) in &patterns {
-            if let Some(cap) = re.captures(line) {
-                if let Some(name_match) = cap.get(1) {
+            if let Some(cap) = re.captures(line)
+                && let Some(name_match) = cap.get(1) {
                     symbols.push(SymbolNode {
                         name: name_match.as_str().to_string(),
                         kind: kind.clone(),
@@ -167,7 +167,6 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
                         context: line.trim().to_string(),
                     });
                 }
-            }
         }
     }
 
@@ -240,7 +239,7 @@ pub fn format_repo_map(map: &RepoMap) -> String {
         *lang_counts.entry(f.language.as_str()).or_insert(0) += 1;
     }
     let mut lang_vec: Vec<_> = lang_counts.into_iter().collect();
-    lang_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    lang_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     lines.push("\n📊 Languages:".to_string());
     for (lang, count) in lang_vec {

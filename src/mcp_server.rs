@@ -189,7 +189,9 @@ impl McpServer {
 
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-        let result = match tool_name {
+        
+
+        match tool_name {
             "terminal" => {
                 let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
                 let tool = crate::tools::terminal::TerminalTool;
@@ -248,9 +250,7 @@ impl McpServer {
                     "message": format!("Unknown tool: {}", tool_name)
                 }
             }),
-        };
-
-        result
+        }
     }
 }
 

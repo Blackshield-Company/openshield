@@ -27,6 +27,8 @@ pub enum GatewayEvent {
 /// rich interactions handle them internally before emitting
 /// a UserMessage or use platform-specific reply paths.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
+#[allow(clippy::large_enum_variant)]
 pub enum InteractionEvent {
     #[cfg(feature = "discord")]
     Discord {

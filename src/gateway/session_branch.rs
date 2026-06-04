@@ -19,6 +19,7 @@ use crate::gateway::channel_state::ChannelState;
 /// A named snapshot of a channel's conversation state.
 #[derive(Clone)]
 pub struct Branch {
+    #[allow(dead_code)]
     pub name: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub state: ChannelState,
@@ -78,6 +79,7 @@ impl BranchRegistry {
     }
 
     /// Check if a branch exists.
+    #[allow(dead_code)]
     pub fn exists(&self, channel_id: u64, name: &str) -> bool {
         let branches = self.branches.lock().unwrap();
         branches.contains_key(&(channel_id, name.to_string()))
