@@ -71,6 +71,13 @@ pub fn run_watch(config: WatchConfig) -> Result<()> {
             }
         }
 
+        // Detect deleted files
+        for path in file_times.keys() {
+            if !new_times.contains_key(path) {
+                changed.push(path.clone());
+            }
+        }
+
         if !changed.is_empty() && last_run.elapsed() >= debounce {
             last_run = Instant::now();
             println!();
