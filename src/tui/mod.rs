@@ -277,6 +277,8 @@ struct App {
     mouse_enabled: bool,
     /// Context mode engine for auto file identification.
     context_mode_engine: Option<crate::context_mode::ContextModeEngine>,
+    /// Smart context — manually pinned files.
+    smart_context: crate::context_pinner::SmartContext,
 }
 
 #[derive(Debug, Clone)]
@@ -561,6 +563,7 @@ impl App {
                     None
                 }
             },
+            smart_context: crate::context_pinner::SmartContext::load(&session_id),
         })
     }
 
@@ -902,6 +905,8 @@ impl App {
             String::new()
         };
 
+        let pinned_context_block = self.smart_context.format_context_block();
+
         let system_msg = Message {
             role: "system".to_string(),
             content: format!(
@@ -920,13 +925,14 @@ impl App {
                  \n\
                  After tool results come back, you will be prompted to synthesize. \
                  When synthesizing: explain what was found, what it means, and the next step. \
-                 Be complete. No one-liners. No catchphrases.{}{}{}",
+                 Be complete. No one-liners. No catchphrases.{}{}{}{}",
                 soul.system_prompt(),
                 fs_capabilities,
                 tool_descriptions,
                 plan_instruction,
                 effort_instruction,
-                context_mode_block
+                context_mode_block,
+                pinned_context_block
             ),
             images: None,
             tool_call_id: None,
@@ -2277,6 +2283,28 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "exit" || input == "quit" {
         app.should_exit = true;
+        return Ok(());
+    }
+
+    // Smart context pin/unpin pseudo-prompts from slash command handler
+    if let Some(path) = input.strip_prefix("__ctx_pin__ ") {
+        match app.smart_context.pin(path, None) {
+            Ok(msg) => {
+                app.rebuild_system_prompt();
+                app.add_system_message(msg);
+            }
+            Err(e) => app.add_system_message(format!("❌ Failed to pin: {}", e)),
+        }
+        return Ok(());
+    }
+    if let Some(path) = input.strip_prefix("__ctx_unpin__ ") {
+        match app.smart_context.unpin(path) {
+            Ok(msg) => {
+                app.rebuild_system_prompt();
+                app.add_system_message(msg);
+            }
+            Err(e) => app.add_system_message(format!("❌ Failed to unpin: {}", e)),
+        }
         return Ok(());
     }
 
@@ -4612,6 +4640,15 @@ async fn handle_slash_result(
                         app.add_system_message("❌ Auto-context mode not available — no project path set.".to_string());
                     }
                 }
+                "ctx_clear" => {
+                    match app.smart_context.clear() {
+                        Ok(msg) => {
+                            app.rebuild_system_prompt();
+                            app.add_system_message(msg);
+                        }
+                        Err(e) => app.add_system_message(format!("❌ Failed to clear pinned context: {}", e)),
+                    }
+                }
                 "yolo" => {
                     app.yolo_mode = value;
                     app.add_system_message(format!(
@@ -4801,6 +4838,15 @@ async fn handle_slash_result(
                         }
                     }
                     return Ok(true);
+                }
+                // /ctx list — show pinned files
+                if name == "ctx" || name == "pin" {
+                    let args = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                    if args.is_empty() || args == "list" {
+                        let lines = app.smart_context.list();
+                        app.add_system_message(lines.join("\n"));
+                        return Ok(true);
+                    }
                 }
             }
             Ok(false) // Fall through for now
