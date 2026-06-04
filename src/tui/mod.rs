@@ -2376,6 +2376,46 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
         return Ok(());
     }
+    // Swarm multi-provider query
+    if let Some(query) = input.strip_prefix("__swarm__ ") {
+        let providers: Vec<(String, crate::providers::Provider, String)> = app
+            .config
+            .providers
+            .iter()
+            .filter_map(|(name, cfg)| {
+                let model = cfg.models.first()?;
+                let provider = crate::providers::Provider::new(
+                    name.clone(),
+                    cfg.base_url.clone(),
+                    cfg.api_key.clone(),
+                    cfg.kind.clone(),
+                    cfg.headers.clone(),
+                );
+                Some((name.clone(), provider, model.name.clone()))
+            })
+            .collect();
+
+        if providers.len() < 2 {
+            app.add_system_message(
+                "🐝 Swarm requires 2+ configured providers. Check your config.".to_string(),
+            );
+            return Ok(());
+        }
+
+        app.add_system_message(format!(
+            "🐝 Swarm querying {} providers...",
+            providers.len()
+        ));
+
+        let query = query.to_string();
+        let system = Some(
+            "You are a helpful coding assistant. Be concise and direct.".to_string(),
+        );
+        let results = crate::swarm::swarm_query(&query, &providers, system.as_deref()).await;
+        let formatted = crate::swarm::format_swarm_consensus(&results);
+        app.add_system_message(formatted);
+        return Ok(());
+    }
 
     if input == "help" {
         app.add_system_message(

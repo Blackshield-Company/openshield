@@ -750,3 +750,191 @@ mod tests {
         assert!(output.contains("4 total"));
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lightweight multi-provider swarm query (v1.5 quick query)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Result from a single provider in a swarm query.
+#[derive(Debug, Clone)]
+pub struct SwarmQueryResult {
+    pub provider: String,
+    pub model: String,
+    pub response: String,
+    pub latency_ms: u64,
+    pub tokens_used: Option<u32>,
+}
+
+/// Send a query to multiple providers in parallel and collect responses.
+pub async fn swarm_query(
+    query: &str,
+    providers: &[(String, crate::providers::Provider, String)], // (name, provider, model)
+    system_prompt: Option<&str>,
+) -> Vec<SwarmQueryResult> {
+    let mut handles = Vec::new();
+
+    for (name, provider, model) in providers.iter().cloned() {
+        let query = query.to_string();
+        let system = system_prompt.map(|s| s.to_string());
+        let handle = tokio::spawn(async move {
+            let start = std::time::Instant::now();
+
+            let messages = if let Some(ref sys) = system {
+                vec![
+                    crate::providers::Message {
+                        role: "system".to_string(),
+                        content: sys.clone(),
+                        images: None,
+                        reasoning_content: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    },
+                    crate::providers::Message {
+                        role: "user".to_string(),
+                        content: query,
+                        images: None,
+                        reasoning_content: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    },
+                ]
+            } else {
+                vec![crate::providers::Message {
+                    role: "user".to_string(),
+                    content: query,
+                    images: None,
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                }]
+            };
+
+            let request = crate::providers::ChatRequest::new(model.clone(), messages, false);
+
+            match provider.chat(request).await {
+                Ok(response) => {
+                    let latency = start.elapsed().as_millis() as u64;
+                    let content = response
+                        .choices
+                        .into_iter()
+                        .next()
+                        .map(|c| c.message.content)
+                        .unwrap_or_default();
+                    SwarmQueryResult {
+                        provider: name,
+                        model,
+                        response: content,
+                        latency_ms: latency,
+                        tokens_used: response.usage.map(|u| u.total_tokens),
+                    }
+                }
+                Err(e) => {
+                    let latency = start.elapsed().as_millis() as u64;
+                    SwarmQueryResult {
+                        provider: name,
+                        model,
+                        response: format!("❌ Error: {}", e),
+                        latency_ms: latency,
+                        tokens_used: None,
+                    }
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    let mut results = Vec::new();
+    for handle in handles {
+        if let Ok(result) = handle.await {
+            results.push(result);
+        }
+    }
+
+    results.sort_by(|a, b| a.provider.cmp(&b.provider));
+    results
+}
+
+/// Format swarm query results into a consensus/divergence view.
+pub fn format_swarm_consensus(results: &[SwarmQueryResult]) -> String {
+    if results.is_empty() {
+        return "🐝 No responses from swarm.".to_string();
+    }
+
+    let mut lines = vec![
+        format!("🐝 Swarm Consensus ({} providers):", results.len()),
+        "─".repeat(60),
+    ];
+
+    // Per-provider responses
+    for r in results {
+        let status = if r.response.starts_with("❌") {
+            "🔴"
+        } else {
+            "🟢"
+        };
+        lines.push(format!(
+            "{} {} ({}) — {}ms | tokens: {}",
+            status,
+            r.provider,
+            r.model,
+            r.latency_ms,
+            r.tokens_used.map(|t| t.to_string()).unwrap_or_else(|| "?".to_string())
+        ));
+        if !r.response.starts_with("❌") {
+            // Truncate long responses for the summary view
+            let preview: String = r
+                .response
+                .lines()
+                .take(8)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let truncated = if r.response.lines().count() > 8 {
+                format!("{}\n... ({} more lines)", preview, r.response.lines().count() - 8)
+            } else {
+                preview
+            };
+            for line in truncated.lines() {
+                lines.push(format!("    {}", line));
+            }
+        } else {
+            lines.push(format!("    {}", r.response));
+        }
+        lines.push(String::new());
+    }
+
+    // Simple consensus detection: group identical responses
+    let mut groups: std::collections::HashMap<String, Vec<&str>> = std::collections::HashMap::new();
+    for r in results.iter().filter(|r| !r.response.starts_with("❌")) {
+        groups
+            .entry(r.response.clone())
+            .or_default()
+            .push(&r.provider);
+    }
+
+    if groups.len() == 1 && !groups.is_empty() {
+        lines.push("✅ CONSENSUS: All providers agree.".to_string());
+    } else if groups.len() > 1 {
+        lines.push("⚠️  DIVERGENCE detected:".to_string());
+        for (idx, (response, providers)) in groups.iter().enumerate() {
+            lines.push(format!(
+                "  Group {} ({}): {}",
+                idx + 1,
+                providers.len(),
+                providers.join(", ")
+            ));
+            let preview: String = response
+                .lines()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join("\n");
+            for line in preview.lines() {
+                lines.push(format!("    {}", line));
+            }
+            if response.lines().count() > 3 {
+                lines.push(format!("    ... ({} more lines)", response.lines().count() - 3));
+            }
+        }
+    }
+
+    lines.join("\n")
+}

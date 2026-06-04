@@ -341,6 +341,21 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "swarm",
+                aliases: &["multi", "ensemble"],
+                description: "Query multiple providers in parallel and view consensus/divergence",
+                usage: "/swarm <query>",
+                category: SlashCategory::Agent,
+                requires_args: true,
+                handler: |args| {
+                    if args.trim().is_empty() {
+                        SlashResult::Error("Usage: /swarm <query>".to_string())
+                    } else {
+                        SlashResult::Prompt(format!("__swarm__ {}", args.trim()))
+                    }
+                },
+            },
+            SlashCommand {
                 name: "model",
                 aliases: &["m", "switch-model"],
                 description: "Switch active model",
