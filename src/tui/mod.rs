@@ -193,6 +193,7 @@ struct App {
     show_comparison: bool,
     /// Selected response index in the comparison overlay.
     comparison_selected: usize,
+    pub profile_registry: crate::security::ProfileRegistry,
     /// Security engine for guardrails.
     security_engine: crate::security::SecurityEngine,
     /// Autonomous mode — temporarily elevate risk tolerance for full-send coding.
@@ -274,6 +275,8 @@ struct App {
     mouse_state: mouse::MouseState,
     /// Whether mouse support is enabled.
     mouse_enabled: bool,
+    /// Context mode engine for auto file identification.
+    context_mode_engine: Option<crate::context_mode::ContextModeEngine>,
 }
 
 #[derive(Debug, Clone)]
@@ -373,6 +376,8 @@ impl App {
             .clone()
             .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
             .unwrap_or_else(|| "/home/synth".to_string());
+
+        let project_path_for_engine = project_path.clone();
 
         // Load input history
         let history_file = dirs::config_dir()
@@ -493,6 +498,7 @@ impl App {
             secondary_providers: Vec::new(),
             show_comparison: false,
             comparison_selected: 0,
+            profile_registry: crate::security::ProfileRegistry::new(),
             security_engine,
             autonomous_mode: false,
             mcp_manager: None,
@@ -546,6 +552,15 @@ impl App {
             vim_mode: false,
             mouse_state: mouse::MouseState::new(),
             mouse_enabled: false,
+            context_mode_engine: {
+                if !project_path_for_engine.is_empty() {
+                    let mut engine = crate::context_mode::ContextModeEngine::new(project_path_for_engine);
+                    let _ = engine.refresh_cache();
+                    Some(engine)
+                } else {
+                    None
+                }
+            },
         })
     }
 
@@ -872,6 +887,21 @@ impl App {
             _ => "",
         };
 
+        let context_mode_block = if let Some(ref mut engine) = self.context_mode_engine {
+            // Get the last user message for context identification
+            let last_user_query = self.model_messages.iter().rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+            if !last_user_query.is_empty() {
+                engine.format_context_block(last_user_query)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         let system_msg = Message {
             role: "system".to_string(),
             content: format!(
@@ -890,12 +920,13 @@ impl App {
                  \n\
                  After tool results come back, you will be prompted to synthesize. \
                  When synthesizing: explain what was found, what it means, and the next step. \
-                 Be complete. No one-liners. No catchphrases.{}{}",
+                 Be complete. No one-liners. No catchphrases.{}{}{}",
                 soul.system_prompt(),
                 fs_capabilities,
                 tool_descriptions,
                 plan_instruction,
-                effort_instruction
+                effort_instruction,
+                context_mode_block
             ),
             images: None,
             tool_call_id: None,
@@ -4568,6 +4599,19 @@ async fn handle_slash_result(
                         if value { "ON" } else { "OFF" }
                     ));
                 }
+                "auto_context" => {
+                    if let Some(ref mut engine) = app.context_mode_engine {
+                        engine.config.enabled = value;
+                        app.rebuild_system_prompt();
+                        app.add_system_message(format!(
+                            "📁 Auto-context mode: {} — {}",
+                            if value { "ON" } else { "OFF" },
+                            if value { "relevant files will be auto-identified for each query" } else { "relevant files will not be auto-identified" }
+                        ));
+                    } else {
+                        app.add_system_message("❌ Auto-context mode not available — no project path set.".to_string());
+                    }
+                }
                 "yolo" => {
                     app.yolo_mode = value;
                     app.add_system_message(format!(
@@ -4643,6 +4687,18 @@ async fn handle_slash_result(
                 if let Err(e) = app.switch_model(model_name) {
                     app.add_system_message(format!("Error: {}", e));
                 }
+            } else if let Some(profile_name) = mode_str.strip_prefix("profile:") {
+                if let Err(e) = app.profile_registry.switch(profile_name) {
+                    app.add_system_message(format!("❌ {}", e));
+                } else {
+                    // Apply profile to security engine config
+                    let new_config = app.profile_registry.apply_to_config(&app.security_engine.config);
+                    app.security_engine = crate::security::SecurityEngine::new(new_config).unwrap_or_else(|e| {
+                        app.add_system_message(format!("⚠️ Failed to apply security profile: {}", e));
+                        app.security_engine.clone()
+                    });
+                    app.add_system_message(format!("🔒 {}", app.profile_registry.active_summary()));
+                }
             } else {
                 app.add_system_message(format!("🔄 Switched to mode: {}", mode_str));
             }
@@ -4673,6 +4729,22 @@ async fn handle_slash_result(
                     } else {
                         app.add_system_message("🔌 Plugin registry not initialized.".to_string());
                     }
+                    return Ok(true);
+                }
+                if name == "profiles" || name == "perms" || name == "security-profiles" {
+                    let active = app.profile_registry.active();
+                    let mut lines = vec![
+                        format!("🔒 Active profile: {}", active),
+                        String::new(),
+                        "Available profiles:".to_string(),
+                    ];
+                    for name in app.profile_registry.list() {
+                        let marker = if name == active { "▸ " } else { "  " };
+                        if let Some(p) = app.profile_registry.get(name) {
+                            lines.push(format!("{}{} — {}", marker, name, p.description));
+                        }
+                    }
+                    app.add_system_message(lines.join("\n"));
                     return Ok(true);
                 }
                 if name == "archive" || name == "hide" || name == "stash" {

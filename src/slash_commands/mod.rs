@@ -258,6 +258,30 @@ impl SlashRegistry {
                 handler: |_args| SlashResult::Handled,
             },
             SlashCommand {
+                name: "autoctx",
+                aliases: &["auto-context", "context-mode"],
+                description: "Toggle auto-context mode — auto-identify relevant files for queries",
+                usage: "/autoctx [on|off]",
+                category: SlashCategory::Agent,
+                requires_args: false,
+                handler: |args| {
+                    match args {
+                        "on" => SlashResult::Toggle {
+                            setting: "auto_context".to_string(),
+                            value: true,
+                        },
+                        "off" => SlashResult::Toggle {
+                            setting: "auto_context".to_string(),
+                            value: false,
+                        },
+                        _ => SlashResult::Toggle {
+                            setting: "auto_context".to_string(),
+                            value: true, // toggle
+                        },
+                    }
+                },
+            },
+            SlashCommand {
                 name: "model",
                 aliases: &["m", "switch-model"],
                 description: "Switch active model",
@@ -714,6 +738,30 @@ impl SlashRegistry {
                     setting: "vim_mode".to_string(),
                     value: true,
                 },
+            },
+            SlashCommand {
+                name: "profile",
+                aliases: &["perm", "security-profile"],
+                description: "Switch permission profile: coding, review, safe, yolo, readonly",
+                usage: "/profile [coding|review|safe|yolo|readonly]",
+                category: SlashCategory::Agent,
+                requires_args: false,
+                handler: |args| {
+                    let name = if args.is_empty() { "coding" } else { args };
+                    match name {
+                        "coding" | "review" | "safe" | "yolo" | "readonly" => SlashResult::SwitchMode(format!("profile:{}", name)),
+                        _ => SlashResult::Error("Usage: /profile <coding|review|safe|yolo|readonly>".to_string()),
+                    }
+                },
+            },
+            SlashCommand {
+                name: "profiles",
+                aliases: &["perms", "security-profiles"],
+                description: "List available permission profiles",
+                usage: "/profiles",
+                category: SlashCategory::Agent,
+                requires_args: false,
+                handler: |_args| SlashResult::Handled,
             },
             SlashCommand {
                 name: "mouse",
