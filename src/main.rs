@@ -279,7 +279,35 @@ async fn main() -> anyhow::Result<()> {
                         };
 
                         while let Some(event) = event_rx.recv().await {
-                            router.handle_event(event).await;
+                            let gateway_event = match event {
+                                crate::gateway::discord::DiscordEvent::UserMessage {
+                                    channel_id,
+                                    user_id,
+                                    username,
+                                    content,
+                                    reply_tx,
+                                } => crate::gateway::events::GatewayEvent::UserMessage {
+                                    channel_id,
+                                    user_id,
+                                    username,
+                                    content,
+                                    reply_tx,
+                                },
+                                crate::gateway::discord::DiscordEvent::SlashCommand {
+                                    interaction,
+                                    reply_tx,
+                                } => {
+                                    router.handle_discord_interaction(interaction, reply_tx).await;
+                                    continue;
+                                }
+                                crate::gateway::discord::DiscordEvent::Ready => {
+                                    crate::gateway::events::GatewayEvent::Ready
+                                }
+                                crate::gateway::discord::DiscordEvent::Disconnected => {
+                                    crate::gateway::events::GatewayEvent::Disconnected
+                                }
+                            };
+                            router.handle_event(gateway_event).await;
                         }
                     });
                 });

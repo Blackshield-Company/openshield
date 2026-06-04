@@ -4,13 +4,13 @@ use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::gateway::channel_state::{ChannelState, ChannelStateStore};
-use crate::gateway::discord::DiscordEvent;
+use crate::gateway::events::GatewayEvent;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage};
 use crate::providers::{ChatRequest, Message, Provider};
 use crate::skills::{SkillRegistry, format_skills_prompt};
 use crate::tools::{find_tool, get_tools};
 
-/// Routes incoming Discord messages and slash commands to the OpenShark engine.
+/// Routes incoming gateway messages to the OpenShark engine.
 pub struct MessageRouter {
     pub config: Config,
     memory: MemoryStore,
@@ -36,10 +36,10 @@ impl MessageRouter {
         })
     }
 
-    /// Handle a Discord event and stream the response back.
-    pub async fn handle_event(&mut self, event: DiscordEvent) {
+    /// Handle a gateway event and stream the response back.
+    pub async fn handle_event(&mut self, event: GatewayEvent) {
         match event {
-            DiscordEvent::UserMessage {
+            GatewayEvent::UserMessage {
                 channel_id,
                 user_id,
                 username,
@@ -53,20 +53,24 @@ impl MessageRouter {
                     error!("Failed to handle user message: {}", e);
                 }
             }
-            DiscordEvent::SlashCommand {
-                interaction,
-                reply_tx,
-            } => {
-                if let Err(e) = self.handle_slash_command(interaction, reply_tx).await {
-                    error!("Failed to handle slash command: {}", e);
-                }
+            GatewayEvent::Ready => {
+                info!("Gateway ready");
             }
-            DiscordEvent::Ready => {
-                info!("Discord gateway ready");
+            GatewayEvent::Disconnected => {
+                warn!("Gateway disconnected");
             }
-            DiscordEvent::Disconnected => {
-                warn!("Discord gateway disconnected");
-            }
+        }
+    }
+
+    /// Handle a Discord slash command interaction.
+    #[cfg(feature = "discord")]
+    pub async fn handle_discord_interaction(
+        &mut self,
+        interaction: serenity::all::Interaction,
+        reply_tx: mpsc::UnboundedSender<String>,
+    ) {
+        if let Err(e) = self.handle_slash_command(interaction, reply_tx).await {
+            error!("Failed to handle slash command: {}", e);
         }
     }
 
@@ -438,6 +442,7 @@ Use `/help` for the full slash command list.
         }
     }
 
+    #[cfg(feature = "discord")]
     async fn handle_slash_command(
         &mut self,
         interaction: serenity::all::Interaction,
@@ -1072,6 +1077,7 @@ Use `/help` for the full slash command list.
 }
 
 /// Helper: extract a string option from slash command options.
+#[cfg(feature = "discord")]
 fn get_string_option<'a>(
     options: &'a [serenity::all::CommandDataOption],
     name: &str,
