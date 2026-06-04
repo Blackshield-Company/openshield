@@ -519,6 +519,7 @@ impl App {
             plugin_registry: {
                 let mut registry = crate::plugins::PluginRegistry::new();
                 let _ = registry.load_from_disk();
+                registry.register_as_tools();
                 Some(registry)
             },
             swarm: None,
@@ -2341,6 +2342,37 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 }
             }
             Err(e) => app.add_system_message(format!("❌ Search failed: {}", e)),
+        }
+        return Ok(());
+    }
+    // Plugin management pseudo-prompts
+    if let Some(name) = input.strip_prefix("__plugin_create__ ") {
+        if let Some(ref registry) = app.plugin_registry {
+            match registry.create_scaffold(name) {
+                Ok(path) => {
+                    app.add_system_message(format!(
+                        "🔌 Plugin scaffold created at {}. Edit it, then run /plugin reload.",
+                        path.display()
+                    ));
+                }
+                Err(e) => app.add_system_message(format!("❌ Failed to create plugin: {}", e)),
+            }
+        }
+        return Ok(());
+    }
+    if input == "__plugin_reload__" {
+        if let Some(ref mut registry) = app.plugin_registry {
+            match registry.load_from_disk() {
+                Ok(count) => {
+                    registry.register_as_tools();
+                    app.rebuild_system_prompt();
+                    app.add_system_message(format!(
+                        "🔌 Reloaded {} plugin(s). They are now available as tools.",
+                        count
+                    ));
+                }
+                Err(e) => app.add_system_message(format!("❌ Failed to reload plugins: {}", e)),
+            }
         }
         return Ok(());
     }
@@ -4882,6 +4914,27 @@ async fn handle_slash_result(
                     if args.is_empty() || args == "list" {
                         let lines = app.smart_context.list();
                         app.add_system_message(lines.join("\n"));
+                        return Ok(true);
+                    }
+                }
+                // /plugin list — show plugins
+                if name == "plugin" || name == "plugins" || name == "hook" || name == "hooks" {
+                    let args = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                    if args.is_empty() || args == "list" {
+                        if let Some(ref registry) = app.plugin_registry {
+                            let plugins: Vec<String> = registry.list().iter().map(|p| format!("{} — {}", p.name, p.description)).collect();
+                            if plugins.is_empty() {
+                                app.add_system_message("🔌 No plugins loaded. Create one with /plugin create <name>".to_string());
+                            } else {
+                                let mut lines = vec![format!("🔌 Loaded Plugins ({}):", plugins.len())];
+                                for p in plugins {
+                                    lines.push(format!("  • {}", p));
+                                }
+                                app.add_system_message(lines.join("\n"));
+                            }
+                        } else {
+                            app.add_system_message("🔌 Plugin registry not initialized.".to_string());
+                        }
                         return Ok(true);
                     }
                 }
