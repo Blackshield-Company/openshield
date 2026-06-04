@@ -10,6 +10,7 @@ mod agent;
 mod cache;
 mod capabilities;
 mod config;
+mod context_mode;
 mod diff;
 mod doctor;
 mod evolution;
