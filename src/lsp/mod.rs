@@ -1,10 +1,20 @@
 #![allow(dead_code)]
+
+pub mod diagnostics;
+pub mod manager;
+pub mod transport;
+
+pub use diagnostics::{DiagnosticEvent, DiagnosticStore};
+pub use manager::LspManager;
+pub use transport::AsyncTransport;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::sync::OnceLock;
 
 /// Lightweight LSP client for symbol understanding
 pub struct LspClient {
@@ -325,4 +335,17 @@ fn symbol_kind_name(kind: u32) -> String {
         _ => "Unknown",
     }
     .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Global singleton
+// ---------------------------------------------------------------------------
+
+static LSP_MANAGER: OnceLock<std::sync::Arc<LspManager>> = OnceLock::new();
+
+/// Get the global LSP manager instance (lazily initialized on first access).
+pub fn global_lsp_manager() -> std::sync::Arc<LspManager> {
+    LSP_MANAGER
+        .get_or_init(|| std::sync::Arc::new(LspManager::new(".")))
+        .clone()
 }

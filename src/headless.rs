@@ -310,52 +310,81 @@ pub async fn run_headless(
                 }
             }
 
-            // Find and execute the tool
-            let result = match find_tool(&suggestion.tool_name) {
-                Some(tool) => {
-                    match tool.execute(&suggestion.args) {
-                        Ok(output) => {
-                            let sanitized = security_engine.sanitize_output(
-                                &suggestion.tool_name,
-                                &output,
-                            );
-                            if let Some(tx) = &event_tx {
-                                let _ = tx.send(HeadlessEvent::ToolResult {
-                                    name: suggestion.tool_name.clone(),
-                                    output: sanitized.clone(),
-                                    success: true,
-                                    turn,
-                                    timestamp: now(),
-                                });
-                            }
-                            format!("✅ {} ({}): {}", suggestion.tool_name, suggestion.args, sanitized)
+            // Find and execute the tool — try async first, then sync
+            let result = if let Some(async_tool) = crate::tools::find_async_tool(&suggestion.tool_name) {
+                match async_tool.execute_async(&suggestion.args).await {
+                    Ok(output) => {
+                        let sanitized = security_engine.sanitize_output(
+                            &suggestion.tool_name,
+                            &output,
+                        );
+                        if let Some(tx) = &event_tx {
+                            let _ = tx.send(HeadlessEvent::ToolResult {
+                                name: suggestion.tool_name.clone(),
+                                output: sanitized.clone(),
+                                success: true,
+                                turn,
+                                timestamp: now(),
+                            });
                         }
-                        Err(e) => {
-                            let msg = format!("❌ {} failed: {}", suggestion.tool_name, e);
-                            if let Some(tx) = &event_tx {
-                                let _ = tx.send(HeadlessEvent::ToolResult {
-                                    name: suggestion.tool_name.clone(),
-                                    output: msg.clone(),
-                                    success: false,
-                                    turn,
-                                    timestamp: now(),
-                                });
-                            }
-                            msg
+                        format!("✅ {} ({}): {}", suggestion.tool_name, suggestion.args, sanitized)
+                    }
+                    Err(e) => {
+                        let msg = format!("❌ {} failed: {}", suggestion.tool_name, e);
+                        if let Some(tx) = &event_tx {
+                            let _ = tx.send(HeadlessEvent::ToolResult {
+                                name: suggestion.tool_name.clone(),
+                                output: msg.clone(),
+                                success: false,
+                                turn,
+                                timestamp: now(),
+                            });
                         }
+                        msg
                     }
                 }
-                None => {
-                    let msg = format!("❌ Unknown tool: {}", suggestion.tool_name);
-                    if let Some(tx) = &event_tx {
-                        let _ = tx.send(HeadlessEvent::Error {
-                            message: msg.clone(),
-                            turn,
-                            timestamp: now(),
-                        });
+            } else if let Some(tool) = find_tool(&suggestion.tool_name) {
+                match tool.execute(&suggestion.args) {
+                    Ok(output) => {
+                        let sanitized = security_engine.sanitize_output(
+                            &suggestion.tool_name,
+                            &output,
+                        );
+                        if let Some(tx) = &event_tx {
+                            let _ = tx.send(HeadlessEvent::ToolResult {
+                                name: suggestion.tool_name.clone(),
+                                output: sanitized.clone(),
+                                success: true,
+                                turn,
+                                timestamp: now(),
+                            });
+                        }
+                        format!("✅ {} ({}): {}", suggestion.tool_name, suggestion.args, sanitized)
                     }
-                    msg
+                    Err(e) => {
+                        let msg = format!("❌ {} failed: {}", suggestion.tool_name, e);
+                        if let Some(tx) = &event_tx {
+                            let _ = tx.send(HeadlessEvent::ToolResult {
+                                name: suggestion.tool_name.clone(),
+                                output: msg.clone(),
+                                success: false,
+                                turn,
+                                timestamp: now(),
+                            });
+                        }
+                        msg
+                    }
                 }
+            } else {
+                let msg = format!("❌ Unknown tool: {}", suggestion.tool_name);
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(HeadlessEvent::Error {
+                        message: msg.clone(),
+                        turn,
+                        timestamp: now(),
+                    });
+                }
+                msg
             };
 
             tool_results.push_str(&result);
