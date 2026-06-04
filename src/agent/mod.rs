@@ -363,10 +363,14 @@ impl Agent {
             }
         }
 
-        let tool = find_tool(&step.tool_name)
-            .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", step.tool_name))?;
-
-        let result = tool.execute(&step.args)?;
+        // Try async tool first (LSP, refactor), then fall back to sync
+        let result = if let Some(async_tool) = crate::tools::find_async_tool(&step.tool_name) {
+            async_tool.execute_async(&step.args).await?
+        } else {
+            let tool = find_tool(&step.tool_name)
+                .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", step.tool_name))?;
+            tool.execute(&step.args)?
+        };
         let sanitized = security_engine.sanitize_output(&step.tool_name, &result);
 
         let tool_call = ToolCall {

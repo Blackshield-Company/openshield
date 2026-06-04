@@ -1,5 +1,5 @@
 use super::Tool;
-use crate::lsp::LspClient;
+use crate::lsp::{LspClient, LspManager};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -484,4 +484,141 @@ mod tests {
         let result = tool.execute("unknown /tmp/test.rs 0 0").unwrap();
         assert!(result.contains("Unknown refactor operation"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Async variant using persistent LspManager connections
+// ---------------------------------------------------------------------------
+
+use async_trait::async_trait;
+use super::AsyncTool;
+
+pub struct RefactorAsyncTool {
+    manager: std::sync::Arc<LspManager>,
+}
+
+impl RefactorAsyncTool {
+    pub fn new(manager: std::sync::Arc<LspManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl AsyncTool for RefactorAsyncTool {
+    fn name(&self) -> &str { "refactor" }
+    fn description(&self) -> &str {
+        "LSP-based refactoring: extract_function, rename_symbol, inline_variable. Usage: refactor <extract_function|rename_symbol|inline_variable> <file> <line> <col> [new_name]"
+    }
+
+    async fn execute_async(&self, args: &str) -> anyhow::Result<String> {
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        if parts.len() < 4 {
+            return Ok("Refactor tool usage:\n\
+                 refactor extract_function <file> <line> <col>           - Extract selection to function\n\
+                 refactor rename_symbol <file> <line> <col> <new_name>  - Rename symbol\n\
+                 refactor inline_variable <file> <line> <col>        - Inline variable at position"
+                .to_string());
+        }
+
+        let operation = parts[0];
+        let file_path = parts[1];
+        let line: u32 = parts[2].parse().unwrap_or(0);
+        let character: u32 = parts[3].parse().unwrap_or(0);
+        let new_name = parts.get(4).map(|s| s.to_string());
+
+        let (lsp_cmd, lsp_args, lang_id) = LspManager::detect_server(file_path);
+        let server = self.manager.get_or_create_server(lang_id, lsp_cmd, lsp_args).await?;
+
+        let content = std::fs::read_to_string(file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file_path, e))?;
+        server.ensure_document_open(file_path, &content).await?;
+
+        let uri = format!("file://{}", std::fs::canonicalize(file_path)?.display());
+
+        match operation {
+            "extract_function" => {
+                let params = serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "range": { "start": { "line": line, "character": character }, "end": { "line": line, "character": character } },
+                    "context": { "diagnostics": [], "only": ["refactor.extract.function"] }
+                });
+                let result = server.request("textDocument/codeAction", params).await?;
+                let changes = parse_workspace_edit_async(&result, file_path)?;
+                let refactor_result = RefactorResult {
+                    success: !changes.is_empty(),
+                    operation: "extract_function".to_string(),
+                    changes,
+                    message: if result.is_null() { "No extract function action available".to_string() } else { "Extract function computed".to_string() },
+                };
+                Ok(serde_json::to_string_pretty(&refactor_result)?)
+            }
+            "rename_symbol" => {
+                let new_name = new_name.ok_or_else(|| anyhow::anyhow!("rename_symbol requires new_name"))?;
+                let params = serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": { "line": line, "character": character },
+                    "newName": new_name
+                });
+                let result = server.request("textDocument/rename", params).await?;
+                let changes = parse_workspace_edit_async(&result, file_path)?;
+                let msg = format!("Renamed symbol to '{}'", new_name);
+                let refactor_result = RefactorResult {
+                    success: !changes.is_empty(),
+                    operation: "rename_symbol".to_string(),
+                    changes,
+                    message: msg,
+                };
+                Ok(serde_json::to_string_pretty(&refactor_result)?)
+            }
+            "inline_variable" => {
+                let params = serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "range": { "start": { "line": line, "character": character }, "end": { "line": line, "character": character } },
+                    "context": { "diagnostics": [], "only": ["refactor.inline.variable"] }
+                });
+                let result = server.request("textDocument/codeAction", params).await?;
+                let changes = parse_workspace_edit_async(&result, file_path)?;
+                let refactor_result = RefactorResult {
+                    success: !changes.is_empty(),
+                    operation: "inline_variable".to_string(),
+                    changes,
+                    message: if result.is_null() { "No inline variable action available".to_string() } else { "Inline variable computed".to_string() },
+                };
+                Ok(serde_json::to_string_pretty(&refactor_result)?)
+            }
+            _ => Ok(format!("Unknown refactor operation: {}", operation)),
+        }
+    }
+}
+
+fn parse_workspace_edit_async(result: &serde_json::Value, default_file: &str) -> anyhow::Result<Vec<FileChange>> {
+    let mut changes = Vec::new();
+    if let Some(document_changes) = result.get("documentChanges").and_then(|v| v.as_array()) {
+        for change in document_changes {
+            if let Some(edits) = change.get("edits").and_then(|v| v.as_array()) {
+                let fp = change.get("textDocument").and_then(|td| td.get("uri")).and_then(|u| u.as_str()).unwrap_or(default_file).strip_prefix("file://").unwrap_or(default_file).to_string();
+                let text_edits: Vec<TextEdit> = edits.iter().filter_map(|edit| {
+                    let range = edit.get("range")?;
+                    let start = range.get("start")?;
+                    let end = range.get("end")?;
+                    let new_text = edit.get("newText")?.as_str()?;
+                    Some(TextEdit { start_line: start.get("line")?.as_u64()? as u32, start_character: start.get("character")?.as_u64()? as u32, end_line: end.get("line")?.as_u64()? as u32, end_character: end.get("character")?.as_u64()? as u32, new_text: new_text.to_string() })
+                }).collect();
+                if !text_edits.is_empty() { changes.push(FileChange { file_path: fp, edits: text_edits }); }
+            }
+        }
+    } else if let Some(changes_map) = result.get("changes").and_then(|v| v.as_object()) {
+        for (uri, edits) in changes_map {
+            let fp = uri.strip_prefix("file://").unwrap_or(uri).to_string();
+            let text_edits: Vec<TextEdit> = edits.as_array().unwrap_or(&Vec::new()).iter().filter_map(|edit| {
+                let range = edit.get("range")?;
+                let start = range.get("start")?;
+                let end = range.get("end")?;
+                let new_text = edit.get("newText")?.as_str()?;
+                Some(TextEdit { start_line: start.get("line")?.as_u64()? as u32, start_character: start.get("character")?.as_u64()? as u32, end_line: end.get("line")?.as_u64()? as u32, end_character: end.get("character")?.as_u64()? as u32, new_text: new_text.to_string() })
+            }).collect();
+            if !text_edits.is_empty() { changes.push(FileChange { file_path: fp, edits: text_edits }); }
+        }
+    }
+    Ok(changes)
 }
