@@ -1,4 +1,5 @@
 pub mod checkpoint;
+pub mod custom;
 pub mod r#async;
 pub mod detection;
 pub mod edit;
@@ -90,6 +91,11 @@ pub fn get_tools() -> Vec<Arc<dyn Tool>> {
         for tool in mcp.iter() {
             tools.push(Arc::clone(tool));
         }
+    }
+
+    // Add custom user-defined tools
+    for tool in crate::tools::custom::get_custom_tools() {
+        tools.push(tool);
     }
 
     // Add plugin tools

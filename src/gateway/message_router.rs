@@ -5,6 +5,7 @@ use tracing::{error, info, warn};
 use crate::config::Config;
 use crate::gateway::channel_state::{ChannelState, ChannelStateStore};
 use crate::gateway::events::GatewayEvent;
+use crate::gateway::session_branch::{BranchRegistry, diff_states};
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage};
 use crate::providers::{ChatRequest, Message, Provider};
 use crate::skills::{SkillRegistry, format_skills_prompt};
@@ -16,6 +17,7 @@ pub struct MessageRouter {
     memory: MemoryStore,
     channel_states: ChannelStateStore,
     skill_registry: Option<SkillRegistry>,
+    branches: BranchRegistry,
 }
 
 impl MessageRouter {
@@ -33,6 +35,7 @@ impl MessageRouter {
             memory,
             channel_states,
             skill_registry,
+            branches: BranchRegistry::new(),
         })
     }
 
@@ -100,7 +103,9 @@ impl MessageRouter {
             || content_lower.starts_with("!status")
             || content_lower.starts_with("!help")
             || content_lower.starts_with("!new")
-            || content_lower.starts_with("!reset");
+            || content_lower.starts_with("!reset")
+            || content_lower.starts_with("!branch")
+            || content_lower.starts_with("!custom");
 
         // Handle command keywords directly
         if is_command_keyword {
@@ -304,7 +309,110 @@ impl MessageRouter {
         }
     }
 
-    /// Handle text-based keyword commands (e.g., !model, !tools, !status).
+    /// Handle branch commands (!branch save|load|list|delete|diff).
+    fn handle_branch_command(
+        &self,
+        arg: &str,
+        channel_id: u64,
+        reply_tx: &mpsc::UnboundedSender<String>,
+    ) {
+        let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+        let subcmd = parts.first().copied().unwrap_or("").trim();
+        let subarg = parts.get(1).copied().unwrap_or("").trim();
+
+        match subcmd {
+            "save" => {
+                if subarg.is_empty() {
+                    let _ = reply_tx.send("❌ Usage: `!branch save <name>`".to_string());
+                    return;
+                }
+                let state = self.channel_states.get_or_create(channel_id);
+                self.branches.save(channel_id, subarg, state);
+                let _ = reply_tx.send(format!(
+                    "🌿 Branch `{}` saved ({} messages).",
+                    subarg,
+                    self.branches
+                        .list(channel_id)
+                        .iter()
+                        .find(|b| b.name == subarg)
+                        .map(|b| b.message_count)
+                        .unwrap_or(0)
+                ));
+            }
+            "load" => {
+                if subarg.is_empty() {
+                    let _ = reply_tx.send("❌ Usage: `!branch load <name>`".to_string());
+                    return;
+                }
+                if let Some(state) = self.branches.load(channel_id, subarg) {
+                    self.channel_states.update(channel_id, state);
+                    let _ = reply_tx.send(format!(
+                        "🌿 Branch `{}` loaded. Current state restored.",
+                        subarg
+                    ));
+                } else {
+                    let _ = reply_tx.send(format!("❌ Branch `{}` not found.", subarg));
+                }
+            }
+            "list" => {
+                let branches = self.branches.list(channel_id);
+                if branches.is_empty() {
+                    let _ = reply_tx.send("🌿 No branches saved for this channel.\n\nUsage: `!branch save <name>`".to_string());
+                } else {
+                    let mut lines = vec!["🌿 **Branches**\n".to_string()];
+                    for b in branches {
+                        lines.push(format!(
+                            "• `{}` | {} messages | model: `{}` | {}",
+                            b.name,
+                            b.message_count,
+                            b.model,
+                            b.created_at.format("%Y-%m-%d %H:%M")
+                        ));
+                    }
+                    let _ = reply_tx.send(lines.join("\n"));
+                }
+            }
+            "delete" => {
+                if subarg.is_empty() {
+                    let _ = reply_tx.send("❌ Usage: `!branch delete <name>`".to_string());
+                    return;
+                }
+                if self.branches.delete(channel_id, subarg) {
+                    let _ = reply_tx.send(format!("🌿 Branch `{}` deleted.", subarg));
+                } else {
+                    let _ = reply_tx.send(format!("❌ Branch `{}` not found.", subarg));
+                }
+            }
+            "diff" => {
+                if subarg.is_empty() {
+                    let _ = reply_tx.send("❌ Usage: `!branch diff <name>`".to_string());
+                    return;
+                }
+                let current = self.channel_states.get_or_create(channel_id);
+                if let Some(branch) = self.branches.load(channel_id, subarg) {
+                    let diff = diff_states(&current, &branch);
+                    let _ = reply_tx.send(format!(
+                        "🌿 **Diff vs `{}`**\n{}",
+                        subarg, diff
+                    ));
+                } else {
+                    let _ = reply_tx.send(format!("❌ Branch `{}` not found.", subarg));
+                }
+            }
+            _ => {
+                let help = r#"🌿 **Branch Commands**
+
+• `!branch save <name>` — Save current conversation state
+• `!branch load <name>` — Restore a saved branch
+• `!branch list` — Show all saved branches
+• `!branch delete <name>` — Delete a branch
+• `!branch diff <name>` — Compare current state to branch
+
+Branches are per-channel and last until restart."#;
+                let _ = reply_tx.send(help.to_string());
+            }
+        }
+    }
     fn handle_keyword_command(
         &self,
         content: &str,
@@ -435,6 +543,27 @@ Use `/help` for the full slash command list.
                     ));
                 }
                 self.channel_states.update(channel_id, state);
+            }
+            "!branch" => {
+                self.handle_branch_command(arg, channel_id, reply_tx);
+            }
+            "!custom" => {
+                let custom_tools = crate::tools::custom::get_custom_tools();
+                if custom_tools.is_empty() {
+                    let _ = reply_tx.send(
+                        "🔧 No custom tools configured.\n\nCreate `~/.config/openshark/custom_tools.toml`:\n\n```toml\n[[tool]]\nname = \"weather\"\ndescription = \"Get weather for a city\"\ncommand = \"curl -s 'wttr.in/{{args}}?format=3'\"\n```"
+                            .to_string(),
+                    );
+                } else {
+                    let mut lines = vec!["🔧 **Custom Tools**\n".to_string()];
+                    for tool in custom_tools {
+                        lines.push(format!("• `{}`: {}", tool.name(), tool.description()));
+                    }
+                    lines.push(
+                        "\nUse `!tool <name> <args>` or `/tool` to execute.".to_string(),
+                    );
+                    let _ = reply_tx.send(lines.join("\n"));
+                }
             }
             _ => {
                 let _ = reply_tx.send(format!("❓ Unknown command: `{}`. Try `!help`", cmd));
@@ -769,8 +898,13 @@ Use `/help` for the full slash command list.
                     let _ = reply_tx.send(lines.join("\n"));
                 }
 
-                "stats" => match self.memory.get_stats_summary() {
-                    Ok(stats) => {
+                "stats" => match (
+                    self.memory.get_stats_summary(),
+                    self.memory.get_model_usage_stats(),
+                    self.memory.get_tool_usage_stats(),
+                    self.memory.get_daily_activity(7),
+                ) {
+                    (Ok(stats), Ok(model_stats), Ok(tool_stats), Ok(activity)) => {
                         let mut lines = vec!["📊 **OpenShark Stats**\n".to_string()];
                         lines.push(format!("Total Sessions: {}", stats.total_sessions));
                         lines.push(format!("Total Messages: {}", stats.total_messages));
@@ -787,10 +921,45 @@ Use `/help` for the full slash command list.
                                 latest.format("%Y-%m-%d %H:%M")
                             ));
                         }
+
+                        if !model_stats.is_empty() {
+                            lines.push("\n**Model Breakdown**".to_string());
+                            for m in model_stats.iter().take(5) {
+                                lines.push(format!(
+                                    "• `{}` | {} sessions | {} msgs | {} tokens | {:.0}% tools",
+                                    m.model,
+                                    m.session_count,
+                                    m.message_count,
+                                    m.total_tokens,
+                                    m.tool_success_rate
+                                ));
+                            }
+                        }
+
+                        if !tool_stats.is_empty() {
+                            lines.push("\n**Tool Breakdown**".to_string());
+                            for t in tool_stats.iter().take(5) {
+                                lines.push(format!(
+                                    "• `{}` | {} calls | {} success | {:.0}%",
+                                    t.tool_name, t.total_calls, t.successful_calls, t.success_rate
+                                ));
+                            }
+                        }
+
+                        if !activity.is_empty() {
+                            lines.push("\n**Last 7 Days**".to_string());
+                            for day in activity.iter().take(7) {
+                                lines.push(format!(
+                                    "• {} | {} sessions | {} models",
+                                    day.day, day.session_count, day.model_count
+                                ));
+                            }
+                        }
+
                         let _ = reply_tx.send(lines.join("\n"));
                     }
-                    Err(e) => {
-                        let _ = reply_tx.send(format!("❌ Error loading stats: {}", e));
+                    _ => {
+                        let _ = reply_tx.send("❌ Error loading stats.".to_string());
                     }
                 },
 
