@@ -165,6 +165,9 @@ pub struct Config {
     /// Custom test command. Uses framework auto-detect if None.
     #[serde(default)]
     pub test_command: Option<String>,
+    /// Auto-run linter after file edits and feed errors back to agent.
+    #[serde(default)]
+    pub auto_lint: bool,
     /// Effort level: low, medium, high, xhigh.
     #[serde(default = "default_effort")]
     pub effort_level: String,
@@ -726,6 +729,7 @@ impl Default for Config {
             editor_model: None,
             auto_run_tests: false,
             test_command: None,
+            auto_lint: true,
             effort_level: "medium".to_string(),
         }
     }
@@ -817,6 +821,7 @@ mod tests {
             editor_model: None,
             auto_run_tests: false,
             test_command: None,
+            auto_lint: false,
             effort_level: "medium".to_string(),
         }
     }
