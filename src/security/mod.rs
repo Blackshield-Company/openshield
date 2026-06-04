@@ -20,11 +20,13 @@ use tracing::info;
 pub mod guardrails;
 pub mod identity;
 pub mod pii;
+pub mod profiles;
 pub mod sandbox;
 
 pub use guardrails::*;
 pub use identity::*;
 pub use pii::*;
+pub use profiles::*;
 pub use sandbox::*;
 
 /// Security configuration stored in user's config directory.
@@ -249,7 +251,8 @@ impl SecurityConfig {
 /// The central security engine that coordinates all security layers.
 #[derive(Clone)]
 pub struct SecurityEngine {
-    config: SecurityConfig,
+    /// Security configuration.
+    pub config: SecurityConfig,
     /// Tracks approved sudo sessions (command -> expiry time).
     sudo_sessions: Arc<Mutex<HashMap<String, std::time::Instant>>>,
     /// Tracks active tool executions for audit.
@@ -263,6 +266,8 @@ pub struct SecurityEngine {
     /// Identity manager for zero-trust.
     #[allow(dead_code)]
     identity_manager: IdentityManager,
+    /// Permission profile registry for switching presets.
+    pub profile_registry: Arc<Mutex<ProfileRegistry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -307,6 +312,7 @@ impl SecurityEngine {
             pii_detector,
             guardrails,
             identity_manager,
+            profile_registry: Arc::new(Mutex::new(ProfileRegistry::new())),
         })
     }
 
