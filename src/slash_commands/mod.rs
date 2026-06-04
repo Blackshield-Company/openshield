@@ -302,6 +302,21 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "search",
+                aliases: &["find", "lookup"],
+                description: "Search across all sessions (including archived) for messages matching a query",
+                usage: "/search <query>",
+                category: SlashCategory::Session,
+                requires_args: true,
+                handler: |args| {
+                    if args.trim().is_empty() {
+                        SlashResult::Error("Usage: /search <query>".to_string())
+                    } else {
+                        SlashResult::Prompt(format!("__search__ {}", args.trim()))
+                    }
+                },
+            },
+            SlashCommand {
                 name: "model",
                 aliases: &["m", "switch-model"],
                 description: "Switch active model",
