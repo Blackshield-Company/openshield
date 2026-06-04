@@ -397,7 +397,7 @@ impl SecurityEngine {
 
         // Truncate if too large
         if sanitized.len() > self.config.max_model_output_bytes {
-            let truncated = &sanitized[..self.config.max_model_output_bytes];
+            let truncated = crate::utils::truncate_str(&sanitized, self.config.max_model_output_bytes);
             sanitized = format!(
                 "{}\n\n[Output truncated: {} bytes total, showing first {}]",
                 truncated,
