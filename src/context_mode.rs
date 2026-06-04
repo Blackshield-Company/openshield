@@ -68,10 +68,6 @@ impl ContextModeEngine {
         }
     }
 
-    pub fn with_config(mut self, config: ContextModeConfig) -> Self {
-        self.config = config;
-        self
-    }
 
     /// Refresh the cached repo map and git status.
     pub fn refresh_cache(&mut self) -> Result<()> {

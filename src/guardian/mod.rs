@@ -71,7 +71,7 @@ pub async fn review(
     provider: crate::providers::Provider,
     model: String,
 ) -> Result<ReviewReport> {
-    let mut findings: Vec<ReviewFinding> = Vec::new();
+    let _findings: Vec<ReviewFinding> = Vec::new();
 
     // Gather context based on target
     let context = match target {

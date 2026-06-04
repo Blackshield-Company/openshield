@@ -30,9 +30,9 @@ impl crate::tools::Tool for PluginTool {
     }
 
     fn execute(&self, args: &str) -> Result<String> {
-        let mut cmd = std::process::Command::new(
-            self.interpreter.as_deref().unwrap_or("bash"),
-        );
+        let interpreter = self.interpreter.as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' has no recognized interpreter", self.name))?;
+        let mut cmd = std::process::Command::new(interpreter);
         cmd.arg(&self.path);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -110,7 +110,10 @@ impl PluginRegistry {
                     Some("py") => Some("python3".to_string()),
                     Some("js") => Some("node".to_string()),
                     Some("rb") => Some("ruby".to_string()),
-                    _ => None,
+                    _ => {
+                        // Skip files with unrecognized extensions — don't execute arbitrary files
+                        continue;
+                    }
                 };
 
                 let description = Self::extract_description(&path).unwrap_or_else(|| {
@@ -204,14 +207,10 @@ impl PluginRegistry {
             .get(name)
             .with_context(|| format!("Plugin '{}' not found", name))?;
 
-        let mut cmd = tokio::process::Command::new(
-            plugin.interpreter.as_deref().unwrap_or("bash"),
-        );
-        if plugin.interpreter.is_some() {
-            cmd.arg(&plugin.path);
-        } else {
-            cmd.arg(&plugin.path);
-        }
+        let interpreter = plugin.interpreter.as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' has no recognized interpreter", name))?;
+        let mut cmd = tokio::process::Command::new(interpreter);
+        cmd.arg(&plugin.path);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

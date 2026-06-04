@@ -88,15 +88,6 @@ impl ConsensusMemory {
         }
     }
 
-    /// Check if consensus is reached for an entry.
-    fn check_consensus(&self, entry: &ConsensusEntry) -> bool {
-        match self.mode.as_str() {
-            "unanimous" => entry.rejections.is_empty(),
-            "majority" => entry.approvals.len() > entry.rejections.len(),
-            "leader_decides" => !entry.approvals.is_empty(), // Simplified: first approval wins
-            _ => entry.approvals.len() > entry.rejections.len(),
-        }
-    }
 
     /// Get all entries.
     pub fn entries(&self) -> Vec<ConsensusEntry> {
