@@ -133,12 +133,14 @@ pub fn stash_checkpoint(name: &str) -> Result<String> {
         .output()
         .context("Failed to run git stash push")?;
 
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Git returns success (0) but prints "No local changes to save" to stdout when clean.
+    if stdout.contains("No local changes") || stdout.contains("nothing to stash") {
+        return Ok("clean".to_string());
+    }
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // If there's nothing to stash, that's okay — return a sentinel.
-        if stderr.contains("No local changes") || stderr.contains("nothing to stash") {
-            return Ok("clean".to_string());
-        }
         anyhow::bail!("git stash failed: {}", stderr);
     }
 
@@ -386,6 +388,10 @@ mod tests {
     use super::*;
     use std::fs;
     use std::process::Command;
+    use std::sync::Mutex;
+
+    // Serialize checkpoint tests — they mutate process-global cwd and git stash state.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_git_repo() -> String {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -430,6 +436,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_stack() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let mut stack = CheckpointStack::new("test-session");
         assert_eq!(stack.undo_len(), 0);
         assert_eq!(stack.redo_len(), 0);
@@ -445,6 +452,7 @@ mod tests {
 
     #[test]
     fn test_in_git_repo() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let dir = temp_git_repo();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
@@ -455,6 +463,7 @@ mod tests {
 
     #[test]
     fn test_stash_checkpoint_clean_repo() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let dir = temp_git_repo();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
@@ -471,6 +480,7 @@ mod tests {
 
     #[test]
     fn test_stash_checkpoint_with_changes() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let dir = temp_git_repo();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
