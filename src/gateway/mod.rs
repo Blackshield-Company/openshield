@@ -9,6 +9,7 @@ pub mod message_router;
 pub mod platform;
 #[cfg(feature = "slack")]
 pub mod slack;
+pub mod session_branch;
 #[cfg(feature = "telegram")]
 pub mod telegram;
 pub mod unified_router;
