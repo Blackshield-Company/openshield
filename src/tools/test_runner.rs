@@ -264,6 +264,279 @@ fn truncate_to_lines(text: &str, max_lines: usize) -> String {
     kept.join("\n")
 }
 
+/// Parsed test result for programmatic consumption.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TestResultSet {
+    pub framework: String,
+    pub passed: usize,
+    pub failed: usize,
+    pub ignored: usize,
+    pub total: usize,
+    pub duration_secs: Option<f64>,
+    pub failures: Vec<TestFailure>,
+    pub raw_output: String,
+    pub success: bool,
+}
+
+/// A single test failure.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TestFailure {
+    pub test_name: String,
+    pub module: Option<String>,
+    pub message: String,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+}
+
+/// Parse test output into a structured result set.
+/// Supports cargo test, pytest, jest, and go test output formats.
+pub fn parse_test_output(raw: &str, framework: &TestFramework) -> TestResultSet {
+    let framework_name = match framework {
+        TestFramework::Cargo => "cargo",
+        TestFramework::Jest => "jest",
+        TestFramework::Pytest => "pytest",
+        TestFramework::GoTest => "go",
+        TestFramework::Unknown => "unknown",
+    };
+
+    let mut result = TestResultSet {
+        framework: framework_name.to_string(),
+        passed: 0,
+        failed: 0,
+        ignored: 0,
+        total: 0,
+        duration_secs: None,
+        failures: Vec::new(),
+        raw_output: raw.to_string(),
+        success: true,
+    };
+
+    match framework {
+        TestFramework::Cargo => parse_cargo_output(raw, &mut result),
+        TestFramework::Pytest => parse_pytest_output(raw, &mut result),
+        TestFramework::Jest => parse_jest_output(raw, &mut result),
+        TestFramework::GoTest => parse_go_output(raw, &mut result),
+        TestFramework::Unknown => {
+            // Try to infer from content
+            if raw.contains("test result:") && raw.contains("cargo") {
+                parse_cargo_output(raw, &mut result);
+            } else if raw.contains("failed") || raw.contains("FAILED") {
+                result.failed = raw.matches("FAILED").count();
+                result.success = result.failed == 0;
+            }
+        }
+    }
+
+    result.total = result.passed + result.failed + result.ignored;
+    result
+}
+
+fn parse_cargo_output(raw: &str, result: &mut TestResultSet) {
+    // Parse lines like: "test result: ok. 420 passed; 0 failed; 3 ignored;"
+    for line in raw.lines() {
+        if line.contains("test result:") {
+            if let Some(passed) = extract_count(line, "passed") {
+                result.passed = passed;
+            }
+            if let Some(failed) = extract_count(line, "failed") {
+                result.failed = failed;
+            }
+            if let Some(ignored) = extract_count(line, "ignored") {
+                result.ignored = ignored;
+            }
+            if line.contains("ok.") {
+                result.success = result.failed == 0;
+            } else {
+                result.success = false;
+            }
+        }
+
+        // Parse failures: "test test_name ... FAILED"
+        if line.contains("... FAILED") || line.contains("...FAILED") {
+            let name = line.split("...").next().unwrap_or("").trim();
+            if !name.is_empty() && name != "test" {
+                result.failures.push(TestFailure {
+                    test_name: name.trim_start_matches("test ").to_string(),
+                    module: None,
+                    message: String::new(),
+                    file: None,
+                    line: None,
+                });
+            }
+        }
+
+        // Parse panic locations: "thread 'test_name' panicked at 'message', src/file.rs:42:5"
+        if line.contains("panicked at") {
+            let name_start = line.find("thread '").map(|i| i + 8);
+            let name_end = line.find("' panicked at");
+            if let (Some(s), Some(e)) = (name_start, name_end) {
+                let test_name = &line[s..e];
+                // Find the file:line
+                let rest = &line[e + "' panicked at ".len()..];
+                let file_line = rest.split(", ").nth(1).unwrap_or("");
+                // file_line is like "src/file.rs:42:5" — split from right to get file:line
+                let parts: Vec<&str> = file_line.rsplitn(3, ':').collect();
+                // parts: ["5", "42", "src/file.rs"] (reversed from right)
+                let line_num = parts.get(1).and_then(|l| l.trim().parse::<u32>().ok());
+                let file = parts.get(2).map(|f| f.to_string()).or_else(|| parts.get(1).map(|f| f.to_string()));
+                let msg = rest.split("'").nth(1).unwrap_or("").to_string();
+
+                // Add or update failure
+                if let Some(failure) = result.failures.iter_mut().find(|f| f.test_name == test_name) {
+                    failure.message = msg;
+                    failure.file = file;
+                    failure.line = line_num;
+                } else {
+                    result.failures.push(TestFailure {
+                        test_name: test_name.to_string(),
+                        module: None,
+                        message: msg,
+                        file,
+                        line: line_num,
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn parse_pytest_output(raw: &str, result: &mut TestResultSet) {
+    for line in raw.lines() {
+        // Parse summary line: "X passed, Y failed, Z skipped in N.NNs"
+        if line.contains("passed") || line.contains("failed") {
+            if let Some(p) = extract_count(line, "passed") {
+                result.passed = p;
+            }
+            if let Some(f) = extract_count(line, "failed") {
+                result.failed = f;
+            }
+            if let Some(s) = extract_count(line, "skipped") {
+                result.ignored = s;
+            }
+            // Duration
+            if let Some(idx) = line.rfind("in ") {
+                let dur_str = &line[idx + 3..];
+                let dur_num: String = dur_str.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+                result.duration_secs = dur_num.parse().ok();
+            }
+            result.success = result.failed == 0;
+        }
+
+        // Parse failure: "FAILED test_file.py::test_name - AssertionError: ..."
+        if line.starts_with("FAILED ") {
+            let rest = &line[7..];
+            let parts: Vec<&str> = rest.splitn(2, " - ").collect();
+            let full_name = parts.first().unwrap_or(&"");
+            let message = parts.get(1).unwrap_or(&"").to_string();
+            let name_parts: Vec<&str> = full_name.split("::").collect();
+            let (module, test_name) = if name_parts.len() > 1 {
+                (Some(name_parts[0].to_string()), name_parts[1].to_string())
+            } else {
+                (None, full_name.to_string())
+            };
+            result.failures.push(TestFailure {
+                test_name,
+                module,
+                message,
+                file: None,
+                line: None,
+            });
+        }
+    }
+}
+
+fn parse_jest_output(raw: &str, result: &mut TestResultSet) {
+    for line in raw.lines() {
+        // Jest summary: "Tests: X failed, Y passed, Z total"
+        if line.starts_with("Tests:") {
+            if let Some(f) = extract_count(line, "failed") {
+                result.failed = f;
+            }
+            if let Some(p) = extract_count(line, "passed") {
+                result.passed = p;
+            }
+            if let Some(t) = extract_count(line, "total") {
+                result.total = t;
+            }
+            result.success = result.failed == 0;
+        }
+        // Jest time: "Time: 3.456s"
+        if line.starts_with("Time:") {
+            let dur: String = line[5..].trim().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            result.duration_secs = dur.parse().ok();
+        }
+        // Parse FAIL lines
+        if line.starts_with("FAIL ") || line.starts_with("  ✕ ") {
+            let name = if line.starts_with("FAIL ") {
+                &line[5..]
+            } else {
+                // "  ✕ " is 2 spaces + 3-byte char + 1 space = skip the prefix via trim
+                line.trim_start_matches(|c: char| c == ' ' || c == '✕' || c == '✗' || c == '×').trim_start()
+            };
+            result.failures.push(TestFailure {
+                test_name: name.trim().to_string(),
+                module: None,
+                message: String::new(),
+                file: None,
+                line: None,
+            });
+        }
+    }
+}
+
+fn parse_go_output(raw: &str, result: &mut TestResultSet) {
+    for line in raw.lines() {
+        // Go: "--- FAIL: TestName (0.00s)"
+        if line.contains("--- FAIL:") {
+            let rest = &line[line.find("--- FAIL:").unwrap() + 9..];
+            let name = rest.split('(').next().unwrap_or("").trim();
+            result.failures.push(TestFailure {
+                test_name: name.to_string(),
+                module: None,
+                message: String::new(),
+                file: None,
+                line: None,
+            });
+        }
+        // Go summary: "FAIL\t packageName\t 0.123s"
+        if line.starts_with("FAIL") && line.contains('\t') {
+            result.success = false;
+        }
+        // Go: "ok  \t packageName\t 0.123s"
+        if line.starts_with("ok") && line.contains('\t') {
+            result.passed += 1;
+        }
+        // Go: "FAIL\t packageName\t 0.123s"
+        if line.starts_with("FAIL\t") {
+            result.failed += 1;
+        }
+    }
+}
+
+/// Extract a count from text like "42 passed" or "3 failed".
+fn extract_count(text: &str, label: &str) -> Option<usize> {
+    let pattern = format!(" {}", label);
+    if let Some(idx) = text.find(&pattern) {
+        let before = &text[..idx];
+        let num_str: String = before.chars().rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        return num_str.parse().ok();
+    }
+    None
+}
+
+/// Run tests and return structured results.
+/// This is the agent-friendly API that returns typed data instead of raw strings.
+pub fn run_tests_structured(path: &str) -> Result<TestResultSet> {
+    let framework = detect_test_framework(path);
+    let raw = run_tests(path, &framework)?;
+    Ok(parse_test_output(&raw, &framework))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,5 +675,75 @@ mod tests {
         let text = "line1\nline2\nline3\nline4\nline5";
         assert_eq!(truncate_to_lines(text, 3), "line1\nline2\nline3");
         assert_eq!(truncate_to_lines(text, 10), text);
+    }
+
+    #[test]
+    fn test_parse_cargo_output_passing() {
+        let raw = "running 420 tests\ntest foo ... ok\ntest bar ... ok\n\ntest result: ok. 420 passed; 0 failed; 3 ignored; finished in 2.00s\n";
+        let result = parse_test_output(raw, &TestFramework::Cargo);
+        assert!(result.success);
+        assert_eq!(result.passed, 420);
+        assert_eq!(result.failed, 0);
+        assert_eq!(result.ignored, 3);
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_parse_cargo_output_with_failures() {
+        let raw = "running 5 tests\ntest test_a ... ok\ntest test_b ... FAILED\ntest test_c ... ok\n\ntest result: FAILED. 3 passed; 2 failed; 0 ignored;\nthread 'test_b' panicked at 'assertion failed', src/lib.rs:42:5\n";
+        let result = parse_test_output(raw, &TestFramework::Cargo);
+        assert!(!result.success);
+        assert_eq!(result.passed, 3);
+        assert_eq!(result.failed, 2);
+        assert!(!result.failures.is_empty());
+        // Check the panic was captured
+        let panic_failure = result.failures.iter().find(|f| f.test_name == "test_b");
+        assert!(panic_failure.is_some());
+        let pf = panic_failure.unwrap();
+        assert_eq!(pf.file.as_deref(), Some("src/lib.rs"));
+        assert_eq!(pf.line, Some(42));
+    }
+
+    #[test]
+    fn test_parse_pytest_output() {
+        let raw = "test_foo.py ..F\n\nFAILED test_foo.py::test_bar - AssertionError: expected 1\n\n2 passed, 1 failed in 0.05s\n";
+        let result = parse_test_output(raw, &TestFramework::Pytest);
+        assert!(!result.success);
+        assert_eq!(result.passed, 2);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.duration_secs, Some(0.05));
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(result.failures[0].test_name, "test_bar");
+        assert_eq!(result.failures[0].module.as_deref(), Some("test_foo.py"));
+    }
+
+    #[test]
+    fn test_parse_jest_output() {
+        let raw = "Tests: 1 failed, 5 passed, 6 total\nTime: 3.456s\nFAIL src/foo.test.js\n  ✕ should work\n";
+        let result = parse_test_output(raw, &TestFramework::Jest);
+        assert!(!result.success);
+        assert_eq!(result.passed, 5);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.total, 6);
+        assert_eq!(result.duration_secs, Some(3.456));
+    }
+
+    #[test]
+    fn test_parse_go_output() {
+        let raw = "--- FAIL: TestFoo (0.00s)\nok\tgithub.com/example/pkg\t0.123s\nFAIL\tgithub.com/example/bad\t0.456s\n";
+        let result = parse_test_output(raw, &TestFramework::GoTest);
+        assert!(!result.success);
+        assert_eq!(result.passed, 1);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(result.failures[0].test_name, "TestFoo");
+    }
+
+    #[test]
+    fn test_extract_count() {
+        assert_eq!(extract_count("420 passed; 0 failed", "passed"), Some(420));
+        assert_eq!(extract_count("420 passed; 0 failed", "failed"), Some(0));
+        assert_eq!(extract_count("3 failed", "failed"), Some(3));
+        assert_eq!(extract_count("no match here", "passed"), None);
     }
 }
