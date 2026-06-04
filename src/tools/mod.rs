@@ -35,6 +35,14 @@ pub trait Tool: Send + Sync {
     fn execute(&self, args: &str) -> Result<String>;
 }
 
+/// Async tool trait for tools that need async I/O (LSP, network, etc.)
+#[async_trait::async_trait]
+pub trait AsyncTool: Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    async fn execute_async(&self, args: &str) -> anyhow::Result<String>;
+}
+
 /// Global cache for MCP-discovered tools, populated after MCP initialization.
 static MCP_TOOLS: Mutex<Vec<Arc<dyn Tool>>> = Mutex::new(Vec::new());
 
@@ -298,6 +306,20 @@ pub fn get_all_tool_descriptions() -> Vec<(String, String)> {
         .iter()
         .map(|t| (t.name().to_string(), t.description().to_string()))
         .collect()
+}
+
+/// Get all async-native tools (LSP, refactor).
+pub fn get_async_tools() -> Vec<std::sync::Arc<dyn AsyncTool>> {
+    let manager = crate::lsp::global_lsp_manager();
+    vec![
+        std::sync::Arc::new(lsp::LspAsyncTool::new(manager.clone())),
+        std::sync::Arc::new(refactor::RefactorAsyncTool::new(manager)),
+    ]
+}
+
+/// Find an async tool by name.
+pub fn find_async_tool(name: &str) -> Option<std::sync::Arc<dyn AsyncTool>> {
+    get_async_tools().into_iter().find(|t| t.name() == name)
 }
 
 pub fn find_tool(name: &str) -> Option<Arc<dyn Tool>> {
