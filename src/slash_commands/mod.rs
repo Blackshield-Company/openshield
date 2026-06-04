@@ -317,6 +317,30 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "plugin",
+                aliases: &["plugins", "hook", "hooks"],
+                description: "Plugin management: list, create, reload",
+                usage: "/plugin [list|create <name>|reload]",
+                category: SlashCategory::Utility,
+                requires_args: false,
+                handler: |args| {
+                    let trimmed = args.trim();
+                    if trimmed.is_empty() || trimmed == "list" {
+                        SlashResult::Handled
+                    } else if let Some(name) = trimmed.strip_prefix("create ") {
+                        if name.is_empty() {
+                            SlashResult::Error("Usage: /plugin create <name>".to_string())
+                        } else {
+                            SlashResult::Prompt(format!("__plugin_create__ {}", name))
+                        }
+                    } else if trimmed == "reload" {
+                        SlashResult::Prompt("__plugin_reload__".to_string())
+                    } else {
+                        SlashResult::Error("Usage: /plugin [list|create <name>|reload]".to_string())
+                    }
+                },
+            },
+            SlashCommand {
                 name: "model",
                 aliases: &["m", "switch-model"],
                 description: "Switch active model",

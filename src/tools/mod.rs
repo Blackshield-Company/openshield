@@ -38,9 +38,20 @@ pub trait Tool: Send + Sync {
 /// Global cache for MCP-discovered tools, populated after MCP initialization.
 static MCP_TOOLS: Mutex<Vec<Arc<dyn Tool>>> = Mutex::new(Vec::new());
 
+/// Global cache for plugin tools, populated when PluginRegistry loads.
+static PLUGIN_TOOLS: Mutex<Vec<Arc<dyn Tool>>> = Mutex::new(Vec::new());
+
 /// Register MCP tools into the global cache. Called after MCP discovery.
 pub fn register_mcp_tools(tools: Vec<Arc<dyn Tool>>) {
     if let Ok(mut guard) = MCP_TOOLS.lock() {
+        guard.clear();
+        guard.extend(tools);
+    }
+}
+
+/// Register plugin tools into the global cache. Called after plugin discovery.
+pub fn register_plugin_tools(tools: Vec<Arc<dyn Tool>>) {
+    if let Ok(mut guard) = PLUGIN_TOOLS.lock() {
         guard.clear();
         guard.extend(tools);
     }
@@ -68,6 +79,13 @@ pub fn get_tools() -> Vec<Arc<dyn Tool>> {
     // Add MCP-discovered tools
     if let Ok(mcp) = MCP_TOOLS.lock() {
         for tool in mcp.iter() {
+            tools.push(Arc::clone(tool));
+        }
+    }
+
+    // Add plugin tools
+    if let Ok(plugins) = PLUGIN_TOOLS.lock() {
+        for tool in plugins.iter() {
             tools.push(Arc::clone(tool));
         }
     }
