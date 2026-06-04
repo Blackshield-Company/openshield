@@ -238,7 +238,13 @@ mod tests {
         let db_path = temp_db();
         let _ = std::fs::remove_file(&db_path);
 
-        let index = CodeIndex::open(&db_path, ".").unwrap();
+        // Create a temp project dir so we're not scanning the real project root
+        let proj_dir = format!("{}", db_path.replace(".db", "_proj"));
+        let _ = std::fs::remove_dir_all(&proj_dir);
+        std::fs::create_dir_all(format!("{}/src", proj_dir)).unwrap();
+        std::fs::write(format!("{}/src/main.rs", proj_dir), "fn main() {}\n").unwrap();
+
+        let index = CodeIndex::open(&db_path, &proj_dir).unwrap();
         let count = index.rebuild().unwrap();
         assert!(count > 0);
 
@@ -249,5 +255,6 @@ mod tests {
         assert_eq!(stats_count, count);
 
         let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir_all(&proj_dir);
     }
 }

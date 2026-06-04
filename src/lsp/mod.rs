@@ -4,7 +4,6 @@ pub mod diagnostics;
 pub mod manager;
 pub mod transport;
 
-pub use diagnostics::{DiagnosticEvent, DiagnosticStore};
 pub use manager::LspManager;
 pub use transport::AsyncTransport;
 

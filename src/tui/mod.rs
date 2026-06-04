@@ -23,7 +23,6 @@ use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, Tool
 use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetrics};
 use crate::tools::{detect_tool_suggestions, find_tool, get_tools, AsyncToolExecutor, Tool, ToolSuggestion};
 use chrono::Utc;
-use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
 use crate::skills::SkillRegistry;
 use crate::session::{SessionExport, ExportMessage, ExportBranch, export_to_default, list_exports};
