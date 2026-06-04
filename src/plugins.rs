@@ -161,9 +161,7 @@ impl PluginRegistry {
         let hook_dir = PathBuf::from(".openshark/hooks");
         std::fs::create_dir_all(&hook_dir)?;
         let path = hook_dir.join(format!("{}.sh", name));
-        let template = format!(
-            "#!/bin/bash\n# desc: User-defined plugin: {{name}}\n# Args are passed via stdin\n\nread -r args\necho \"Running {{name}} with args: $args\"\n",
-        );
+        let template = "#!/bin/bash\n# desc: User-defined plugin: {name}\n# Args are passed via stdin\n\nread -r args\necho \"Running {name} with args: $args\"\n".to_string();
         std::fs::write(&path, template)?;
         #[cfg(unix)]
         {

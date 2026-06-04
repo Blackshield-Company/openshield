@@ -205,8 +205,8 @@ impl ContextModeEngine {
                 file.reasons.join(", ")
             ));
 
-            if self.config.include_snippets {
-                if let Ok(content) = std::fs::read_to_string(
+            if self.config.include_snippets
+                && let Ok(content) = std::fs::read_to_string(
                     std::path::Path::new(&self.project_path).join(&file.path),
                 ) {
                     let snippet: String = content
@@ -218,7 +218,6 @@ impl ContextModeEngine {
                         lines.push(format!("    ```{}\n{}\n    ```", detect_lang(&file.path), snippet));
                     }
                 }
-            }
         }
 
         lines.push(String::new());

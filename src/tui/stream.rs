@@ -364,8 +364,8 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             }
         }
         StreamEvent::MultiModelResponse { name, content, metrics } => {
-            if !content.is_empty() {
-                if let Some(last_idx) = app.messages.iter().rposition(|m| m.role == "assistant") {
+            if !content.is_empty()
+                && let Some(last_idx) = app.messages.iter().rposition(|m| m.role == "assistant") {
                     app.messages[last_idx].multi_model_responses.push(SecondaryResponse {
                         model_name: name,
                         content,
@@ -373,7 +373,6 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                         tokens: metrics.tokens_generated,
                     });
                 }
-            }
         }
         StreamEvent::SetPendingBatch(batch) => {
             app.pending_batch = Some(batch);

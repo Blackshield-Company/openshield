@@ -153,11 +153,10 @@ pub fn stash_checkpoint(name: &str) -> Result<String> {
     let list_str = String::from_utf8_lossy(&list.stdout);
     // Find the first stash with our message
     for line in list_str.lines() {
-        if line.contains(&msg) {
-            if let Some(ref_part) = line.split(':').next() {
+        if line.contains(&msg)
+            && let Some(ref_part) = line.split(':').next() {
                 return Ok(ref_part.trim().to_string());
             }
-        }
     }
 
     // Fallback

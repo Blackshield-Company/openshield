@@ -286,7 +286,7 @@ fn browser_navigate(url: &str) -> Result<String> {
     let truncated = if text.len() > 6000 {
         format!(
             "{}...\n[truncated {} chars]",
-            crate::utils::truncate_str(&text, 6000),
+            crate::utils::truncate_str(text, 6000),
             text.len() - 6000
         )
     } else {
