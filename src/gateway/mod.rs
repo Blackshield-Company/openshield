@@ -1,10 +1,13 @@
 pub mod channel_state;
 pub mod commands;
+#[cfg(feature = "discord")]
 pub mod discord;
 pub mod matrix;
 pub mod message_router;
 pub mod platform;
+#[cfg(feature = "slack")]
 pub mod slack;
+#[cfg(feature = "telegram")]
 pub mod telegram;
 pub mod unified_router;
 
