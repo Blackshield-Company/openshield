@@ -1,7 +1,9 @@
 pub mod channel_state;
+#[cfg(feature = "discord")]
 pub mod commands;
 #[cfg(feature = "discord")]
 pub mod discord;
+pub mod events;
 pub mod matrix;
 pub mod message_router;
 pub mod platform;

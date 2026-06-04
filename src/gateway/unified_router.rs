@@ -1,19 +1,16 @@
-//! Unified router — normalizes events from all platforms into DiscordEvent format
+//! Unified router — normalizes events from all platforms into GatewayEvent format
 //! for the existing MessageRouter.
 //!
 //! This is a pragmatic bridge: the MessageRouter has 1000+ lines of battle-tested
-//! Discord logic (memory, skills, tool execution, multi-model). Rather than
+//! routing logic (memory, skills, tool execution, multi-model). Rather than
 //! duplicating that for each platform, we normalize all events to the same shape.
 
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::config::Config;
-use crate::gateway::discord::DiscordEvent;
-use crate::gateway::matrix::MatrixReplySender;
+use crate::gateway::events::GatewayEvent;
 use crate::gateway::message_router::MessageRouter;
-use crate::gateway::slack::SlackReplySender;
-use crate::gateway::telegram::TelegramReplySender;
 
 /// Unified event router that handles all platforms.
 pub struct UnifiedRouter {
@@ -26,17 +23,57 @@ impl UnifiedRouter {
         Ok(Self { inner })
     }
 
-    /// Handle a Discord event directly.
+    /// Handle a generic gateway event directly.
     #[allow(dead_code)]
-    pub async fn handle_discord_event(&mut self, event: DiscordEvent) {
+    pub async fn handle_event(&mut self, event: GatewayEvent) {
         self.inner.handle_event(event).await;
     }
 
-    /// Handle a Telegram event by converting to DiscordEvent format.
+    /// Handle a Discord event directly.
+    #[cfg(feature = "discord")]
+    #[allow(dead_code)]
+    pub async fn handle_discord_event(
+        &mut self,
+        event: crate::gateway::discord::DiscordEvent,
+    ) {
+        match event {
+            crate::gateway::discord::DiscordEvent::UserMessage {
+                channel_id,
+                user_id,
+                username,
+                content,
+                reply_tx,
+            } => {
+                let gateway_event = GatewayEvent::UserMessage {
+                    channel_id,
+                    user_id,
+                    username,
+                    content,
+                    reply_tx,
+                };
+                self.inner.handle_event(gateway_event).await;
+            }
+            crate::gateway::discord::DiscordEvent::SlashCommand {
+                interaction,
+                reply_tx,
+            } => {
+                self.inner.handle_discord_interaction(interaction, reply_tx).await;
+            }
+            crate::gateway::discord::DiscordEvent::Ready => {
+                info!("Discord gateway ready");
+            }
+            crate::gateway::discord::DiscordEvent::Disconnected => {
+                warn!("Discord gateway disconnected");
+            }
+        }
+    }
+
+    /// Handle a Telegram event by converting to GatewayEvent format.
+    #[cfg(feature = "telegram")]
     pub async fn handle_telegram_event(
         &mut self,
         event: crate::gateway::telegram::TelegramEvent,
-        reply_sender: &TelegramReplySender,
+        reply_sender: &crate::gateway::telegram::TelegramReplySender,
     ) {
         match event {
             crate::gateway::telegram::TelegramEvent::UserMessage {
@@ -58,7 +95,7 @@ impl UnifiedRouter {
                     }
                 });
 
-                let discord_event = DiscordEvent::UserMessage {
+                let discord_event = GatewayEvent::UserMessage {
                     channel_id: chat_id as u64,
                     user_id,
                     username,
@@ -76,11 +113,12 @@ impl UnifiedRouter {
         }
     }
 
-    /// Handle a Slack event by converting to DiscordEvent format.
+    /// Handle a Slack event by converting to GatewayEvent format.
+    #[cfg(feature = "slack")]
     pub async fn handle_slack_event(
         &mut self,
         event: crate::gateway::slack::SlackEvent,
-        reply_sender: &SlackReplySender,
+        reply_sender: &crate::gateway::slack::SlackReplySender,
     ) {
         match event {
             crate::gateway::slack::SlackEvent::UserMessage {
@@ -102,14 +140,14 @@ impl UnifiedRouter {
                     }
                 });
 
-                let discord_event = DiscordEvent::UserMessage {
+                let gateway_event = GatewayEvent::UserMessage {
                     channel_id: hash_string_to_u64(&channel_id),
                     user_id: hash_string_to_u64(&user_id),
                     username,
                     content,
                     reply_tx,
                 };
-                self.inner.handle_event(discord_event).await;
+                self.inner.handle_event(gateway_event).await;
             }
             crate::gateway::slack::SlackEvent::Ready => {
                 info!("Slack gateway ready");
@@ -120,11 +158,11 @@ impl UnifiedRouter {
         }
     }
 
-    /// Handle a Matrix event by converting to DiscordEvent format.
+    /// Handle a Matrix event by converting to GatewayEvent format.
     pub async fn handle_matrix_event(
         &mut self,
         event: crate::gateway::matrix::MatrixEvent,
-        reply_sender: &MatrixReplySender,
+        reply_sender: &crate::gateway::matrix::MatrixReplySender,
     ) {
         match event {
             crate::gateway::matrix::MatrixEvent::UserMessage {
@@ -147,14 +185,14 @@ impl UnifiedRouter {
                 });
 
                 let channel_id = hash_string_to_u64(&room_id);
-                let discord_event = DiscordEvent::UserMessage {
+                let gateway_event = GatewayEvent::UserMessage {
                     channel_id,
                     user_id: hash_string_to_u64(&user_id),
                     username,
                     content,
                     reply_tx,
                 };
-                self.inner.handle_event(discord_event).await;
+                self.inner.handle_event(gateway_event).await;
             }
             crate::gateway::matrix::MatrixEvent::Ready => {
                 info!("Matrix gateway ready");
