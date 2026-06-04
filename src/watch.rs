@@ -109,11 +109,10 @@ fn scan_dir(
             }
             scan_dir(&path, out)?;
         } else {
-            if let Ok(meta) = entry.metadata() {
-                if let Ok(modified) = meta.modified() {
+            if let Ok(meta) = entry.metadata()
+                && let Ok(modified) = meta.modified() {
                     out.insert(path, modified);
                 }
-            }
         }
     }
     Ok(())

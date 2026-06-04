@@ -36,11 +36,10 @@ impl SmartContext {
     /// Load smart context for a session from disk.
     pub fn load(session_id: &str) -> Self {
         let path = Self::storage_path(session_id);
-        if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(ctx) = serde_json::from_str::<SmartContext>(&data) {
+        if let Ok(data) = std::fs::read_to_string(&path)
+            && let Ok(ctx) = serde_json::from_str::<SmartContext>(&data) {
                 return ctx;
             }
-        }
         Self::new(session_id)
     }
 

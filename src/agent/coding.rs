@@ -163,8 +163,8 @@ impl CodingAgent {
             )?;
 
             // ── Phase 3: Run tests after edit tools ─────────────────────────
-            if is_edit_tool(&step.tool_name) && !tests_run {
-                if let Some(test_result) = self.run_tests().await {
+            if is_edit_tool(&step.tool_name) && !tests_run
+                && let Some(test_result) = self.run_tests().await {
                     progress(AgentProgress::TestsRunning {
                         framework: test_result.framework.clone(),
                     });
@@ -195,7 +195,6 @@ impl CodingAgent {
                         }
                     }
                 }
-            }
 
             // ── Phase 4: Run linter after edits ─────────────────────────────
             if is_edit_tool(&step.tool_name) && !lint_run && self.app_config.auto_lint {

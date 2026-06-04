@@ -165,6 +165,7 @@ pub fn get_custom_tools() -> Vec<Arc<dyn Tool>> {
 }
 
 /// Register custom tools into the global cache.
+#[allow(dead_code)]
 pub fn register_custom_tools(tools: Vec<Arc<dyn Tool>>) {
     if let Ok(mut guard) = CUSTOM_TOOLS.lock() {
         guard.clear();

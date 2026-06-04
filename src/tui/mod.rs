@@ -46,7 +46,6 @@ const MAX_CONTEXT_MESSAGES: usize = 5;
 const TICK_RATE: Duration = Duration::from_millis(16); // ~60fps for responsive input
 
 /// Events sent from the background streaming task to the main TUI loop.
-
 /// A single message in the chat history.
 #[derive(Debug, Clone)]
 struct ChatMessage {
@@ -1048,7 +1047,6 @@ impl App {
     }
 
     /// Apply a stream event from the background task.
-
     /// Get visible messages based on scroll.
     fn visible_messages(&self, height: usize) -> Vec<&ChatMessage> {
         let start = self.scroll;
@@ -1177,8 +1175,8 @@ async fn run_app(
                         break;
                     }
                 }
-                Event::Mouse(mouse_event) => {
-                    if app.mouse_enabled {
+                Event::Mouse(mouse_event)
+                    if app.mouse_enabled => {
                         let action = mouse::translate_mouse_event(mouse_event, app);
                         match action {
                             mouse::MouseAction::ChatClick { y } => {
@@ -1237,7 +1235,6 @@ async fn run_app(
                             mouse::MouseAction::None => {}
                         }
                     }
-                }
                 _ => {}
             }
         }
@@ -3027,28 +3024,6 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 /// Extract thinking content from a streaming chunk.
 /// Returns (Option<reasoning_text>, remaining_content).
 /// Handles partial <think> tags across chunk boundaries.
-
-/// Parse all explicit TOOL: invocations from text, anywhere in the response.
-/// Handles both `TOOL:tool_name args` and `TOOL: tool_name args` (with space after colon).
-
-/// Parse JSON tool format: supports two forms:
-/// 1. tool_name {"key": "value", ...}    (bare JSON)
-/// 2. tool_name:0>{"key": "value", ...}  (numeric-indexed)
-
-/// Find balanced JSON string starting with '{' or '['.
-
-/// Extract args from a parsed JSON object string.
-/// Maps JSON fields to space-separated args that each tool's execute method expects.
-
-/// Generic fallback for unknown/MCP tools: collect all string/number values.
-
-/// Strip TOOL: / TOOL. lines from assistant content for display.
-
-/// Extract thinking/reasoning content from <think>...</think> blocks.
-
-/// Strip all <think>...</think> blocks from text.
-
-/// Execute a chain of tools and stream follow-up via the event channel.
 async fn execute_tool_chain(
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
     provider: &Provider,
@@ -4045,7 +4020,7 @@ async fn handle_slash_result(
                         };
 
                         let config = crate::headless::HeadlessConfig {
-                            task: format!("{}", task),
+                            task: task.to_string(),
                             yolo: true,
                             json: false,
                             timeout_secs: 300,
@@ -4206,9 +4181,9 @@ async fn handle_slash_result(
                 }
                 _ if setting.starts_with("batch_approve:") => {
                     let idx_str = &setting["batch_approve:".len()..];
-                    if let Ok(idx) = idx_str.parse::<usize>() {
-                        if let Some(ref mut batch) = app.pending_batch {
-                            if idx < batch.approved.len() {
+                    if let Ok(idx) = idx_str.parse::<usize>()
+                        && let Some(ref mut batch) = app.pending_batch
+                            && idx < batch.approved.len() {
                                 let name = batch.suggestions[idx].tool_name.clone();
                                 let args = batch.suggestions[idx].args.clone();
                                 batch.approved[idx] = true;
@@ -4217,21 +4192,17 @@ async fn handle_slash_result(
                                     idx, name, args
                                 ));
                             }
-                        }
-                    }
                 }
                 _ if setting.starts_with("batch_reject:") => {
                     let idx_str = &setting["batch_reject:".len()..];
-                    if let Ok(idx) = idx_str.parse::<usize>() {
-                        if let Some(ref mut batch) = app.pending_batch {
-                            if idx < batch.approved.len() {
+                    if let Ok(idx) = idx_str.parse::<usize>()
+                        && let Some(ref mut batch) = app.pending_batch
+                            && idx < batch.approved.len() {
                                 batch.approved[idx] = false;
                                 app.add_system_message(format!(
                                     "❌ Rejected suggestion {}", idx
                                 ));
                             }
-                        }
-                    }
                 }
                 _ => {
                     app.add_system_message(format!(
@@ -4319,7 +4290,7 @@ async fn handle_slash_result(
                     return Ok(true);
                 }
                 if name.starts_with("unarchive") || name == "unhide" || name == "restore-session" {
-                    let args = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                    let args = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim();
                     if args.is_empty() {
                         app.add_system_message("Usage: /unarchive <session-id>".to_string());
                     } else {
@@ -4364,7 +4335,7 @@ async fn handle_slash_result(
                 }
                 // /ctx list — show pinned files
                 if name == "ctx" || name == "pin" {
-                    let args = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                    let args = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim();
                     if args.is_empty() || args == "list" {
                         let lines = app.smart_context.list();
                         app.add_system_message(lines.join("\n"));
@@ -4373,7 +4344,7 @@ async fn handle_slash_result(
                 }
                 // /plugin list — show plugins
                 if name == "plugin" || name == "plugins" || name == "hook" || name == "hooks" {
-                    let args = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                    let args = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim();
                     if args.is_empty() || args == "list" {
                         if let Some(ref registry) = app.plugin_registry {
                             let plugins: Vec<String> = registry.list().iter().map(|p| format!("{} — {}", p.name, p.description)).collect();
@@ -4515,25 +4486,22 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
             }
 
             // Auto-commit if enabled and tool was an edit
-            if app.config.auto_commit && is_edit_tool(&suggestion.tool_name) {
-                if let Err(e) = auto_commit_changes(app).await {
+            if app.config.auto_commit && is_edit_tool(&suggestion.tool_name)
+                && let Err(e) = auto_commit_changes(app).await {
                     app.add_system_message(format!("⚠️ Auto-commit failed: {}", e));
                 }
-            }
 
             // Auto-run tests if enabled and tool was an edit
-            if app.config.auto_run_tests && is_edit_tool(&suggestion.tool_name) {
-                if let Err(e) = auto_run_tests(app).await {
+            if app.config.auto_run_tests && is_edit_tool(&suggestion.tool_name)
+                && let Err(e) = auto_run_tests(app).await {
                     app.add_system_message(format!("⚠️ Auto-test failed: {}", e));
                 }
-            }
 
             // Auto-lint if enabled and tool was an edit — feed errors back for auto-fix
-            if app.config.auto_lint && is_edit_tool(&suggestion.tool_name) {
-                if let Err(e) = auto_lint_after_edit(app).await {
+            if app.config.auto_lint && is_edit_tool(&suggestion.tool_name)
+                && let Err(e) = auto_lint_after_edit(app).await {
                     app.add_system_message(format!("⚠️ Auto-lint failed: {}", e));
                 }
-            }
         }
         Err(e) => {
             app.add_system_message(format!("Tool execution failed: {}", e));
@@ -4771,7 +4739,6 @@ async fn generate_commit_message(app: &mut App) -> Result<String> {
 
 /// Generate a diff preview for an edit tool suggestion.
 /// Returns Some(diff) if the suggestion is for write/replace/patch and a diff can be generated.
-
 /// Auto-commit changes after a successful edit.
 #[allow(dead_code)]
 async fn auto_commit_changes(app: &mut App) -> Result<()> {

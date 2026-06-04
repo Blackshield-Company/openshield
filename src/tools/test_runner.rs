@@ -423,8 +423,7 @@ fn parse_pytest_output(raw: &str, result: &mut TestResultSet) {
         }
 
         // Parse failure: "FAILED test_file.py::test_name - AssertionError: ..."
-        if line.starts_with("FAILED ") {
-            let rest = &line[7..];
+        if let Some(rest) = line.strip_prefix("FAILED ") {
             let parts: Vec<&str> = rest.splitn(2, " - ").collect();
             let full_name = parts.first().unwrap_or(&"");
             let message = parts.get(1).unwrap_or(&"").to_string();
@@ -461,18 +460,19 @@ fn parse_jest_output(raw: &str, result: &mut TestResultSet) {
             result.success = result.failed == 0;
         }
         // Jest time: "Time: 3.456s"
-        if line.starts_with("Time:") {
-            let dur: String = line[5..].trim().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+        if let Some(rest) = line.strip_prefix("Time:") {
+            let dur: String = rest.trim().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
             result.duration_secs = dur.parse().ok();
         }
         // Parse FAIL lines
-        if line.starts_with("FAIL ") || line.starts_with("  ✕ ") {
-            let name = if line.starts_with("FAIL ") {
-                &line[5..]
-            } else {
-                // "  ✕ " is 2 spaces + 3-byte char + 1 space = skip the prefix via trim
-                line.trim_start_matches(|c: char| c == ' ' || c == '✕' || c == '✗' || c == '×').trim_start()
-            };
+        let name = if let Some(rest) = line.strip_prefix("FAIL ") {
+            Some(rest)
+        } else if line.starts_with("  ✕ ") || line.starts_with("  ✗ ") || line.starts_with("  × ") {
+            Some(line.trim_start_matches([' ', '✕', '✗', '×']).trim_start())
+        } else {
+            None
+        };
+        if let Some(name) = name {
             result.failures.push(TestFailure {
                 test_name: name.trim().to_string(),
                 module: None,

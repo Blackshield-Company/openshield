@@ -262,7 +262,7 @@ impl EditTool {
         }
 
         // Process hunks in reverse order (by old_start descending) so line numbers don't shift
-        hunks.sort_by(|a, b| b.0.cmp(&a.0));
+        hunks.sort_by_key(|b| std::cmp::Reverse(b.0));
 
         for (old_start, _new_start, hunk_body) in hunks {
             let start_idx = old_start.saturating_sub(1); // 1-based to 0-based
@@ -276,9 +276,9 @@ impl EditTool {
                         result_lines.remove(idx);
                     }
                     // offset stays same since we removed current line
-                } else if hunk_line.starts_with('+') {
+                } else if let Some(rest) = hunk_line.strip_prefix('+') {
                     // Insert after current position
-                    result_lines.insert(idx, hunk_line[1..].to_string());
+                    result_lines.insert(idx, rest.to_string());
                     offset += 1; // we added a line, so advance
                 } else if hunk_line.starts_with(' ') {
                     // Context line — just advance
