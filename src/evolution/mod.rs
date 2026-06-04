@@ -174,7 +174,7 @@ impl EvolutionEngine {
                 let mut context = String::new();
                 for (i, msg) in messages.iter().take(3).enumerate() {
                     let preview = if msg.content.len() > 300 {
-                        format!("{}...", &msg.content[..300])
+                        format!("{}...", crate::utils::truncate_str(&msg.content, 300))
                     } else {
                         msg.content.clone()
                     };

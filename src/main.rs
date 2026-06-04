@@ -41,6 +41,7 @@ mod slash_commands;
 mod swarm;
 mod tools;
 mod tui;
+mod utils;
 mod watch;
 
 use crate::tools::Tool;
