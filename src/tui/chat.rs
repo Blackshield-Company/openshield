@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::tui::{App, AppMode};
+use crate::tui::App;
 use crate::memory::ToolCall;
 use crate::providers::Message;
 use crate::tools::{find_tool, detect_tool_suggestions, ToolSuggestion};

@@ -2,7 +2,7 @@
 //! keyed by language ID, avoiding per-call server spawns.
 
 use super::diagnostics::{parse_diagnostics_notification, DiagnosticStore};
-use super::{Diagnostic, Symbol};
+use super::Symbol;
 use crate::lsp::AsyncTransport;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -588,7 +588,7 @@ mod tests {
         assert_eq!(lang, "rust");
         assert!(args.is_empty());
 
-        let (cmd, args, lang) = LspManager::detect_server("test.py");
+        let (cmd, _args, lang) = LspManager::detect_server("test.py");
         assert_eq!(cmd, "pylsp");
         assert_eq!(lang, "python");
 

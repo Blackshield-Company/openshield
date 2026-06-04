@@ -185,6 +185,9 @@ fn _capitalize_first(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_identity() -> AgentIdentity {
         AgentIdentity {
@@ -255,6 +258,7 @@ mod tests {
 
     #[test]
     fn test_blank_soul() {
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
             std::env::set_var("SOUL_NAME", "blank");
         }
@@ -268,6 +272,7 @@ mod tests {
 
     #[test]
     fn test_default_soul() {
+        let _guard = ENV_LOCK.lock().unwrap();
         // Run after test_blank_soul to ensure env is clean
         unsafe {
             std::env::remove_var("SOUL_NAME");

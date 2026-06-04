@@ -282,9 +282,15 @@ pub fn format_repo_map_compact(map: &RepoMap) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    static CLEANUP_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_rust_project() -> String {
-        let dir = format!("/tmp/openshark_repo_test_{}", std::process::id());
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = format!("/tmp/openshark_repo_test_{}_{n}", std::process::id());
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(format!("{}/src", dir)).unwrap();
         fs::write(format!("{}/src/main.rs", dir), r#"
@@ -315,6 +321,11 @@ version = "0.1.0"
         dir
     }
 
+    fn cleanup(dir: &str) {
+        let _guard = CLEANUP_LOCK.lock().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn test_detect_language() {
         assert_eq!(detect_language(Path::new("foo.rs")), "rust");
@@ -338,7 +349,7 @@ version = "0.1.0"
         let fns = map.find_symbols_by_kind(SymbolKind::Function);
         assert!(!fns.is_empty());
 
-        let _ = fs::remove_dir_all(&dir);
+        cleanup(&dir);
     }
 
     #[test]
@@ -348,6 +359,6 @@ version = "0.1.0"
         let formatted = format_repo_map(&map);
         assert!(formatted.contains("main"));
         assert!(formatted.contains("MyStruct"));
-        let _ = fs::remove_dir_all(&dir);
+        cleanup(&dir);
     }
 }

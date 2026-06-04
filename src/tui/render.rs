@@ -1,5 +1,4 @@
 use ratatui::{
-    backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
@@ -9,22 +8,17 @@ use ratatui::{
     },
     Frame,
 };
-use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
-use super::{App, AppMode, ChatMessage, SessionBranch};
+use super::{App, AppMode};
 use super::command_palette;
 use super::bookmarks;
 use super::image_display;
 use super::ascii_art;
 use super::syntax_highlight;
-use super::{border_style, bg_style, shark_style, title_style, accent_style, highlight_style, muted_style, error_style, success_style, prompt_style, reasoning_style, header_style, secondary_accent_style, selected_style, focused_border_style, dim, tool_style, user_name_style, agent_name_style, text_style};
-use crate::memory::ToolCall;
-use crate::providers::Message;
-use crate::tools::{get_tools, find_tool, detect_tool_suggestions, ToolSuggestion};
+use super::{border_style, bg_style, shark_style, title_style, accent_style, highlight_style, muted_style, error_style, reasoning_style, focused_border_style, tool_style, text_style};
+use crate::tools::get_tools;
 use crate::tui::theme::current_theme;
-use chrono::Utc;
-use uuid::Uuid;
 
 pub(crate) fn draw_ui(f: &mut Frame, app: &App) {
     if app.mode == AppMode::Splash {
