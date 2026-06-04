@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tracing::info;
@@ -43,6 +44,9 @@ mod tools;
 mod tui;
 mod utils;
 mod watch;
+
+#[cfg(feature = "web-api")]
+mod api;
 
 use crate::tools::Tool;
 use config::Config;
@@ -228,6 +232,13 @@ enum Commands {
     Profile {
         #[arg(default_value = "")]
         name: String,
+    },
+    /// Start HTTP + WebSocket API server
+    #[cfg(feature = "web-api")]
+    Serve {
+        /// Bind address (default: 127.0.0.1:8080)
+        #[arg(short, long, default_value = "127.0.0.1:8080")]
+        addr: String,
     },
 }
 
@@ -1418,6 +1429,18 @@ async fn main() -> anyhow::Result<()> {
                     eprintln!("❌ Failed to get sessions: {}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+        #[cfg(feature = "web-api")]
+        Some(Commands::Serve { addr }) => {
+            info!("Starting OpenShark API server on {}", addr);
+            let state = crate::api::AppState {
+                config: Arc::new(config),
+                running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            };
+            if let Err(e) = crate::api::serve(state, &addr).await {
+                eprintln!("❌ API server error: {}", e);
+                std::process::exit(1);
             }
         }
     }
