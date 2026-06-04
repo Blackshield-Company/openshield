@@ -45,13 +45,12 @@ impl ConsensusMemory {
     }
 
     /// Approve an entry by a reviewer.
-    pub fn approve_entry(&mut self, author: &str, reviewer: &str) {
-        // Find the most recent pending entry by this author
+    pub fn approve_entry(&mut self, entry_id: &str, reviewer: &str) {
+        // Find the pending entry by entry_id
         if let Some(entry) = self
             .entries
             .values_mut()
-            .filter(|e| e.author == author && e.status == EntryStatus::Pending)
-            .max_by_key(|e| e.timestamp)
+            .find(|e| e.id == entry_id && e.status == EntryStatus::Pending)
         {
             if !entry.approvals.contains(&reviewer.to_string()) {
                 entry.approvals.push(reviewer.to_string());
@@ -72,12 +71,11 @@ impl ConsensusMemory {
     }
 
     /// Reject an entry by a reviewer with feedback.
-    pub fn reject_entry(&mut self, author: &str, reviewer: &str, _feedback: &str) {
+    pub fn reject_entry(&mut self, entry_id: &str, reviewer: &str, _feedback: &str) {
         if let Some(entry) = self
             .entries
             .values_mut()
-            .filter(|e| e.author == author && e.status == EntryStatus::Pending)
-            .max_by_key(|e| e.timestamp)
+            .find(|e| e.id == entry_id && e.status == EntryStatus::Pending)
         {
             if !entry.rejections.contains(&reviewer.to_string()) {
                 entry.rejections.push(reviewer.to_string());
@@ -188,7 +186,7 @@ mod tests {
         };
 
         mem.add_entry(entry);
-        mem.approve_entry("agent-1", "agent-2");
+        mem.approve_entry("test-1", "agent-2");
 
         let entries = mem.entries();
         assert_eq!(entries[0].status, EntryStatus::Approved);
@@ -209,8 +207,8 @@ mod tests {
         };
 
         mem.add_entry(entry);
-        mem.reject_entry("agent-1", "agent-2", "Needs more work");
-        mem.reject_entry("agent-1", "agent-3", "Still bad");
+        mem.reject_entry("test-1", "agent-2", "Needs more work");
+        mem.reject_entry("test-1", "agent-3", "Still bad");
 
         let entries = mem.entries();
         assert_eq!(entries[0].status, EntryStatus::Rejected);

@@ -359,6 +359,7 @@ impl AgentRunner {
         target_agent: AgentId,
         work_content: &str,
         agent_ref: &Arc<RwLock<SwarmAgent>>,
+        entry_id: &str,
     ) -> Result<(bool, String)> {
         info!("🐝 Agent {} reviewing {}", self.agent_id, target_agent);
 
@@ -429,6 +430,7 @@ impl AgentRunner {
             target_agent: target_agent.clone(),
             approval: approved,
             feedback: feedback.clone(),
+            entry_id: entry_id.to_string(),
         });
 
         info!(

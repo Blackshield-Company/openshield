@@ -54,7 +54,7 @@ pub fn sync_pull(hermes_home: &str) -> anyhow::Result<String> {
     }
     
     // TODO: Implement actual memory sync
-    Ok(format!("Hermes memory sync from {} — not yet implemented", memory_src.display()))
+    anyhow::bail!("Not yet implemented — Hermes sync is a planned feature")
 }
 
 /// Push OpenShark skills to Hermes.
@@ -67,5 +67,5 @@ pub fn sync_push(hermes_home: &str) -> anyhow::Result<String> {
     }
     
     // TODO: Implement actual skills sync
-    Ok(format!("Hermes skills sync to {} — not yet implemented", skills_dst.display()))
+    anyhow::bail!("Not yet implemented — Hermes sync is a planned feature")
 }
