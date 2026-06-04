@@ -5264,6 +5264,13 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                     app.add_system_message(format!("⚠️ Auto-test failed: {}", e));
                 }
             }
+
+            // Auto-lint if enabled and tool was an edit — feed errors back for auto-fix
+            if app.config.auto_lint && is_edit_tool(&suggestion.tool_name) {
+                if let Err(e) = auto_lint_after_edit(app).await {
+                    app.add_system_message(format!("⚠️ Auto-lint failed: {}", e));
+                }
+            }
         }
         Err(e) => {
             app.add_system_message(format!("Tool execution failed: {}", e));
@@ -7031,5 +7038,47 @@ async fn remove_worktree(project_path: &str, worktree_path: &str) -> anyhow::Res
         .await;
 
     tracing::info!("[worktree] Removed {}", worktree_path);
+    Ok(())
+}
+
+/// Auto-run linter after edit and inject results into the conversation.
+/// If lint errors are found, they're added as a system message so the agent
+/// can see them and auto-fix in the next turn.
+async fn auto_lint_after_edit(app: &mut App) -> Result<()> {
+    let path = app.config.filesystem.working_directory.as_deref().unwrap_or(".");
+    match crate::linting::run_linter(path).await {
+        Ok(results) => {
+            if results.is_empty() {
+                app.add_system_message("✅ Lint: no issues found.".to_string());
+            } else {
+                let errors = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Error)).count();
+                let warnings = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Warning)).count();
+
+                // Build a structured message the agent can parse and fix
+                let mut msg = format!(
+                    "🔍 Lint results: {} errors, {} warnings\n\n",
+                    errors, warnings
+                );
+                for r in results.iter().take(15) {
+                    msg.push_str(&format!(
+                        "  {} {}:{} — {}: {}\n",
+                        r.severity, r.file, r.line,
+                        r.code.as_deref().unwrap_or("-"),
+                        r.message
+                    ));
+                }
+                if results.len() > 15 {
+                    msg.push_str(&format!("  ... and {} more issues\n", results.len() - 15));
+                }
+                msg.push_str("\nFix these lint issues. Use TOOL:edit to apply fixes.");
+
+                app.add_system_message(msg);
+            }
+        }
+        Err(e) => {
+            // Non-fatal — linter might not be installed
+            tracing::debug!("Auto-lint skipped: {}", e);
+        }
+    }
     Ok(())
 }

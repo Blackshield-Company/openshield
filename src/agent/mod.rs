@@ -524,6 +524,7 @@ impl Agent {
             editor_model: None,
             auto_run_tests: false,
             test_command: None,
+            auto_lint: false,
             effort_level: "medium".to_string(),
         }
     }
