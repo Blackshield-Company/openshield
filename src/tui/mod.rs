@@ -2307,6 +2307,43 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
         return Ok(());
     }
+    // Session search pseudo-prompt
+    if let Some(query) = input.strip_prefix("__search__ ") {
+        match app.memory.search_messages(query, 20) {
+            Ok(messages) => {
+                if messages.is_empty() {
+                    app.add_system_message(format!("🔍 No results for '{}'", query));
+                } else {
+                    let mut lines = vec![
+                        format!("🔍 Search Results for '{}' ({} found):", query, messages.len()),
+                        "─".repeat(50),
+                    ];
+                    for (i, msg) in messages.iter().take(10).enumerate() {
+                        let preview = if msg.content.len() > 120 {
+                            format!("{}...", &msg.content[..120])
+                        } else {
+                            msg.content.clone()
+                        };
+                        let date = msg.created_at.format("%Y-%m-%d %H:%M");
+                        lines.push(format!(
+                            "  {}. [{}] {} | {}: {}",
+                            i + 1,
+                            msg.role,
+                            date,
+                            &msg.session_id[..msg.session_id.len().min(16)],
+                            preview
+                        ));
+                    }
+                    if messages.len() > 10 {
+                        lines.push(format!("\n  ... and {} more results", messages.len() - 10));
+                    }
+                    app.add_system_message(lines.join("\n"));
+                }
+            }
+            Err(e) => app.add_system_message(format!("❌ Search failed: {}", e)),
+        }
+        return Ok(());
+    }
 
     if input == "help" {
         app.add_system_message(
