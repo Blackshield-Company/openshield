@@ -11,6 +11,7 @@ mod cache;
 mod capabilities;
 mod config;
 mod context_mode;
+mod context_pinner;
 mod diff;
 mod doctor;
 mod evolution;

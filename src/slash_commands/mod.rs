@@ -282,6 +282,26 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "ctx",
+                aliases: &["pin", "unpin"],
+                description: "Pin/unpin files to context: /ctx <path>, /ctx clear, /ctx list",
+                usage: "/ctx <path> | /ctx clear | /ctx list | /ctx unpin <path>",
+                category: SlashCategory::Session,
+                requires_args: false,
+                handler: |args| {
+                    let trimmed = args.trim();
+                    if trimmed.is_empty() || trimmed == "list" {
+                        SlashResult::Handled
+                    } else if trimmed == "clear" {
+                        SlashResult::Toggle { setting: "ctx_clear".to_string(), value: true }
+                    } else if let Some(rest) = trimmed.strip_prefix("unpin ") {
+                        SlashResult::Prompt(format!("__ctx_unpin__ {}", rest))
+                    } else {
+                        SlashResult::Prompt(format!("__ctx_pin__ {}", trimmed))
+                    }
+                },
+            },
+            SlashCommand {
                 name: "model",
                 aliases: &["m", "switch-model"],
                 description: "Switch active model",
