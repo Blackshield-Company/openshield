@@ -11,7 +11,7 @@
 *High impact, medium effort. These are expected by any serious harness user.*
 
 ### 1.1 Auto / YOLO Mode
-**Status:** Not started | **Effort:** Low | **Source:** Cline, Claude Code
+**Status:** ✅ Shipped in v1.5 | **Effort:** Low | **Source:** Cline, Claude Code
 
 Skip all tool approval prompts. Toggle with `/yolo` or config `yolo_mode = true`.
 
@@ -33,7 +33,7 @@ if app.yolo_mode {
 ---
 
 ### 1.2 Auto-Commit with LLM-Generated Messages
-**Status:** Not started | **Effort:** Low | **Source:** Aider
+**Status:** ✅ Shipped in v1.5 | **Effort:** Low | **Source:** Aider
 
 After edit tools, generate a commit message via quick LLM call instead of static string.
 
@@ -52,7 +52,7 @@ async fn generate_commit_message(&self, diff: &str) -> String {
 ---
 
 ### 1.3 Test Runner Auto-Run
-**Status:** Not started | **Effort:** Medium | **Source:** Aider
+**Status:** ✅ Shipped in v1.6 | **Effort:** Medium | **Source:** Aider
 
 After edit tools, auto-run `cargo test` (or configured test command) and report results.
 
@@ -73,7 +73,7 @@ async fn run_tests(&self) -> TestResult {
 ---
 
 ### 1.4 Effort Levels / Thinking Budgets
-**Status:** Not started | **Effort:** Low | **Source:** Claude Code, Aider
+**Status:** ✅ Shipped in v1.4 | **Effort:** Low | **Source:** Claude Code, Aider
 
 `/effort low|medium|high|xhigh` adjusts reasoning depth per request.
 
@@ -98,7 +98,7 @@ fn effort_prompt_prefix(level: &str) -> &'static str {
 ---
 
 ### 1.5 Copy-on-Select
-**Status:** Not started | **Effort:** Low | **Source:** Claude Code
+**Status:** ✅ Shipped in v1.4 | **Effort:** Low | **Source:** Claude Code
 
 Auto-copy selected text to clipboard when user releases mouse in TUI.
 
@@ -118,7 +118,7 @@ if let Some(selection) = app.current_selection {
 ---
 
 ### 1.6 Git Worktree Isolation
-**Status:** Not started | **Effort:** Medium | **Source:** Claude Code
+**Status:** ✅ Shipped in v1.6 (headless mode) | **Effort:** Medium | **Source:** Claude Code
 
 Background `/headless` sessions use git worktrees so they don't stomp working tree.
 
@@ -139,7 +139,7 @@ async fn run_in_worktree(task: &str) -> Result<()> {
 ---
 
 ### 1.7 OSC 8 Terminal Hyperlinks
-**Status:** Not started | **Effort:** Low | **Source:** Codex CLI
+**Status:** ✅ Shipped in v1.4 | **Effort:** Low | **Source:** Codex CLI
 
 Render clickable URLs in terminal output using OSC 8 escape sequences.
 
@@ -157,7 +157,7 @@ pub fn osc8_link(url: &str, text: &str) -> String {
 ---
 
 ### 1.8 Context Mode (Auto File Identification)
-**Status:** Not started | **Effort:** Medium | **Source:** Aider
+**Status:** ✅ Shipped in v1.4 | **Effort:** Medium | **Source:** Aider
 
 Agent auto-identifies which files need editing without user specifying.
 
@@ -209,7 +209,7 @@ struct WorkflowTask {
 ---
 
 ### 2.2 Sandbox v2 — Permission Profiles
-**Status:** Partial (sandbox.rs exists) | **Effort:** Medium | **Source:** Codex CLI
+**Status:** ✅ Shipped in v1.4 (profiles + sandbox integration) | **Effort:** Medium | **Source:** Codex CLI
 
 Filesystem sandboxing with deny/allow lists. Per-command risk levels.
 
@@ -232,7 +232,7 @@ struct SandboxProfile {
 ---
 
 ### 2.3 Guardian Code Review Agent
-**Status:** Not started | **Effort:** High | **Source:** Codex CLI
+**Status:** ✅ Shipped in v1.4 (`/review` command) | **Effort:** High | **Source:** Codex CLI
 
 Secondary agent reviews proposed edits before applying. Cache key for speed.
 
@@ -341,7 +341,7 @@ enum EditFormat {
 ---
 
 ### 2.8 Archive / Unarchive Sessions
-**Status:** Not started | **Effort:** Low | **Source:** Codex CLI
+**Status:** ✅ Shipped in v1.3 (`/archive`, `/unarchive`) | **Effort:** Low | **Source:** Codex CLI
 
 Save session state to disk, load later. `/archive <name>`, `/unarchive <name>`.
 
@@ -402,7 +402,7 @@ System notifications when background tasks complete.
 ---
 
 ### 3.2 JSON / NDJSON Output Mode
-**Status:** Partial (`json_output.rs` exists) | **Effort:** Low | **Source:** Claude Code, Cline
+**Status:** ✅ Shipped in v1.6 (headless --json, --ndjson) | **Effort:** Low | **Source:** Claude Code, Cline
 
 `openshark -p "prompt" --json` for scripting/piping.
 
@@ -434,7 +434,7 @@ Git commits tagged with `Co-authored-by: OpenShark <openshark@local>`.
 ---
 
 ### 3.5 Watch Mode
-**Status:** Partial (`watch.rs` exists) | **Effort:** Low | **Source:** Aider
+**Status:** ✅ Shipped in v1.3 (`/watch` command) | **Effort:** Low | **Source:** Aider
 
 File watcher triggers agent when files change.
 
