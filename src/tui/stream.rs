@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::memory::{MemoryStore, ToolCall};
+use crate::memory::ToolCall;
 use crate::providers::{Message, StreamMetrics};
 use crate::tools::ToolSuggestion;
 use chrono::Utc;
 use uuid::Uuid;
 
-use super::{App, AppMode, ChatMessage};
+use super::{App, AppMode};
 
 /// Events sent from the background streaming task to the main TUI loop.
 #[derive(Debug)]
