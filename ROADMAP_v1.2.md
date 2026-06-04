@@ -6,7 +6,7 @@ OpenShark becomes the **synthesis engine** — a standalone powerhouse that opti
 
 ---
 
-## Tier 1: Git Agent (Code Agent Parity)
+## Tier 1: Git Agent (Code Agent Parity) ✅ COMPLETE
 
 **Goal:** Match Claw Code / Claude Code / OpenCode for the core coding loop.
 
@@ -26,7 +26,7 @@ OpenShark becomes the **synthesis engine** — a standalone powerhouse that opti
 
 ---
 
-## Tier 2: Hermes Bridge (Optional)
+## Tier 2: Hermes Bridge (Optional) 🟡 SCAFFOLDED
 
 **Goal:** Two-way sync with Hermes — OpenShark reads Hermes memory, Hermes reads OpenShark skills.
 
@@ -54,7 +54,7 @@ push_skills = true
 
 ---
 
-## Tier 3: OpenClaw / OpenCode / Claw-Code Interop (Optional)
+## Tier 3: OpenClaw / OpenCode / Claw-Code Interop (Optional) ✅ COMPLETE
 
 **Goal:** Delegate to other agents, stream results back. OpenShark as conductor.
 
@@ -78,7 +78,7 @@ openshark delegate claude "write tests for src/lib.rs"  # Delegate to Claude Cod
 
 ---
 
-## Tier 4: Platform Expansion
+## Tier 4: Platform Expansion 🟡 PARTIAL
 
 **Goal:** GitHub-native integration, richer Discord commands, web API scaffold.
 
@@ -86,8 +86,8 @@ openshark delegate claude "write tests for src/lib.rs"  # Delegate to Claude Cod
 |---------|--------|-------------|
 | GitHub MCP native | 📋 | Built-in GitHub tools (issues, PRs, repos) without external MCP |
 | Discord slash commands | 📋 | `/swarm`, `/code`, `/review` slash commands |
-| Web API scaffold | 📋 | HTTP REST API for external tools (optional feature flag) |
-| SSE streaming endpoint | 📋 | Server-sent events for external consumers |
+| Web API scaffold | ✅ | HTTP REST API + WebSocket streaming (feature-gated) |
+| SSE streaming endpoint | ✅ | WebSocket streaming at /ws/v1/chat and /ws/v1/agent |
 
 **Files:**
 - `src/capabilities/github.rs` — native GitHub REST API tools
@@ -96,7 +96,7 @@ openshark delegate claude "write tests for src/lib.rs"  # Delegate to Claude Cod
 
 ---
 
-## Tier 5: The Synthesis Engine
+## Tier 5: The Synthesis Engine 📋 NOT STARTED
 
 **Goal:** Meta-learning across harnesses. OpenShark learns which agent performs best per task type.
 
@@ -120,10 +120,10 @@ openshark synthesis --compare "refactor" # Run on all available agents, compare
 
 ## Implementation Order
 
-1. **Tier 1** — Git agent (`/commit`, `/pr`, `/test`, `/review`)
-2. **Tier 2** — Hermes bridge scaffold (read-only sync first)
-3. **Tier 3** — Delegation (`openshark delegate <agent>`)
-4. **Tier 4** — GitHub native + Discord slash
-5. **Tier 5** — Synthesis engine (meta-learning)
+1. **Tier 1** — Git agent ✅ COMPLETE
+2. **Tier 3** — Delegation ✅ COMPLETE
+3. **Tier 4** — Web API ✅ COMPLETE | GitHub + Discord 📋
+4. **Tier 2** — Hermes bridge 🟡 SCAFFOLDED (needs real sync)
+5. **Tier 5** — Synthesis engine 📋 NOT STARTED
 
 Each tier is independently shippable. All integrations behind feature flags + config gates.
