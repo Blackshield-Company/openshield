@@ -9,6 +9,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 mod agent;
 mod cache;
 mod capabilities;
+mod code_index;
 mod config;
 mod context_mode;
 mod context_pinner;

@@ -356,6 +356,21 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "index",
+                aliases: &["idx", "lookup", "symbol"],
+                description: "Search the code index for symbols (functions, structs, etc.)",
+                usage: "/index <query>",
+                category: SlashCategory::Utility,
+                requires_args: true,
+                handler: |args| {
+                    if args.trim().is_empty() {
+                        SlashResult::Error("Usage: /index <query>".to_string())
+                    } else {
+                        SlashResult::Prompt(format!("__index__ {}", args.trim()))
+                    }
+                },
+            },
+            SlashCommand {
                 name: "model",
                 aliases: &["m", "switch-model"],
                 description: "Switch active model",

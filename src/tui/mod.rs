@@ -14,6 +14,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::agent::{Agent, AgentConfig};
@@ -214,6 +215,7 @@ struct App {
     skill_registry: Option<crate::skills::SkillRegistry>,
     /// Plugin registry for custom hooks.
     plugin_registry: Option<crate::plugins::PluginRegistry>,
+    code_index: Option<Arc<crate::code_index::CodeIndex>>,
     /// Swarm engine for multi-agent mode.
     swarm: Option<crate::swarm::SwarmEngine>,
     /// Broadcast receiver for swarm activity events.
@@ -521,6 +523,31 @@ impl App {
                 let _ = registry.load_from_disk();
                 registry.register_as_tools();
                 Some(registry)
+            },
+            code_index: {
+                let config_dir = dirs::config_dir()
+                    .map(|d| d.join("openshark"))
+                    .unwrap_or_else(|| std::path::PathBuf::from(".openshark"));
+                let db_path = config_dir.join("code_index.db");
+                let cwd = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                match crate::code_index::CodeIndex::open(
+                    db_path.to_str().unwrap_or(".openshark/code_index.db"),
+                    cwd.to_str().unwrap_or("."),
+                ) {
+                    Ok(index) => {
+                        let arc = Arc::new(index);
+                        // Do an initial build
+                        let _ = arc.rebuild();
+                        // Spawn background refresh every 5 minutes
+                        arc.spawn_background_refresh(std::time::Duration::from_secs(300));
+                        Some(arc)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to open code index: {}", e);
+                        None
+                    }
+                }
             },
             swarm: None,
             swarm_event_rx: None,
@@ -2414,6 +2441,21 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         let results = crate::swarm::swarm_query(&query, &providers, system.as_deref()).await;
         let formatted = crate::swarm::format_swarm_consensus(&results);
         app.add_system_message(formatted);
+        return Ok(());
+    }
+    // Code index symbol search
+    if let Some(query) = input.strip_prefix("__index__ ") {
+        if let Some(ref index) = app.code_index {
+            match index.search(query, 20) {
+                Ok(results) => {
+                    let formatted = crate::code_index::format_search_results(query, &results);
+                    app.add_system_message(formatted);
+                }
+                Err(e) => app.add_system_message(format!("❌ Index search failed: {}", e)),
+            }
+        } else {
+            app.add_system_message("❌ Code index not initialized.".to_string());
+        }
         return Ok(());
     }
 
