@@ -3181,6 +3181,39 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         return Ok(());
     }
 
+    if input == "/diff" || input.starts_with("/diff ") {
+        let path = input.strip_prefix("/diff").unwrap_or("").trim();
+        let path = if path.is_empty() { "." } else { path };
+        match std::process::Command::new("git")
+            .args(["diff", "--stat", path])
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.trim().is_empty() {
+                    app.add_system_message("✅ No uncommitted changes.".to_string());
+                } else {
+                    // Show stat summary
+                    app.add_system_message(format!("📊 Changes since last checkpoint:\n{}", stdout.trim()));
+                    // Also show full diff if it's not too large
+                    let full = std::process::Command::new("git")
+                        .args(["diff", path])
+                        .output();
+                    if let Ok(full_out) = full {
+                        let full_diff = String::from_utf8_lossy(&full_out.stdout);
+                        if full_diff.len() > 8000 {
+                            app.add_system_message(format!("📄 Full diff ({} bytes) — use `TOOL:terminal git diff` for complete output", full_diff.len()));
+                        } else if !full_diff.trim().is_empty() {
+                            app.add_system_message(format!("```\n{}\n```", full_diff.trim()));
+                        }
+                    }
+                }
+            }
+            Err(e) => app.add_system_message(format!("❌ Failed to run git diff: {}", e)),
+        }
+        return Ok(());
+    }
+
     // ── Control Commands ────────────────────────────────────────────────────
     // Natural language control words that interrupt or modify agent behavior
     let input_lower = input.to_lowercase();
@@ -5128,6 +5161,19 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 crate::security::RiskLevel::Critical, &reason
             );
             return Ok(());
+        }
+    }
+
+    // Auto-checkpoint before edit operations so user can /undo
+    if is_edit_tool(&suggestion.tool_name) && crate::tools::checkpoint::in_git_repo() {
+        let cp_name = format!("pre-{}-{}", suggestion.tool_name, chrono::Local::now().format("%H%M%S"));
+        match crate::tools::checkpoint::save_checkpoint(&cp_name) {
+            Ok(cp) => {
+                app.checkpoint_stack.push(cp);
+            }
+            Err(_) => {
+                // Non-fatal — just skip if checkpoint fails (e.g., clean repo)
+            }
         }
     }
 
