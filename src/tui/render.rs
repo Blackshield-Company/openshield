@@ -824,23 +824,30 @@ pub(crate) fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
         text_style()
     };
 
-    let paragraph = Paragraph::new(input_text)
+    // Add a visible prompt prefix
+    let display_text = if app.input.is_empty() {
+        input_text.to_string()
+    } else {
+        format!("❯ {}", app.input)
+    };
+    
+    let paragraph = Paragraph::new(display_text.clone())
         .style(style)
         .wrap(Wrap { trim: true });
 
     f.render_widget(paragraph, inner);
 
-    if !app.input.is_empty() {
-        let available_width = inner.width as usize;
-        let (cursor_x, cursor_y) = compute_wrapped_cursor_position(
-            &app.input,
-            app.cursor_position,
-            available_width,
-            inner.x,
-            inner.y,
-        );
-        f.set_cursor_position((cursor_x, cursor_y));
-    }
+    // Always show cursor at the correct position
+    let available_width = inner.width as usize;
+    let cursor_offset = if app.input.is_empty() { 0 } else { "❯ ".len() }; // byte offset of prefix in display_text
+    let (cursor_x, cursor_y) = compute_wrapped_cursor_position(
+        &display_text,
+        app.cursor_position + cursor_offset,
+        available_width,
+        inner.x,
+        inner.y,
+    );
+    f.set_cursor_position((cursor_x, cursor_y));
 }
 
 /// Compute the visual height the input bar needs based on text length and wrap width.
@@ -858,12 +865,13 @@ pub(crate) fn input_bar_height(app: &App, area_width: u16) -> u16 {
     let lines = lines.max(1);
     // Cap at 8 lines so it doesn't eat the whole chat area
     let capped = lines.min(8);
-    (capped as u16) + 2 // +2 for borders
+    // +3: +1 for status line, +2 for input block borders
+    (capped as u16) + 3
 }
 
 /// Compute the actual screen (x, y) for the cursor given a text buffer,
 /// a cursor byte position, and the available wrap width.
-/// This uses word-wrapping logic to match Paragraph::wrap behavior.
+/// Simulates ratatui's wrap behavior to place the cursor correctly.
 pub(crate) fn compute_wrapped_cursor_position(
     text: &str,
     cursor_pos: usize,
@@ -876,67 +884,28 @@ pub(crate) fn compute_wrapped_cursor_position(
     }
 
     let pos = cursor_pos.min(text.len());
-    // Ensure we don't slice inside a multi-byte UTF-8 character
     let safe_pos = text.ceil_char_boundary(pos);
     let before_cursor = &text[..safe_pos];
-    let mut col: usize = 0;
-    let mut row: u16 = 0;
-    let mut word_start_col: usize = 0;
-    let mut word_width: usize = 0;
-    let mut in_word = false;
 
-    // Process text character by character, tracking word boundaries
+    // Simulate wrapping: walk through chars, tracking line breaks
+    let mut line = 0usize;
+    let mut col = 0usize;
+
     for ch in before_cursor.chars() {
+        let ch_w = ch.width().unwrap_or(1);
         if ch == '\n' {
-            row += 1;
+            line += 1;
             col = 0;
-            word_start_col = 0;
-            word_width = 0;
-            in_word = false;
-        } else if ch.is_whitespace() {
-            // End of word — commit it
-            col = word_start_col + word_width;
-            in_word = false;
-            let space_width = ch.width().unwrap_or(1);
-            if col + space_width > wrap_width {
-                // Space goes past wrap boundary — wrap to next line
-                // The space itself is consumed by the line break (not shown)
-                row += 1;
-                col = 0;
-            } else {
-                col += space_width;
-            }
-            word_start_col = col;
-            word_width = 0;
+        } else if col + ch_w > wrap_width && wrap_width > 0 {
+            // Wrap to next line
+            line += 1;
+            col = ch_w;
         } else {
-            // In a word
-            if !in_word {
-                word_start_col = col;
-                word_width = 0;
-                in_word = true;
-            }
-            let ch_width = ch.width().unwrap_or(1);
-            word_width += ch_width;
-            
-            // Check if word needs to wrap
-            if word_start_col + word_width > wrap_width && word_width > wrap_width {
-                // Word is longer than line — force break at char boundary
-                row += 1;
-                word_start_col = 0;
-                word_width = ch_width;
-            } else if word_start_col + word_width > wrap_width {
-                // Word doesn't fit — wrap to next line
-                row += 1;
-                word_start_col = 0;
-                // word_width stays the same
-            }
+            col += ch_w;
         }
     }
-    
-    // Final position is at the end of the last word
-    col = word_start_col + word_width;
 
-    (base_x + col as u16, base_y + row)
+    (base_x + col as u16, base_y + line as u16)
 }
 
 pub(crate) fn draw_tool_approval_popup(f: &mut Frame, app: &App) {
@@ -1224,7 +1193,6 @@ pub(crate) fn draw_splash_screen(f: &mut Frame) {
         .collect();
 
     let banner = Paragraph::new(Text::from(banner_lines))
-        .alignment(Alignment::Left)
         .style(bg_style());
 
     // Center vertically: calculate offset to place banner in middle of screen
