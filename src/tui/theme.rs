@@ -758,26 +758,25 @@ pub fn bg_style() -> Style {
 
 pub fn text_style() -> Style {
     let t = current_theme();
-    Style::default().fg(t.foreground).bg(t.background)
+    Style::default().fg(t.foreground)
 }
 
 pub fn muted_style() -> Style {
     let t = current_theme();
-    Style::default().fg(t.muted).bg(t.background)
+    Style::default().fg(t.muted)
 }
 
 /// Style for reasoning/thinking content — same muted color as streaming,
 /// so saved reasoning messages match the live-streaming appearance.
 pub fn reasoning_style() -> Style {
     let t = current_theme();
-    Style::default().fg(t.muted).bg(t.background)
+    Style::default().fg(t.muted)
 }
 
 pub fn highlight_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.highlight)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -785,20 +784,18 @@ pub fn accent_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.accent)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
 pub fn secondary_accent_style() -> Style {
     let t = current_theme();
-    Style::default().fg(t.accent_secondary).bg(t.background)
+    Style::default().fg(t.accent_secondary)
 }
 
 pub fn error_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.error)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -806,7 +803,6 @@ pub fn success_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.success)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -824,7 +820,6 @@ pub fn title_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.title)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -832,7 +827,6 @@ pub fn shark_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.accent)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -840,7 +834,6 @@ pub fn prompt_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.highlight)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -848,7 +841,6 @@ pub fn tool_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.tool)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -870,7 +862,7 @@ pub fn header_style() -> Style {
 
 pub fn row_even_style() -> Style {
     let t = current_theme();
-    Style::default().fg(t.foreground).bg(t.background)
+    Style::default().fg(t.foreground)
 }
 
 pub fn row_odd_style() -> Style {
@@ -882,7 +874,6 @@ pub fn user_name_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.user_name)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -890,7 +881,6 @@ pub fn agent_name_style() -> Style {
     let t = current_theme();
     Style::default()
         .fg(t.agent_name)
-        .bg(t.background)
         .add_modifier(Modifier::BOLD)
 }
 

@@ -188,6 +188,8 @@ pub(crate) struct App {
     input_history: Vec<String>,
     /// Current index into input_history (None = not navigating history).
     history_index: Option<usize>,
+    /// Draft input saved when starting history navigation (restored on Down past end).
+    history_draft: Option<String>,
     /// File path for persisting input history.
     history_file: std::path::PathBuf,
     /// Diff preview content for inline diff before applying edits.
@@ -474,9 +476,10 @@ impl App {
                 ) {
                     Ok(index) => {
                         let arc = Arc::new(index);
-                        // Do an initial build
-                        let _ = arc.rebuild();
-                        // Spawn background refresh every 5 minutes
+                        // Spawn background refresh every 5 minutes.
+                        // Skip the initial synchronous rebuild — it blocks startup
+                        // on large directories. The background thread will populate
+                        // the index on its first refresh cycle.
                         arc.spawn_background_refresh(std::time::Duration::from_secs(300));
                         Some(arc)
                     }
@@ -507,6 +510,7 @@ impl App {
             plan_mode: false,
             input_history,
             history_index: None,
+            history_draft: None,
             history_file,
             pending_diff: None,
             diff_scroll: 0,
@@ -518,11 +522,10 @@ impl App {
             vim_state: vim_input::VimState::new(),
             vim_mode: false,
             mouse_state: mouse::MouseState::new(),
-            mouse_enabled: false,
+            mouse_enabled: true,
             context_mode_engine: {
                 if !project_path_for_engine.is_empty() {
-                    let mut engine = crate::context_mode::ContextModeEngine::new(project_path_for_engine);
-                    let _ = engine.refresh_cache();
+                    let engine = crate::context_mode::ContextModeEngine::new(project_path_for_engine);
                     Some(engine)
                 } else {
                     None
@@ -1046,16 +1049,22 @@ impl App {
         }
     }
 
-    /// Apply a stream event from the background task.
     /// Get visible messages based on scroll.
     fn visible_messages(&self, height: usize) -> Vec<&ChatMessage> {
         let start = self.scroll;
-        let end = (self.scroll + height).min(self.messages.len());
-        if start < self.messages.len() {
-            self.messages[start..end].iter().collect()
-        } else {
-            Vec::new()
+        if start >= self.messages.len() {
+            return Vec::new();
         }
+        // At the bottom, show last messages that fit; otherwise show from scroll
+        let end = if self.scroll + height >= self.messages.len() {
+            self.messages.len()
+        } else {
+            // Estimate: each message takes ~3 lines minimum (header + content + spacer)
+            // Show up to height/3 messages to avoid overflowing the viewport
+            let estimated_msg_count = (height / 3).max(1);
+            (self.scroll + estimated_msg_count).min(self.messages.len())
+        };
+        self.messages[start..end].iter().collect()
     }
 
     /// Scroll up in chat history — smooth line-by-line.
@@ -1103,7 +1112,8 @@ pub async fn run(config: Config) -> Result<()> {
 
     let mut app = App::new(config.clone())?;
 
-    // Initialize MCP connections if enabled
+    // Enable mouse capture by default
+    app.mouse_state.enable();
     if config.gateway.mcp.enabled && !config.gateway.mcp.servers.is_empty() {
         app.init_mcp().await;
     }
@@ -1189,10 +1199,10 @@ async fn run_app(
                                 app.sidebar_scroll = y;
                             }
                             mouse::MouseAction::ScrollUp => {
-                                app.scroll_up(3);
+                                app.scroll_up(1);
                             }
                             mouse::MouseAction::ScrollDown => {
-                                app.scroll_down(3);
+                                app.scroll_down(1);
                             }
                             mouse::MouseAction::DragStart { x, y } => {
                                 app.mouse_state.selecting = true;
@@ -1713,6 +1723,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     // Save to history
                     app.input_history.push(input.clone());
                     app.history_index = None;
+                    app.history_draft = None;
                     let _ = std::fs::write(
                         &app.history_file,
                         app.input_history.join("\n")
@@ -1764,7 +1775,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             } else if app.focused_pane == 0 {
                 app.sidebar_scroll = app.sidebar_scroll.saturating_sub(1);
             } else if !app.input_history.is_empty() {
-                // Navigate input history
+                // Navigate input history — save draft on first Up press
+                if app.history_index.is_none() {
+                    app.history_draft = Some(app.input.clone());
+                }
                 let idx = app.history_index.map_or(
                     app.input_history.len().saturating_sub(1),
                     |i| i.saturating_sub(1)
@@ -1772,8 +1786,6 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.input = app.input_history[idx].clone();
                 app.cursor_position = app.input.len();
                 app.history_index = Some(idx);
-            } else {
-                app.scroll_up(1);
             }
         }
         KeyCode::Down => {
@@ -1801,12 +1813,11 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.cursor_position = app.input.len();
                     app.history_index = Some(idx + 1);
                 } else {
-                    app.input.clear();
-                    app.cursor_position = 0;
+                    // Restore draft instead of clearing
+                    app.input = app.history_draft.take().unwrap_or_default();
+                    app.cursor_position = app.input.len();
                     app.history_index = None;
                 }
-            } else {
-                app.scroll_down(1);
             }
         }
         KeyCode::PageUp => {
