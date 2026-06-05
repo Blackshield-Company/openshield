@@ -270,7 +270,6 @@ impl Provider {
             .tcp_keepalive(std::time::Duration::from_secs(30))
             .timeout(std::time::Duration::from_secs(300))
             .connect_timeout(std::time::Duration::from_secs(15))
-            .http2_prior_knowledge()
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
@@ -298,7 +297,6 @@ impl Provider {
             .tcp_keepalive(std::time::Duration::from_secs(30))
             .timeout(std::time::Duration::from_secs(300))
             .connect_timeout(std::time::Duration::from_secs(15))
-            .http2_prior_knowledge()
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
