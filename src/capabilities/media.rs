@@ -76,7 +76,7 @@ impl Tool for ImageGenTool {
         "image_gen"
     }
     fn description(&self) -> &str {
-        "Generate images from text prompts. Args: <prompt> [--aspect-ratio landscape|square|portrait]"
+        "Generate images from text prompts via FAL. Args: <prompt> [--aspect-ratio landscape|square|portrait]"
     }
     fn execute(&self, args: &str) -> Result<String> {
         let parts: Vec<&str> = args.split("--aspect-ratio").collect();
@@ -89,10 +89,102 @@ impl Tool for ImageGenTool {
             );
         }
 
-        Ok(format!(
-            "Image generation requested:\nPrompt: {}\nAspect ratio: {}\n\nNote: Image generation requires a configured provider (FAL, OpenAI, etc.). Set up via environment or config.",
-            prompt, aspect
-        ))
+        // Map aspect ratio to FAL dimensions
+        let (width, height) = match aspect {
+            "square" => (1024, 1024),
+            "portrait" => (768, 1344),
+            _ => (1344, 768), // landscape default
+        };
+
+        // Load FAL key from env or fal.env
+        let fal_key = std::env::var("FAL_KEY")
+            .or_else(|_| std::env::var("FAL_API_KEY"))
+            .or_else(|_| {
+                // Try loading from fal.env in config dir
+                let env_path = dirs::config_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("openshark/fal.env");
+                if let Ok(content) = std::fs::read_to_string(&env_path) {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if line.starts_with("FAL_KEY=") {
+                            return Ok(line.trim_start_matches("FAL_KEY=").to_string());
+                        }
+                        if line.starts_with("FAL_API_KEY=") {
+                            return Ok(line.trim_start_matches("FAL_API_KEY=").to_string());
+                        }
+                    }
+                }
+                Err(std::env::VarError::NotPresent)
+            });
+
+        let fal_key = match fal_key {
+            Ok(k) => k,
+            Err(_) => {
+                return Ok(
+                    "No FAL_KEY found. Set FAL_KEY environment variable or create ~/.config/openshark/fal.env".to_string()
+                );
+            }
+        };
+
+        // Call FAL API
+        let client = reqwest::blocking::Client::new();
+        let body = serde_json::json!({
+            "prompt": prompt,
+            "image_size": {
+                "width": width,
+                "height": height
+            },
+            "num_images": 1,
+            "enable_safety_checker": false
+        });
+
+        let response = client
+            .post("https://api.fal.ai/v1/images/generations")
+            .header("Authorization", format!("Key {}", fal_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send();
+
+        match response {
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                if status.is_success() {
+                    // Parse the response to extract image URL
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(images) = json.get("images").and_then(|i| i.as_array()) {
+                            if let Some(first) = images.first() {
+                                if let Some(url) = first.get("url").and_then(|u| u.as_str()) {
+                                    return Ok(format!(
+                                        "Image generated!\nPrompt: {}\nAspect: {} ({}x{})\nURL: {}\n\nMEDIA:{}",
+                                        prompt, aspect, width, height, url, url
+                                    ));
+                                }
+                            }
+                        }
+                        // Fallback: return raw JSON if we can't parse
+                        Ok(format!(
+                            "Image generated!\nPrompt: {}\nAspect: {} ({}x{})\nResponse: {}",
+                            prompt, aspect, width, height, text
+                        ))
+                    } else {
+                        Ok(format!(
+                            "Image generated!\nPrompt: {}\nAspect: {} ({}x{})\nResponse: {}",
+                            prompt, aspect, width, height, text
+                        ))
+                    }
+                } else {
+                    Ok(format!(
+                        "FAL API error ({}): {}\n\nBody: {}",
+                        status, status.canonical_reason().unwrap_or("Unknown"), text
+                    ))
+                }
+            }
+            Err(e) => {
+                Ok(format!("Failed to call FAL API: {}", e))
+            }
+        }
     }
 }
 
