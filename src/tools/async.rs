@@ -36,10 +36,14 @@ impl AsyncToolExecutor {
             if let Some(async_tool) = crate::tools::find_async_tool(&tool_name) {
                 return async_tool.execute_async(&args).await;
             }
-            // Fall back to sync tool
-            let tool = find_tool(&tool_name)
-                .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
-            tool.execute(&args)
+            // Fall back to sync tool — run on blocking thread pool to avoid stalling the async runtime
+            tokio::task::spawn_blocking(move || {
+                let tool = find_tool(&tool_name)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
+                tool.execute(&args)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Blocking task panicked: {}", e))?
         })
     }
 
