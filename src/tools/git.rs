@@ -14,6 +14,11 @@ impl Tool for GitTool {
     }
 
     fn execute(&self, args: &str) -> Result<String> {
+        // Check if we're in a git repo before running any command
+        if !Self::in_repo() {
+            return Ok("Not a git repository. This directory is not tracked by git.".to_string());
+        }
+
         let parts: Vec<&str> = args.splitn(2, ' ').collect();
         if parts.is_empty() {
             return Ok(self.usage());

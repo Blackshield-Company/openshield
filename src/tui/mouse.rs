@@ -10,6 +10,7 @@
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use unicode_width::UnicodeWidthChar;
 
 /// Mouse state tracking.
 #[derive(Debug, Clone, Default)]
@@ -140,6 +141,119 @@ pub fn extract_selection_text(
 
     result.trim_end().to_string()
 }
+
+/// Extract text from a single chat message, accounting for word wrapping.
+/// Returns the substring that would appear between start_col and end_col on each row.
+pub fn extract_message_text_wrapped(
+    content: &str,
+    start_row: usize,
+    end_row: usize,
+    term_width: usize,
+    msg_start_row: usize,
+) -> String {
+    let mut result = String::new();
+    let mut current_row = msg_start_row;
+    let mut char_idx = 0usize;
+
+    for line in content.lines() {
+        if current_row > end_row {
+            break;
+        }
+        // Word-wrap this line into segments of at most term_width visual columns
+        let mut line_col = 0usize;
+        let mut segment_start = char_idx;
+
+        for ch in line.chars() {
+            let ch_width = ch.width().unwrap_or(1);
+            if line_col + ch_width > term_width && line_col > 0 {
+                // Segment ends before this char
+                let segment_end = char_idx;
+                if current_row >= start_row && current_row <= end_row {
+                    result.push_str(&line[segment_start..segment_end.min(line.len())]);
+                    result.push('\n');
+                }
+                current_row += 1;
+                if current_row > end_row {
+                    break;
+                }
+                segment_start = char_idx;
+                line_col = ch_width;
+            } else {
+                line_col += ch_width;
+            }
+            char_idx += ch.len_utf8();
+        }
+
+        // Flush remaining segment
+        if current_row >= start_row && current_row <= end_row && segment_start < line.len() {
+            result.push_str(&line[segment_start..line.len()]);
+            result.push('\n');
+        }
+        current_row += 1;
+        char_idx += 1; // newline
+    }
+
+    result.trim_end().to_string()
+}
+
+/// Extract selection text with proper word-wrap awareness.
+pub fn extract_selection_text_wrapped(
+    messages: &[crate::tui::ChatMessage],
+    scroll: usize,
+    start_row: usize,
+    end_row: usize,
+    term_width: usize,
+) -> String {
+    let mut result = String::new();
+    let mut current_row = 0usize;
+
+    for msg in messages.iter().skip(scroll) {
+        if current_row > end_row {
+            break;
+        }
+
+        let content = &msg.content;
+        let lines_needed = estimate_wrapped_lines(content, term_width);
+        let msg_end_row = current_row + lines_needed;
+
+        if msg_end_row >= start_row {
+            let text = extract_message_text_wrapped(
+                content,
+                start_row.saturating_sub(current_row),
+                end_row.saturating_sub(current_row),
+                term_width,
+                0,
+            );
+            if !text.is_empty() {
+                result.push_str(&text);
+                result.push('\n');
+            }
+        }
+        current_row = msg_end_row + 1; // +1 for separator
+    }
+
+    result.trim_end().to_string()
+}
+
+/// Estimate how many terminal rows a message will occupy with word wrapping.
+fn estimate_wrapped_lines(content: &str, term_width: usize) -> usize {
+    let width = term_width.max(1);
+    content.lines().map(|line| {
+        let mut cols = 0usize;
+        let mut rows = 1usize;
+        for ch in line.chars() {
+            let ch_width = ch.width().unwrap_or(1);
+            if cols + ch_width > width {
+                rows += 1;
+                cols = ch_width;
+            } else {
+                cols += ch_width;
+            }
+        }
+        rows
+    }).sum()
+}
+
 pub fn handle_mouse_event(
     event: MouseEvent,
     chat_area: Rect,

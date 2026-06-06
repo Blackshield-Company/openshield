@@ -16,11 +16,11 @@ use super::bookmarks;
 use super::image_display;
 use super::ascii_art;
 use super::syntax_highlight;
-use super::{border_style, bg_style, shark_style, title_style, accent_style, highlight_style, muted_style, error_style, reasoning_style, focused_border_style, tool_style, text_style};
+use super::{border_style, bg_style, shark_style, title_style, accent_style, highlight_style, muted_style, error_style, reasoning_style, focused_border_style, tool_style, text_style, selection_style};
 use crate::tools::get_tools;
 use crate::tui::theme::current_theme;
 
-pub(crate) fn draw_ui(f: &mut Frame, app: &App) {
+pub(crate) fn draw_ui(f: &mut Frame, app: &mut App) {
     if app.mode == AppMode::Splash {
         draw_splash_screen(f);
         return;
@@ -49,6 +49,7 @@ pub(crate) fn draw_ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Min(3), Constraint::Length(input_bar_height(app, main_layout[1].width))])
         .split(main_layout[1]);
 
+    app.chat_area_rect = Some(chat_layout[0]);
     draw_chat_area(f, app, chat_layout[0]);
     draw_input_bar(f, app, chat_layout[1]);
 
@@ -690,6 +691,28 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             }
 
             lines.push(Line::from(""));
+        }
+    }
+
+    // ── Apply selection highlight ──────────────────────────────────────────
+    if app.mouse_state.selecting {
+        if let (Some(start), Some(end)) = (app.mouse_state.selection_start, app.mouse_state.selection_end) {
+            let sel_top = start.1.min(end.1);
+            let sel_bottom = start.1.max(end.1);
+            // Convert absolute terminal rows to content-relative rows
+            let content_top = inner.y;
+            let rel_top = sel_top.saturating_sub(content_top);
+            let rel_bottom = sel_bottom.saturating_sub(content_top);
+            for (row_idx, line) in lines.iter_mut().enumerate() {
+                let row = row_idx as u16;
+                if row >= rel_top && row <= rel_bottom {
+                    *line = Line::from(
+                        line.spans.iter().map(|s| {
+                            Span::styled(s.content.clone(), selection_style())
+                        }).collect::<Vec<_>>()
+                    );
+                }
+            }
         }
     }
 

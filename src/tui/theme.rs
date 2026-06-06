@@ -852,6 +852,14 @@ pub fn selected_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// Style for mouse-drag text selection in the chat area.
+pub fn selection_style() -> Style {
+    let t = current_theme();
+    Style::default()
+        .fg(t.foreground)
+        .bg(t.border_unfocused)
+}
+
 pub fn header_style() -> Style {
     let t = current_theme();
     Style::default()
