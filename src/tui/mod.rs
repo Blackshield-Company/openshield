@@ -217,6 +217,8 @@ pub(crate) struct App {
     context_mode_engine: Option<crate::context_mode::ContextModeEngine>,
     /// Smart context — manually pinned files.
     smart_context: crate::context_pinner::SmartContext,
+    /// Cached chat area rect for mouse selection coordinate translation.
+    chat_area_rect: Option<ratatui::layout::Rect>,
 }
 
 #[derive(Debug, Clone)]
@@ -532,6 +534,7 @@ impl App {
                 }
             },
             smart_context: crate::context_pinner::SmartContext::load(&session_id),
+            chat_area_rect: None,
         })
     }
 
@@ -1144,7 +1147,7 @@ async fn run_app(
     last_tick: &mut Instant,
 ) -> Result<()> {
     loop {
-        terminal.draw(|f| draw_ui(f, app))?;
+        terminal.draw(|f| draw_ui(f, &mut *app))?;
 
         // Drain any stream events from the background task before handling input.
         // Use Option::take() to avoid borrowing app.stream_rx while calling apply_stream_event.
@@ -1221,13 +1224,22 @@ async fn run_app(
                                         let start_row = start.1.min(end.1) as usize;
                                         let end_row = start.1.max(end.1) as usize;
                                         if end_row > start_row {
-                                            let term_width = terminal.size().map(|s| s.width as usize).unwrap_or(80);
-                                            let text = mouse::extract_selection_text(
+                                            // Use chat area inner width for accurate wrapping
+                                            let chat_width = app.chat_area_rect
+                                                .map(|r| r.width.saturating_sub(2) as usize)
+                                                .unwrap_or(80);
+                                            // Convert absolute terminal rows to content-relative
+                                            let content_top = app.chat_area_rect
+                                                .map(|r| r.y + 1)
+                                                .unwrap_or(0) as usize;
+                                            let rel_start = start_row.saturating_sub(content_top);
+                                            let rel_end = end_row.saturating_sub(content_top);
+                                            let text = mouse::extract_selection_text_wrapped(
                                                 &app.messages,
                                                 app.scroll,
-                                                start_row,
-                                                end_row,
-                                                term_width,
+                                                rel_start,
+                                                rel_end,
+                                                chat_width,
                                             );
                                             if !text.is_empty() {
                                                 let _ = mouse::copy_to_clipboard(&text);
