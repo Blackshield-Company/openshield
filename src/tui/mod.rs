@@ -3155,7 +3155,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     ];
 
     for (word, response) in &control_words {
-        if input_lower == *word || input_lower.starts_with(&format!("{} ", word)) {
+        // Only intercept EXACT matches for control words — not partial matches
+        // "go" should only trigger if the user literally types "go", not "go ahead and..."
+        if input_lower == *word {
             // For resume commands, actually restart the stream if it died
             if *word == "continue" || *word == "go" || *word == "proceed" || *word == "carry on" {
                 app.add_system_message(response.to_string());
