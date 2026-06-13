@@ -6,11 +6,11 @@
 #![allow(dead_code)]
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 
 /// A single command entry in the palette.
@@ -33,24 +33,93 @@ pub struct CommandPalette {
 impl CommandPalette {
     pub fn new() -> Self {
         let commands = vec![
-            CommandEntry { name: "/clear".to_string(), description: "Clear the chat history".to_string(), shortcut: Some("Ctrl+L".to_string()) },
-            CommandEntry { name: "/export".to_string(), description: "Export session to JSON".to_string(), shortcut: None },
-            CommandEntry { name: "/import".to_string(), description: "Import session from JSON".to_string(), shortcut: None },
-            CommandEntry { name: "/imports".to_string(), description: "List available imports".to_string(), shortcut: None },
-            CommandEntry { name: "/diff".to_string(), description: "Show diff preview help".to_string(), shortcut: None },
-            CommandEntry { name: "/run".to_string(), description: "Execute code from last response".to_string(), shortcut: None },
-            CommandEntry { name: "/git".to_string(), description: "Git operations (status, diff, log, etc.)".to_string(), shortcut: None },
-            CommandEntry { name: "/search".to_string(), description: "Web search".to_string(), shortcut: None },
-            CommandEntry { name: "/compare".to_string(), description: "Show multi-model comparison".to_string(), shortcut: None },
-            CommandEntry { name: "/multi".to_string(), description: "Toggle multi-model mode".to_string(), shortcut: None },
-            CommandEntry { name: "/swarm".to_string(), description: "Swarm mode commands".to_string(), shortcut: Some("Ctrl+W".to_string()) },
-            CommandEntry { name: "/undo".to_string(), description: "Undo last file edit".to_string(), shortcut: None },
-            CommandEntry { name: "/model".to_string(), description: "Switch model".to_string(), shortcut: None },
-            CommandEntry { name: "/theme".to_string(), description: "Change TUI theme".to_string(), shortcut: None },
-            CommandEntry { name: "/help".to_string(), description: "Show help".to_string(), shortcut: Some("Ctrl+H".to_string()) },
-            CommandEntry { name: "/quit".to_string(), description: "Quit OpenShark".to_string(), shortcut: Some("Ctrl+Q".to_string()) },
+            CommandEntry {
+                name: "/clear".to_string(),
+                description: "Clear the chat history".to_string(),
+                shortcut: Some("Ctrl+L".to_string()),
+            },
+            CommandEntry {
+                name: "/export".to_string(),
+                description: "Export session to JSON".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/import".to_string(),
+                description: "Import session from JSON".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/imports".to_string(),
+                description: "List available imports".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/diff".to_string(),
+                description: "Show diff preview help".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/run".to_string(),
+                description: "Execute code from last response".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/git".to_string(),
+                description: "Git operations (status, diff, log, etc.)".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/search".to_string(),
+                description: "Web search".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/compare".to_string(),
+                description: "Show multi-model comparison".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/multi".to_string(),
+                description: "Toggle multi-model mode".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/swarm".to_string(),
+                description: "Swarm mode commands".to_string(),
+                shortcut: Some("Ctrl+W".to_string()),
+            },
+            CommandEntry {
+                name: "/undo".to_string(),
+                description: "Undo last file edit".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/model".to_string(),
+                description: "Switch model".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/theme".to_string(),
+                description: "Change TUI theme".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/help".to_string(),
+                description: "Show help".to_string(),
+                shortcut: Some("Ctrl+H".to_string()),
+            },
+            CommandEntry {
+                name: "/quit".to_string(),
+                description: "Quit OpenShark".to_string(),
+                shortcut: Some("Ctrl+Q".to_string()),
+            },
         ];
-        Self { visible: false, filter: String::new(), selected: 0, commands }
+        Self {
+            visible: false,
+            filter: String::new(),
+            selected: 0,
+            commands,
+        }
     }
 
     /// Toggle visibility.
@@ -152,8 +221,11 @@ pub fn draw_command_palette(f: &mut Frame, palette: &CommandPalette, area: Rect)
     } else {
         Text::from(Line::from(Span::raw(&palette.filter)))
     };
-    let filter_paragraph = Paragraph::new(filter_text)
-        .block(Block::default().borders(Borders::ALL).title(" Command Palette "));
+    let filter_paragraph = Paragraph::new(filter_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Command Palette "),
+    );
     f.render_widget(filter_paragraph, chunks[0]);
 
     // Command list

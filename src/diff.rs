@@ -52,12 +52,13 @@ pub fn generate_diff(old: &str, new: &str, path: &str) -> String {
             }
 
             if let Some(new) = new_line
-                && !old_lines.contains(new) {
-                    result.push_str(&format!("+{}", new));
-                    if !new.ends_with('\n') {
-                        result.push('\n');
-                    }
+                && !old_lines.contains(new)
+            {
+                result.push_str(&format!("+{}", new));
+                if !new.ends_with('\n') {
+                    result.push('\n');
                 }
+            }
         } else if in_hunk {
             // Context line within hunk
             if let Some(line) = old_line {
@@ -77,8 +78,8 @@ pub fn generate_diff(old: &str, new: &str, path: &str) -> String {
 
 /// Generate a diff preview for a replace operation.
 pub fn preview_replace(path: &str, old_str: &str, new_str: &str) -> Result<String, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read {}: {}", path, e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path, e))?;
 
     if !content.contains(old_str) {
         return Err(format!("String not found in {}", path));
@@ -90,8 +91,8 @@ pub fn preview_replace(path: &str, old_str: &str, new_str: &str) -> Result<Strin
 
 /// Generate a diff preview for a patch operation.
 pub fn preview_patch(path: &str, old_lines: &str, new_lines: &str) -> Result<String, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read {}: {}", path, e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path, e))?;
 
     if !content.contains(old_lines) {
         return Err(format!("Patch context not found in {}", path));

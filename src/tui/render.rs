@@ -1,22 +1,24 @@
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
     },
-    Frame,
 };
 use unicode_width::UnicodeWidthChar;
 
-use super::{App, AppMode};
-use super::command_palette;
-use super::bookmarks;
-use super::image_display;
 use super::ascii_art;
+use super::bookmarks;
+use super::command_palette;
+use super::image_display;
 use super::syntax_highlight;
-use super::{border_style, bg_style, shark_style, title_style, accent_style, highlight_style, muted_style, error_style, reasoning_style, focused_border_style, tool_style, text_style, selection_style};
+use super::{App, AppMode};
+use super::{
+    accent_style, bg_style, border_style, error_style, focused_border_style, highlight_style,
+    muted_style, selection_style, shark_style, text_style, title_style, tool_style,
+};
 use crate::tools::get_tools;
 use crate::tui::theme::current_theme;
 
@@ -46,7 +48,10 @@ pub(crate) fn draw_ui(f: &mut Frame, app: &mut App) {
 
     let chat_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(input_bar_height(app, main_layout[1].width))])
+        .constraints([
+            Constraint::Min(3),
+            Constraint::Length(input_bar_height(app, main_layout[1].width)),
+        ])
         .split(main_layout[1]);
 
     app.chat_area_rect = Some(chat_layout[0]);
@@ -86,26 +91,25 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let sidebar_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Compact logo + tagline
-            Constraint::Length(9),  // Session info (7 lines + padding)
-            Constraint::Length(9),  // Shortcuts (7 lines + padding)
-            Constraint::Length(8),  // Tools/Skills (up to 6 with tab header)
-            Constraint::Min(3),     // Performance (flexible)
+            Constraint::Length(3), // Compact logo + tagline
+            Constraint::Length(9), // Session info (7 lines + padding)
+            Constraint::Length(9), // Shortcuts (7 lines + padding)
+            Constraint::Length(8), // Tools/Skills (up to 6 with tab header)
+            Constraint::Min(3),    // Performance (flexible)
         ])
         .split(inner);
 
     // Compact header: harness name + version (hardcoded, separate from agent identity)
-    let mut header_lines = vec![
-        Line::from(vec![
-            Span::styled("🦈 ", shark_style()),
-            Span::styled("openshark", highlight_style()),
-            Span::styled(format!(" v{}", crate::VERSION), muted_style()),
-        ]),
-    ];
+    let mut header_lines = vec![Line::from(vec![
+        Span::styled("🦈 ", shark_style()),
+        Span::styled("openshark", highlight_style()),
+        Span::styled(format!(" v{}", crate::VERSION), muted_style()),
+    ])];
     if !app.config.agent.tagline.is_empty() {
-        header_lines.push(Line::from(vec![
-            Span::styled(app.config.agent.tagline.clone(), muted_style()),
-        ]));
+        header_lines.push(Line::from(vec![Span::styled(
+            app.config.agent.tagline.clone(),
+            muted_style(),
+        )]));
     }
     let header = Paragraph::new(Text::from(header_lines))
         .alignment(Alignment::Center)
@@ -118,12 +122,21 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .checked_div(app.model_context_length)
         .unwrap_or(0)
         .min(100);
-    let ctx_color = if ctx_pct > 80 { error_style() } else if ctx_pct > 50 { accent_style() } else { text_style() };
+    let ctx_color = if ctx_pct > 80 {
+        error_style()
+    } else if ctx_pct > 50 {
+        accent_style()
+    } else {
+        text_style()
+    };
 
     let session_info = vec![
         Line::from(vec![
             Span::styled("Session  ", muted_style()),
-            Span::styled(&app.session_id[..8.min(app.session_id.len())], highlight_style()),
+            Span::styled(
+                &app.session_id[..8.min(app.session_id.len())],
+                highlight_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Model    ", muted_style()),
@@ -163,15 +176,42 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
     // Shortcuts — clean two-column layout
     let shortcuts = vec![
-        Line::from(vec![Span::styled("Ctrl+C×2", accent_style()), Span::styled(" Quit", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+L  ", accent_style()), Span::styled("Clear chat", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+B  ", accent_style()), Span::styled("Toggle sidebar", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+P  ", accent_style()), Span::styled("Model selector", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+A  ", accent_style()), Span::styled("Autonomous mode", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+T  ", accent_style()), Span::styled("Cycle theme", muted_style())]),
-        Line::from(vec![Span::styled("Ctrl+S  ", accent_style()), Span::styled("Tools/Skills", muted_style())]),
-        Line::from(vec![Span::styled("↑/↓     ", accent_style()), Span::styled("Scroll", muted_style())]),
-        Line::from(vec![Span::styled("PgUp/Dn ", accent_style()), Span::styled("Fast scroll", muted_style())]),
+        Line::from(vec![
+            Span::styled("Ctrl+C×2", accent_style()),
+            Span::styled(" Quit", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+L  ", accent_style()),
+            Span::styled("Clear chat", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+B  ", accent_style()),
+            Span::styled("Toggle sidebar", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+P  ", accent_style()),
+            Span::styled("Model selector", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+A  ", accent_style()),
+            Span::styled("Autonomous mode", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+T  ", accent_style()),
+            Span::styled("Cycle theme", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+S  ", accent_style()),
+            Span::styled("Tools/Skills", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("↑/↓     ", accent_style()),
+            Span::styled("Scroll", muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("PgUp/Dn ", accent_style()),
+            Span::styled("Fast scroll", muted_style()),
+        ]),
     ];
     let shortcuts_para = Paragraph::new(Text::from(shortcuts))
         .block(
@@ -202,32 +242,50 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             .collect();
         (format!(" Tools [{}] ", all_tools.len()), tools)
     } else if app.sidebar_tab == 1 {
-        let skills: Vec<Line> = app.skill_registry.as_ref()
-            .map(|reg| reg.all_skills().iter()
-                .skip(app.sidebar_scroll)
-                .take(6)
-                .map(|skill| {
-                    let desc = &skill.description;
-                    let desc_short = &desc[..desc.len().min(22)];
-                    Line::from(vec![
-                        Span::styled(format!("{:<10}", &skill.name), tool_style()),
-                        Span::styled(desc_short.to_string(), muted_style()),
-                    ])
-                })
-                .collect()
-            )
-            .unwrap_or_else(|| vec![
-                Line::from(vec![Span::styled("No skills loaded", muted_style())]),
-                Line::from(vec![Span::styled("Add .md files to ~/.config/openshark/skills/", muted_style())]),
-            ]);
-        let count = app.skill_registry.as_ref().map(|r| r.all_skills().len()).unwrap_or(0);
+        let skills: Vec<Line> = app
+            .skill_registry
+            .as_ref()
+            .map(|reg| {
+                reg.all_skills()
+                    .iter()
+                    .skip(app.sidebar_scroll)
+                    .take(6)
+                    .map(|skill| {
+                        let desc = &skill.description;
+                        let desc_short = &desc[..desc.len().min(22)];
+                        Line::from(vec![
+                            Span::styled(format!("{:<10}", &skill.name), tool_style()),
+                            Span::styled(desc_short.to_string(), muted_style()),
+                        ])
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                vec![
+                    Line::from(vec![Span::styled("No skills loaded", muted_style())]),
+                    Line::from(vec![Span::styled(
+                        "Add .md files to ~/.config/openshark/skills/",
+                        muted_style(),
+                    )]),
+                ]
+            });
+        let count = app
+            .skill_registry
+            .as_ref()
+            .map(|r| r.all_skills().len())
+            .unwrap_or(0);
         (format!(" Skills [{}] ", count), skills)
     } else if app.sidebar_tab == 4 {
         // Files tab — project file tree
         let file_lines: Vec<Line> = if app.file_tree.is_empty() {
-            vec![Line::from(vec![Span::styled("No files scanned", muted_style())])]
+            vec![Line::from(vec![Span::styled(
+                "No files scanned",
+                muted_style(),
+            )])]
         } else {
-            app.file_tree.iter().enumerate()
+            app.file_tree
+                .iter()
+                .enumerate()
                 .skip(app.sidebar_scroll)
                 .take(20)
                 .map(|(i, entry)| {
@@ -248,7 +306,14 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled("Status: ", muted_style()),
-                    Span::styled(if app.swarm_running { "🟢 Running" } else { "⏹ Idle" }, text_style()),
+                    Span::styled(
+                        if app.swarm_running {
+                            "🟢 Running"
+                        } else {
+                            "⏹ Idle"
+                        },
+                        text_style(),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("Agents: ", muted_style()),
@@ -301,40 +366,52 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     _ => current_theme().accent,
                 };
                 let role_style = Style::default().fg(role_color).add_modifier(Modifier::BOLD);
-                let status = if state.is_streaming { "🟡 streaming" } else { "⏹ done" };
+                let status = if state.is_streaming {
+                    "🟡 streaming"
+                } else {
+                    "⏹ done"
+                };
                 lines.push(Line::from(vec![
                     Span::styled(format!("🐝 {} ", state.agent_name), role_style),
                     Span::styled(format!("({}) {}", state.role, status), muted_style()),
                 ]));
                 // Show truncated content preview with code detection
                 let preview = &state.content[..state.content.len().min(120)];
-                let has_code = preview.contains("```") || preview.contains("fn ") || preview.contains("def ");
+                let has_code =
+                    preview.contains("```") || preview.contains("fn ") || preview.contains("def ");
                 if has_code {
                     lines.push(Line::from(vec![
                         Span::styled("  📄 ".to_string(), muted_style()),
                         Span::styled(preview.replace('\n', " "), muted_style()),
                     ]));
                 } else {
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("  {}", preview.replace('\n', " ")), muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {}", preview.replace('\n', " ")),
+                        muted_style(),
+                    )]));
                 }
                 if !state.tool_results.is_empty() {
                     let expanded = app.agent_tool_expanded.contains(&state.agent_id);
                     let expand_icon = if expanded { "▼" } else { "▶" };
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("  {} 🔧 {} tools", expand_icon, state.tool_results.len()), tool_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {} 🔧 {} tools", expand_icon, state.tool_results.len()),
+                        tool_style(),
+                    )]));
                     if expanded {
                         for (tool_name, result, success) in &state.tool_results {
                             let icon = if *success { "✅" } else { "❌" };
-                            lines.push(Line::from(vec![
-                                Span::styled(format!("    {} {}", icon, tool_name), muted_style()),
-                            ]));
+                            lines.push(Line::from(vec![Span::styled(
+                                format!("    {} {}", icon, tool_name),
+                                muted_style(),
+                            )]));
                             for res_line in result.lines().take(4) {
-                                lines.push(Line::from(vec![
-                                    Span::styled(format!("      {}", res_line.chars().take(50).collect::<String>()), muted_style()),
-                                ]));
+                                lines.push(Line::from(vec![Span::styled(
+                                    format!(
+                                        "      {}",
+                                        res_line.chars().take(50).collect::<String>()
+                                    ),
+                                    muted_style(),
+                                )]));
                             }
                         }
                     }
@@ -345,7 +422,10 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         } else {
             vec![
                 Line::from(vec![Span::styled("No agent data", muted_style())]),
-                Line::from(vec![Span::styled("Start a swarm to inspect agents", muted_style())]),
+                Line::from(vec![Span::styled(
+                    "Start a swarm to inspect agents",
+                    muted_style(),
+                )]),
             ]
         };
         (" Inspector ".to_string(), inspector_lines)
@@ -367,15 +447,24 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         vec![
             Line::from(vec![
                 Span::styled("First token: ", muted_style()),
-                Span::styled(format!("{}ms", app.session_perf.avg_first_token()), text_style()),
+                Span::styled(
+                    format!("{}ms", app.session_perf.avg_first_token()),
+                    text_style(),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Total latency: ", muted_style()),
-                Span::styled(format!("{}ms", app.session_perf.avg_total_latency()), text_style()),
+                Span::styled(
+                    format!("{}ms", app.session_perf.avg_total_latency()),
+                    text_style(),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Tool exec: ", muted_style()),
-                Span::styled(format!("{}ms", app.session_perf.avg_tool_exec()), text_style()),
+                Span::styled(
+                    format!("{}ms", app.session_perf.avg_tool_exec()),
+                    text_style(),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Requests: ", muted_style()),
@@ -384,39 +473,59 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         ]
     } else if app.swarm_running {
         // Show swarm stats when no streaming perf data
-        let active = app.swarm_agents.iter()
+        let active = app
+            .swarm_agents
+            .iter()
             .filter(|a| matches!(a.status, crate::swarm::AgentStatus::Working { .. }))
             .count();
-        let completed = app.swarm_agents.iter()
+        let completed = app
+            .swarm_agents
+            .iter()
             .filter(|a| matches!(a.status, crate::swarm::AgentStatus::Completed { .. }))
             .count();
-        let errors = app.swarm_agents.iter()
+        let errors = app
+            .swarm_agents
+            .iter()
             .filter(|a| matches!(a.status, crate::swarm::AgentStatus::Error { .. }))
             .count();
         vec![
-            Line::from(vec![
-                Span::styled("Swarm active", accent_style()),
-            ]),
+            Line::from(vec![Span::styled("Swarm active", accent_style())]),
             Line::from(vec![
                 Span::styled("Working: ", muted_style()),
                 Span::styled(format!("{}", active), text_style()),
                 Span::styled(" | Done: ", muted_style()),
                 Span::styled(format!("{}", completed), text_style()),
                 Span::styled(" | Err: ", muted_style()),
-                Span::styled(format!("{}", errors), if errors > 0 { error_style() } else { text_style() }),
+                Span::styled(
+                    format!("{}", errors),
+                    if errors > 0 {
+                        error_style()
+                    } else {
+                        text_style()
+                    },
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Cycles: ", muted_style()),
                 Span::styled(
-                    format!("{}", app.swarm_agents.iter().map(|a| a.cycles_completed).sum::<usize>()),
-                    text_style()
+                    format!(
+                        "{}",
+                        app.swarm_agents
+                            .iter()
+                            .map(|a| a.cycles_completed)
+                            .sum::<usize>()
+                    ),
+                    text_style(),
                 ),
             ]),
         ]
     } else {
         vec![
             Line::from(vec![Span::styled("No performance data yet", muted_style())]),
-            Line::from(vec![Span::styled("Start chatting to collect metrics", muted_style())]),
+            Line::from(vec![Span::styled(
+                "Start chatting to collect metrics",
+                muted_style(),
+            )]),
         ]
     };
     let perf = Paragraph::new(Text::from(perf_lines))
@@ -460,14 +569,24 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
         let agent_name = &app.config.agent.display_name;
 
         let (role_style, content_style, prefix, display_role) = match msg.role.as_str() {
-            "user" => (accent_style(), text_style(), "❯ ".to_string(), user_name.to_string()),
+            "user" => (
+                accent_style(),
+                text_style(),
+                "❯ ".to_string(),
+                user_name.to_string(),
+            ),
             "assistant" => {
                 let agent_emoji = if app.config.agent.emoji.is_empty() {
                     "🦈"
                 } else {
                     &app.config.agent.emoji
                 };
-                (shark_style(), text_style(), format!("{} ", agent_emoji), agent_name.to_string())
+                (
+                    shark_style(),
+                    text_style(),
+                    format!("{} ", agent_emoji),
+                    agent_name.to_string(),
+                )
             }
             "system" => {
                 // Use error styling for error messages
@@ -476,12 +595,27 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                     || msg.content.contains("Failed")
                     || msg.content.contains("failed");
                 if is_error {
-                    (error_style(), error_style(), "⚠ ".to_string(), "system".to_string())
+                    (
+                        error_style(),
+                        error_style(),
+                        "⚠ ".to_string(),
+                        "system".to_string(),
+                    )
                 } else {
-                    (muted_style(), muted_style(), "ℹ ".to_string(), "system".to_string())
+                    (
+                        muted_style(),
+                        muted_style(),
+                        "ℹ ".to_string(),
+                        "system".to_string(),
+                    )
                 }
             }
-            _ => (text_style(), text_style(), "  ".to_string(), msg.role.clone()),
+            _ => (
+                text_style(),
+                text_style(),
+                "  ".to_string(),
+                msg.role.clone(),
+            ),
         };
 
         lines.push(Line::from(vec![
@@ -493,51 +627,37 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
         if let Some(ref images) = msg.images {
             for img in images {
                 let info = image_display::extract_image_info(img);
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {}", info.format_indicator()),
-                        muted_style().add_modifier(Modifier::ITALIC),
-                    ),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", info.format_indicator()),
+                    muted_style().add_modifier(Modifier::ITALIC),
+                )]));
                 // Show ASCII placeholder for the image
                 for placeholder_line in info.ascii_placeholder() {
-                    lines.push(Line::from(vec![
-                        Span::styled(placeholder_line, muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        placeholder_line,
+                        muted_style(),
+                    )]));
                 }
             }
         }
 
         // Render content with syntax highlighting for assistant messages
         if msg.role == "assistant" {
-            // Render persistent reasoning first, if present
-            if let Some(ref reasoning) = msg.reasoning
-                && !reasoning.is_empty() {
-                    lines.push(Line::from(vec![
-                        Span::styled("  💭 ", reasoning_style()),
-                        Span::styled("Thinking", reasoning_style().add_modifier(Modifier::BOLD | Modifier::ITALIC)),
-                    ]));
-                    for line in reasoning.lines() {
-                        lines.push(Line::from(vec![
-                            Span::styled(format!("     {}", line), reasoning_style().add_modifier(Modifier::ITALIC)),
-                        ]));
-                    }
-                    lines.push(Line::from(""));
-                }
-
             // Render assistant messages with syntax highlighting + inline markdown
             let highlighted = syntax_highlight::extract_and_highlight(&msg.content);
             for (is_code, block_lines) in highlighted {
                 if is_code {
-                    lines.push(Line::from(vec![
-                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        "┌─ code ──────────────────────────────",
+                        muted_style(),
+                    )]));
                     for hl_line in block_lines {
                         lines.push(hl_line);
                     }
-                    lines.push(Line::from(vec![
-                        Span::styled("└─────────────────────────────────────", muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        "└─────────────────────────────────────",
+                        muted_style(),
+                    )]));
                 } else {
                     for hl_line in block_lines {
                         // Apply inline markdown rendering to plain text blocks
@@ -546,102 +666,34 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
                     }
                 }
             }
-
         } else {
             for content_line in msg.content.lines() {
                 // Welcome logo lines use purple for visibility against dark bg
                 let line_style = if msg.role == "system" && content_line.contains('█') {
-                    Style::default().fg(current_theme().border_unfocused).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(current_theme().border_unfocused)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     content_style
                 };
-                lines.push(Line::from(vec![Span::styled(
-                    content_line,
-                    line_style,
-                )]));
+                lines.push(Line::from(vec![Span::styled(content_line, line_style)]));
             }
         }
 
         // Multi-model response indicator on assistant messages
         if msg.role == "assistant" && !msg.multi_model_responses.is_empty() {
             let count = msg.multi_model_responses.len();
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("📊 {} alternate response{} — Ctrl+V to compare", count, if count == 1 { "" } else { "s" }),
-                    muted_style().add_modifier(Modifier::ITALIC),
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "📊 {} alternate response{} — Ctrl+V to compare",
+                    count,
+                    if count == 1 { "" } else { "s" }
                 ),
-            ]));
+                muted_style().add_modifier(Modifier::ITALIC),
+            )]));
         }
 
         lines.push(Line::from(""));
-    }
-
-    if app.is_streaming {
-        let agent_name = &app.config.agent.display_name;
-        let agent_emoji = if app.config.agent.emoji.is_empty() {
-            "🦈"
-        } else {
-            &app.config.agent.emoji
-        };
-        // Animated spinner based on frame counter
-        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let spinner = SPINNER_CHARS[app.spinner_frame % SPINNER_CHARS.len()];
-        let elapsed = app.stream_start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-        let elapsed_str = if elapsed > 0 {
-            format!(" [{}s]", elapsed)
-        } else {
-            String::new()
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} ", agent_emoji), shark_style()),
-            Span::styled(agent_name, shark_style().add_modifier(Modifier::BOLD)),
-            Span::styled(format!("  {} thinking{}", spinner, elapsed_str), accent_style()),
-        ]));
-
-        // Show reasoning/thinking content in real-time with syntax highlighting
-        if !app.reasoning_content.is_empty() {
-            // Use the same syntax highlighter so code in reasoning gets highlighted
-            let highlighted = syntax_highlight::extract_and_highlight(&app.reasoning_content);
-            for (is_code, block_lines) in highlighted {
-                if is_code {
-                    lines.push(Line::from(vec![
-                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
-                    ]));
-                    for hl_line in block_lines {
-                        lines.push(hl_line);
-                    }
-                    lines.push(Line::from(vec![
-                        Span::styled("└─────────────────────────────────────", muted_style()),
-                    ]));
-                } else {
-                    for hl_line in block_lines {
-                        lines.push(hl_line);
-                    }
-                }
-            }
-        }
-
-        // Show actual streaming content with syntax highlighting
-        let highlighted = syntax_highlight::extract_and_highlight(&app.streaming_content);
-        for (is_code, block_lines) in highlighted {
-            if is_code {
-                lines.push(Line::from(vec![
-                    Span::styled("┌─ code ──────────────────────────────", muted_style()),
-                ]));
-                for hl_line in block_lines {
-                    lines.push(hl_line);
-                }
-                lines.push(Line::from(vec![
-                    Span::styled("└─────────────────────────────────────", muted_style()),
-                ]));
-            } else {
-                for hl_line in block_lines {
-                    lines.push(hl_line);
-                }
-            }
-        }
-        lines.push(Line::from(vec![Span::styled("▌", accent_style())]));
     }
 
     // ── Swarm Agent Streaming ──────────────────────────────────────────────
@@ -670,15 +722,17 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             for (is_code, block_lines) in highlighted {
                 if is_code {
                     // Add a subtle code block border
-                    lines.push(Line::from(vec![
-                        Span::styled("┌─ code ──────────────────────────────", muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        "┌─ code ──────────────────────────────",
+                        muted_style(),
+                    )]));
                     for hl_line in block_lines {
                         lines.push(hl_line);
                     }
-                    lines.push(Line::from(vec![
-                        Span::styled("└─────────────────────────────────────", muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        "└─────────────────────────────────────",
+                        muted_style(),
+                    )]));
                 } else {
                     for hl_line in block_lines {
                         lines.push(hl_line);
@@ -695,23 +749,27 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // ── Apply selection highlight ──────────────────────────────────────────
-    if app.mouse_state.selecting {
-        if let (Some(start), Some(end)) = (app.mouse_state.selection_start, app.mouse_state.selection_end) {
-            let sel_top = start.1.min(end.1);
-            let sel_bottom = start.1.max(end.1);
-            // Convert absolute terminal rows to content-relative rows
-            let content_top = inner.y;
-            let rel_top = sel_top.saturating_sub(content_top);
-            let rel_bottom = sel_bottom.saturating_sub(content_top);
-            for (row_idx, line) in lines.iter_mut().enumerate() {
-                let row = row_idx as u16;
-                if row >= rel_top && row <= rel_bottom {
-                    *line = Line::from(
-                        line.spans.iter().map(|s| {
-                            Span::styled(s.content.clone(), selection_style())
-                        }).collect::<Vec<_>>()
-                    );
-                }
+    if app.mouse_state.selecting
+        && let (Some(start), Some(end)) = (
+            app.mouse_state.selection_start,
+            app.mouse_state.selection_end,
+        )
+    {
+        let sel_top = start.1.min(end.1);
+        let sel_bottom = start.1.max(end.1);
+        // Convert absolute terminal rows to content-relative rows
+        let content_top = inner.y;
+        let rel_top = sel_top.saturating_sub(content_top);
+        let rel_bottom = sel_bottom.saturating_sub(content_top);
+        for (row_idx, line) in lines.iter_mut().enumerate() {
+            let row = row_idx as u16;
+            if row >= rel_top && row <= rel_bottom {
+                *line = Line::from(
+                    line.spans
+                        .iter()
+                        .map(|s| Span::styled(s.content.clone(), selection_style()))
+                        .collect::<Vec<_>>(),
+                );
             }
         }
     }
@@ -756,7 +814,10 @@ pub(crate) fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // YOLO mode indicator
     if app.yolo_mode {
-        status_spans.push(Span::styled("🤘YOLO ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+        status_spans.push(Span::styled(
+            "🤘YOLO ",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
     }
 
     // Checkpoint depth
@@ -791,18 +852,8 @@ pub(crate) fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    // Streaming indicator
-    if app.is_streaming {
-        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let spinner = SPINNER_CHARS[app.spinner_frame % SPINNER_CHARS.len()];
-        status_spans.push(Span::styled(
-            format!("{} ", spinner),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let status_line = Paragraph::new(Line::from(status_spans))
-        .style(Style::default().bg(Color::Black));
+    let status_line =
+        Paragraph::new(Line::from(status_spans)).style(Style::default().bg(Color::Black));
     f.render_widget(status_line, layout[0]);
 
     // ── Input block ─────────────────────────────────────────────────────────
@@ -823,15 +874,6 @@ pub(crate) fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
     let input_text = if app.input.is_empty() {
         if app.mode == AppMode::ToolApproval {
             "Tool suggestion pending. Press 'y' to execute, 'n' to skip."
-        } else if app.is_streaming {
-            const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-            let spinner = SPINNER_CHARS[app.spinner_frame % SPINNER_CHARS.len()];
-            let elapsed = app.stream_start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-            if elapsed > 0 {
-                &format!("{} Streaming response... [{}s]", spinner, elapsed)
-            } else {
-                &format!("{} Streaming response...", spinner)
-            }
         } else if app.swarm_running {
             "🐝 Agents working..."
         } else {
@@ -853,7 +895,7 @@ pub(crate) fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
     } else {
         format!("❯ {}", app.input)
     };
-    
+
     let paragraph = Paragraph::new(display_text.clone())
         .style(style)
         .wrap(Wrap { trim: true });
@@ -862,7 +904,11 @@ pub(crate) fn draw_input_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // Always show cursor at the correct position
     let available_width = inner.width as usize;
-    let cursor_offset = if app.input.is_empty() { 0 } else { "❯ ".len() }; // byte offset of prefix in display_text
+    let cursor_offset = if app.input.is_empty() {
+        0
+    } else {
+        "❯ ".len()
+    }; // byte offset of prefix in display_text
     let (cursor_x, cursor_y) = compute_wrapped_cursor_position(
         &display_text,
         app.cursor_position + cursor_offset,
@@ -1021,20 +1067,30 @@ pub(crate) fn draw_diff_preview_popup(f: &mut Frame, app: &App) {
     f.render_widget(block, popup_area);
 
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled("📝 Proposed file edit:", highlight_style()),
-        ]),
+        Line::from(vec![Span::styled(
+            "📝 Proposed file edit:",
+            highlight_style(),
+        )]),
         Line::from(""),
     ];
 
     if let Some(ref diff) = app.pending_diff {
         for diff_line in diff.lines().skip(app.diff_scroll) {
             let styled_line = if diff_line.starts_with('+') {
-                Line::from(vec![Span::styled(diff_line, Style::default().fg(ratatui::style::Color::Green))])
+                Line::from(vec![Span::styled(
+                    diff_line,
+                    Style::default().fg(ratatui::style::Color::Green),
+                )])
             } else if diff_line.starts_with('-') {
-                Line::from(vec![Span::styled(diff_line, Style::default().fg(ratatui::style::Color::Red))])
+                Line::from(vec![Span::styled(
+                    diff_line,
+                    Style::default().fg(ratatui::style::Color::Red),
+                )])
             } else if diff_line.starts_with("@@") {
-                Line::from(vec![Span::styled(diff_line, Style::default().fg(ratatui::style::Color::Cyan))])
+                Line::from(vec![Span::styled(
+                    diff_line,
+                    Style::default().fg(ratatui::style::Color::Cyan),
+                )])
             } else {
                 Line::from(vec![Span::styled(diff_line, text_style())])
             };
@@ -1052,9 +1108,10 @@ pub(crate) fn draw_diff_preview_popup(f: &mut Frame, app: &App) {
         Span::styled("n", error_style()),
         Span::styled(" to skip", text_style()),
     ]));
-    lines.push(Line::from(vec![
-        Span::styled("↑/↓ or PgUp/PgDn to scroll", muted_style()),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "↑/↓ or PgUp/PgDn to scroll",
+        muted_style(),
+    )]));
 
     let paragraph = Paragraph::new(Text::from(lines))
         .style(bg_style())
@@ -1081,7 +1138,9 @@ pub(crate) fn draw_comparison_overlay(f: &mut Frame, app: &App) {
     f.render_widget(block, popup_area);
 
     // Find the assistant message with the most secondary responses
-    let target_msg = app.messages.iter()
+    let target_msg = app
+        .messages
+        .iter()
         .filter(|m| m.role == "assistant")
         .max_by_key(|m| m.multi_model_responses.len());
 
@@ -1089,12 +1148,14 @@ pub(crate) fn draw_comparison_overlay(f: &mut Frame, app: &App) {
 
     if let Some(msg) = target_msg {
         if msg.multi_model_responses.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("No alternate responses available yet.", muted_style()),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("Enable multi-model mode with /multi and send a message.", muted_style()),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "No alternate responses available yet.",
+                muted_style(),
+            )]));
+            lines.push(Line::from(vec![Span::styled(
+                "Enable multi-model mode with /multi and send a message.",
+                muted_style(),
+            )]));
         } else {
             // Header — primary model
             lines.push(Line::from(vec![
@@ -1111,9 +1172,10 @@ pub(crate) fn draw_comparison_overlay(f: &mut Frame, app: &App) {
                 lines.push(Line::from(vec![Span::styled("...", muted_style())]));
             }
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("─".repeat(inner.width as usize), border_style()),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "─".repeat(inner.width as usize),
+                border_style(),
+            )]));
             lines.push(Line::from(""));
 
             // Secondary responses
@@ -1127,7 +1189,14 @@ pub(crate) fn draw_comparison_overlay(f: &mut Frame, app: &App) {
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(marker, if is_selected { highlight_style() } else { muted_style() }),
+                    Span::styled(
+                        marker,
+                        if is_selected {
+                            highlight_style()
+                        } else {
+                            muted_style()
+                        },
+                    ),
                     Span::styled(&sec.model_name, name_style),
                     Span::styled("  |  ", muted_style()),
                     Span::styled(format!("{}ms", sec.latency_ms), text_style()),
@@ -1140,25 +1209,32 @@ pub(crate) fn draw_comparison_overlay(f: &mut Frame, app: &App) {
                 for line in sec.content.lines().take(preview_lines) {
                     lines.push(Line::from(vec![
                         Span::styled("    ", muted_style()),
-                        Span::styled(line, if is_selected { text_style() } else { muted_style() }),
+                        Span::styled(
+                            line,
+                            if is_selected {
+                                text_style()
+                            } else {
+                                muted_style()
+                            },
+                        ),
                     ]));
                 }
                 if sec.content.lines().count() > preview_lines {
-                    lines.push(Line::from(vec![
-                        Span::styled("    ...", muted_style()),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled("    ...", muted_style())]));
                 }
                 lines.push(Line::from(""));
             }
 
-            lines.push(Line::from(vec![
-                Span::styled("↑/↓ to navigate • Ctrl+V to close", muted_style()),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "↑/↓ to navigate • Ctrl+V to close",
+                muted_style(),
+            )]));
         }
     } else {
-        lines.push(Line::from(vec![
-            Span::styled("No assistant messages found.", muted_style()),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "No assistant messages found.",
+            muted_style(),
+        )]));
     }
 
     let paragraph = Paragraph::new(Text::from(lines))
@@ -1215,8 +1291,7 @@ pub(crate) fn draw_splash_screen(f: &mut Frame) {
         })
         .collect();
 
-    let banner = Paragraph::new(Text::from(banner_lines))
-        .style(bg_style());
+    let banner = Paragraph::new(Text::from(banner_lines)).style(bg_style());
 
     // Center vertically: calculate offset to place banner in middle of screen
     let banner_height = banner_text.lines().count() as u16;
@@ -1237,8 +1312,8 @@ pub(crate) fn draw_splash_screen(f: &mut Frame) {
             .fg(current_theme().muted)
             .add_modifier(Modifier::ITALIC),
     )])]))
-        .alignment(Alignment::Center)
-        .style(bg_style());
+    .alignment(Alignment::Center)
+    .style(bg_style());
 
     let prompt_area = Rect {
         x: area.x,
@@ -1248,4 +1323,3 @@ pub(crate) fn draw_splash_screen(f: &mut Frame) {
     };
     f.render_widget(prompt, prompt_area);
 }
-

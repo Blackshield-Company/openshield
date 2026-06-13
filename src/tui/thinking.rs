@@ -18,10 +18,10 @@ pub(crate) fn split_thinking_content(content: &str) -> (String, String) {
             tag.push(ch);
             while let Some(&next_ch) = chars.peek() {
                 if next_ch == '>' {
-                    tag.push(chars.next().unwrap());
+                    tag.push(chars.next().expect("peek confirmed element exists"));
                     break;
                 } else {
-                    tag.push(chars.next().unwrap());
+                    tag.push(chars.next().expect("peek confirmed element exists"));
                 }
             }
 
@@ -98,4 +98,3 @@ pub(crate) fn emergency_truncate_messages(
         }
     }
 }
-

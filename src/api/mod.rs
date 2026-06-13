@@ -30,10 +30,11 @@ pub mod ws;
 
 use axum::Router;
 use axum::routing::{get, post};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct AppState {
     pub config: Arc<crate::config::Config>,
     pub running_tasks: Arc<RwLock<Vec<AgentTask>>>,
@@ -78,6 +79,7 @@ pub struct ChatResponse {
 
 /// Agent task request body.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct AgentTaskRequest {
     pub task: String,
     #[serde(default)]
@@ -90,8 +92,12 @@ pub struct AgentTaskRequest {
     pub yolo: bool,
 }
 
-fn default_timeout() -> u64 { 300 }
-fn default_max_turns() -> usize { 50 }
+fn default_timeout() -> u64 {
+    300
+}
+fn default_max_turns() -> usize {
+    50
+}
 
 /// Tool execution request.
 #[derive(Debug, Deserialize)]
@@ -123,7 +129,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tools/{name}", post(handlers::execute_tool))
         // Diagnostics
         .route("/api/v1/diagnostics", get(handlers::all_diagnostics))
-        .route("/api/v1/diagnostics/{*file}", get(handlers::file_diagnostics))
+        .route(
+            "/api/v1/diagnostics/{*file}",
+            get(handlers::file_diagnostics),
+        )
         // Chat
         .route("/api/v1/chat", post(handlers::chat))
         // Agent

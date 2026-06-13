@@ -499,7 +499,10 @@ impl Default for Config {
                 headers: {
                     let mut h = HashMap::new();
                     h.insert("x-kimi-agent-name".to_string(), "OpenShark".to_string());
-                    h.insert("x-kimi-agent-version".to_string(), crate::VERSION.to_string());
+                    h.insert(
+                        "x-kimi-agent-version".to_string(),
+                        crate::VERSION.to_string(),
+                    );
                     h
                 },
                 env_file: Some("kimi.env".to_string()),
@@ -742,12 +745,14 @@ fn env_or_placeholder(key: &str) -> String {
 /// Resolve a gateway token from env var if it uses ${VAR} syntax.
 fn resolve_gateway_token(token: &mut Option<String>) {
     if let Some(t) = token
-        && t.starts_with("${") && t.ends_with("}") {
-            let var_name = &t[2..t.len() - 1];
-            if let Ok(val) = std::env::var(var_name) {
-                *token = Some(val);
-            }
+        && t.starts_with("${")
+        && t.ends_with("}")
+    {
+        let var_name = &t[2..t.len() - 1];
+        if let Ok(val) = std::env::var(var_name) {
+            *token = Some(val);
         }
+    }
 }
 
 #[cfg(test)]

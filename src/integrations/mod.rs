@@ -5,10 +5,10 @@
 
 #![allow(dead_code)]
 
-pub mod hermes;
-pub mod claw;
-pub mod opencode;
 pub mod claude;
+pub mod claw;
+pub mod hermes;
+pub mod opencode;
 pub mod registry;
 
 use serde::{Deserialize, Serialize};

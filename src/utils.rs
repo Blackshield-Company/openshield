@@ -9,7 +9,11 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> String {
         return s.to_string();
     }
     // Find the last char boundary at or before max_bytes
-    match s.char_indices().take_while(|(idx, _)| *idx <= max_bytes).last() {
+    match s
+        .char_indices()
+        .take_while(|(idx, _)| *idx <= max_bytes)
+        .last()
+    {
         Some((idx, c)) => {
             let end = idx + c.len_utf8();
             if end <= max_bytes {

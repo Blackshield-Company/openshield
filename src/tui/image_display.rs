@@ -9,12 +9,16 @@ pub fn extract_image_info(data_url: &str) -> ImageInfo {
 
     // Parse MIME type from data URL prefix (data:image/png;base64,...)
     if data_url.starts_with("data:")
-        && let Some(semi) = data_url.strip_prefix("data:").unwrap_or(data_url).find(';') {
-            info.mime_type = data_url.strip_prefix("data:").unwrap_or(data_url)[..semi].to_string();
-        }
+        && let Some(semi) = data_url.strip_prefix("data:").unwrap_or(data_url).find(';')
+    {
+        info.mime_type = data_url.strip_prefix("data:").unwrap_or(data_url)[..semi].to_string();
+    }
 
     // Extract base64 payload after the comma
-    let payload = data_url.find(',').map(|i| &data_url[i + 1..]).unwrap_or(data_url);
+    let payload = data_url
+        .find(',')
+        .map(|i| &data_url[i + 1..])
+        .unwrap_or(data_url);
 
     // Decode base64 to get raw bytes for analysis
     if let Ok(bytes) = base64_decode(payload) {
@@ -60,11 +64,7 @@ impl ImageInfo {
     pub fn ascii_placeholder(&self) -> Vec<String> {
         let w = self.width;
         let h = self.height;
-        let aspect = if h > 0 {
-            w as f32 / h as f32
-        } else {
-            1.0
-        };
+        let aspect = if h > 0 { w as f32 / h as f32 } else { 1.0 };
 
         // Target display size in characters
         let target_width = 40u32.min(w.max(10));
@@ -95,7 +95,7 @@ fn human_size(bytes: usize) -> String {
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, base64::DecodeError> {
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
     STANDARD.decode(input.replace(['\n', '\r', ' '], ""))
 }
 
@@ -135,7 +135,7 @@ fn detect_jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
                     let w = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]) as u32;
                     return Some((w, h));
                 }
-                0xD9 => break, // EOI
+                0xD9 => break,  // EOI
                 0xD8 => i += 2, // SOI
                 _ => {
                     if i + 3 < bytes.len() {

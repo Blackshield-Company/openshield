@@ -19,7 +19,10 @@ pub(crate) enum StreamEvent {
     /// A reasoning/thinking chunk arrived (shown in real-time before response).
     ReasoningChunk(String),
     /// The full response is complete.
-    ResponseComplete { content: String, metrics: StreamMetrics },
+    ResponseComplete {
+        content: String,
+        metrics: StreamMetrics,
+    },
     /// A tool was invoked and returned a result.
     ToolResult {
         name: String,
@@ -30,7 +33,11 @@ pub(crate) enum StreamEvent {
     /// Follow-up assistant message after tool execution.
     FollowUp(String),
     /// Multi-model secondary response.
-    MultiModelResponse { name: String, content: String, metrics: StreamMetrics },
+    MultiModelResponse {
+        name: String,
+        content: String,
+        metrics: StreamMetrics,
+    },
     /// Switch to tool-approval mode.
     #[allow(dead_code)]
     SetPendingSuggestion(ToolSuggestion),
@@ -43,9 +50,7 @@ pub(crate) enum StreamEvent {
     /// Streaming finished (success or error).
     Done,
     /// Batched tool results from multi-tool execution (collapsed display).
-    ToolResultsBatch {
-        results: Vec<ToolResultEntry>,
-    },
+    ToolResultsBatch { results: Vec<ToolResultEntry> },
 }
 
 /// A single tool result for batched display.
@@ -78,7 +83,10 @@ pub(crate) struct AgentStreamState {
 }
 
 pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
-    use super::{strip_think_tags, strip_tool_lines, parse_embedded_tools, detect_high_confidence_suggestion, generate_edit_diff, execute_tool_chain, stream_model_response_task};
+    use super::{
+        detect_high_confidence_suggestion, generate_edit_diff, parse_embedded_tools,
+        stream_model_response_task, strip_think_tags, strip_tool_lines,
+    };
     match event {
         StreamEvent::Start => {
             app.is_streaming = true;
@@ -92,7 +100,8 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             app.streaming_content.push_str(&strip_tool_lines(&cleaned));
         }
         StreamEvent::ReasoningChunk(chunk) => {
-            app.reasoning_content.push_str(&chunk);
+            let cleaned = strip_tool_lines(&chunk);
+            app.reasoning_content.push_str(&cleaned);
             app.is_reasoning = true;
         }
         StreamEvent::ResponseComplete { content, metrics } => {
@@ -112,7 +121,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 Some(&format!("tokens={}", metrics.tokens_generated)),
             );
 
-            let reasoning_to_save = None;
+            let reasoning_to_save = Some(app.reasoning_content.clone());
 
             let embedded_tools = parse_embedded_tools(&content);
             if !embedded_tools.is_empty() {
@@ -140,7 +149,10 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 if !parts.is_empty() {
                     let tool_name = parts[0].trim().to_string();
                     let args = parts.get(1).unwrap_or(&"").trim().to_string();
-                    app.add_assistant_message(format!("🔧 Using tool: {} {}", tool_name, args), reasoning_to_save.clone());
+                    app.add_assistant_message(
+                        format!("🔧 Using tool: {} {}", tool_name, args),
+                        reasoning_to_save.clone(),
+                    );
                     app.model_messages.push(Message {
                         role: "assistant".to_string(),
                         content: format!("TOOL:{} {}", tool_name, args),
@@ -154,11 +166,14 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 let clean_content = strip_think_tags(&content);
                 app.add_assistant_message(clean_content, reasoning_to_save);
                 if let Some(suggestion) = detect_high_confidence_suggestion(&content) {
-                    match app.security_engine.check_tool_call(
-                        &suggestion.tool_name,
-                        &suggestion.args
-                    ) {
-                        crate::security::SecurityDecision::RequireApproval { reason: _, risk_level } => {
+                    match app
+                        .security_engine
+                        .check_tool_call(&suggestion.tool_name, &suggestion.args)
+                    {
+                        crate::security::SecurityDecision::RequireApproval {
+                            reason: _,
+                            risk_level,
+                        } => {
                             let tool_name = suggestion.tool_name.clone();
                             app.pending_suggestion = Some(suggestion);
                             app.mode = AppMode::ToolApproval;
@@ -183,7 +198,11 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             let mut groups: HashMap<String, (usize, usize)> = HashMap::new();
             for r in &results {
                 let entry = groups.entry(r.name.clone()).or_insert((0, 0));
-                if r.success { entry.0 += 1; } else { entry.1 += 1; }
+                if r.success {
+                    entry.0 += 1;
+                } else {
+                    entry.1 += 1;
+                }
             }
             let total = results.len();
             let mut summary = format!("📊 Tool results ({} total):\n", total);
@@ -228,7 +247,12 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 });
             }
         }
-        StreamEvent::ToolResult { name, args, result, success } => {
+        StreamEvent::ToolResult {
+            name,
+            args,
+            result,
+            success,
+        } => {
             let display = if success {
                 format!("Result: {}", &result[..result.len().min(200)])
             } else {
@@ -264,50 +288,35 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             });
         }
         StreamEvent::FollowUp(content) => {
+            // FollowUp is the SYNTHESIS phase — the model should NOT output more tools.
+            // If it does, strip them and display as text instead of re-executing.
             let embedded_tools = parse_embedded_tools(&content);
             if !embedded_tools.is_empty() {
-                app.add_system_message(format!(
-                    "🔧 Executing {} follow-up tool(s)...",
-                    embedded_tools.len()
-                ));
+                // Model incorrectly output tools during synthesis phase.
+                // Strip tool lines and display the remaining text as the assistant's response.
                 let display_content = strip_think_tags(&strip_tool_lines(&content));
                 if !display_content.trim().is_empty() {
+                    app.add_system_message(
+                        "⚠️ Model tried to call more tools during synthesis. Stripped tool calls."
+                            .to_string(),
+                    );
                     app.add_assistant_message(display_content, None);
+                } else {
+                    app.add_system_message(
+                        "⚠️ Model output only tool calls during synthesis phase (ignored)."
+                            .to_string(),
+                    );
                 }
-                for (tool_name, args) in &embedded_tools {
-                    app.model_messages.push(Message {
-                        role: "assistant".to_string(),
-                        content: format!("TOOL:{} {}", tool_name, args),
-                        images: None,
-                        tool_call_id: None,
-                        tool_calls: None,
-                        reasoning_content: None,
-                    });
-                }
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                app.stream_rx = Some(rx);
-                app.is_streaming = true;
-                app.stream_start_time = Some(Instant::now());
-                let provider = app.provider.clone();
-                let model = app.model.clone();
-                let model_messages = app.model_messages.clone();
-                let security_engine = app.security_engine.clone();
-                let tools = embedded_tools;
-                tokio::spawn(async move {
-                    let _ = execute_tool_chain(
-                        &tx, &provider, &model, &model_messages,
-                        &security_engine, &tools, &content,
-                    ).await;
-                });
+                // Do NOT re-execute tools — that causes infinite loops
                 return;
             }
 
             let trimmed = content.trim();
             if trimmed.is_empty() {
                 app.empty_response_count += 1;
-                if app.empty_response_count >= 3 {
+                if app.empty_response_count >= 1 {
                     app.add_system_message(
-                        "⚠️ Model returned empty responses repeatedly. Showing raw tool results:".to_string()
+                        "⚠️ Model returned empty synthesis. Showing raw tool results:".to_string(),
                     );
                     let mut found_results = Vec::new();
                     for msg in app.model_messages.iter().rev().take(20) {
@@ -325,7 +334,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     app.empty_response_count = 0;
                 } else {
                     app.add_system_message(
-                        format!("⚠️ Response was empty — re-prompting for synthesis... (attempt {}/3)", app.empty_response_count)
+                        "⚠️ Response was empty — re-prompting for synthesis...".to_string(),
                     );
                     app.model_messages.push(Message {
                         role: "assistant".to_string(),
@@ -353,9 +362,15 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     let config = app.config.clone();
                     tokio::spawn(async move {
                         let _ = stream_model_response_task(
-                            tx, provider, model, model_config,
-                            model_messages, is_multi_model, config,
-                        ).await;
+                            tx,
+                            provider,
+                            model,
+                            model_config,
+                            model_messages,
+                            is_multi_model,
+                            config,
+                        )
+                        .await;
                     });
                 }
             } else {
@@ -363,31 +378,41 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 app.add_assistant_message(strip_think_tags(&content), None);
             }
         }
-        StreamEvent::MultiModelResponse { name, content, metrics } => {
+        StreamEvent::MultiModelResponse {
+            name,
+            content,
+            metrics,
+        } => {
             if !content.is_empty()
-                && let Some(last_idx) = app.messages.iter().rposition(|m| m.role == "assistant") {
-                    app.messages[last_idx].multi_model_responses.push(SecondaryResponse {
+                && let Some(last_idx) = app.messages.iter().rposition(|m| m.role == "assistant")
+            {
+                app.messages[last_idx]
+                    .multi_model_responses
+                    .push(SecondaryResponse {
                         model_name: name,
                         content,
                         latency_ms: metrics.total_latency_ms,
                         tokens: metrics.tokens_generated,
                     });
-                }
+            }
         }
         StreamEvent::SetPendingBatch(batch) => {
             app.pending_batch = Some(batch);
             app.batch_selected = 0;
-            app.add_system_message("🔧 Multi-file edit batch received. Use /approve or /reject to handle.".to_string());
+            app.add_system_message(
+                "🔧 Multi-file edit batch received. Use /approve or /reject to handle.".to_string(),
+            );
         }
         StreamEvent::SetPendingSuggestion(suggestion) => {
             if suggestion.tool_name == "edit"
-                && let Some(diff) = generate_edit_diff(&suggestion.args) {
-                    app.pending_diff = Some(diff);
-                    app.pending_suggestion = Some(suggestion);
-                    app.mode = AppMode::DiffPreview;
-                    app.diff_scroll = 0;
-                    return;
-                }
+                && let Some(diff) = generate_edit_diff(&suggestion.args)
+            {
+                app.pending_diff = Some(diff);
+                app.pending_suggestion = Some(suggestion);
+                app.mode = AppMode::DiffPreview;
+                app.diff_scroll = 0;
+                return;
+            }
             app.pending_suggestion = Some(suggestion);
             app.mode = AppMode::ToolApproval;
             app.tool_approval_shown_at = Some(Instant::now());
@@ -400,10 +425,11 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
         StreamEvent::SystemMessage(msg) => {
             if msg.starts_with("🔧 Tool") {
                 if let Some(idx) = app.last_progress_msg_idx
-                    && idx < app.messages.len() {
-                        app.messages[idx].content = msg;
-                        return;
-                    }
+                    && idx < app.messages.len()
+                {
+                    app.messages[idx].content = msg;
+                    return;
+                }
                 app.add_system_message(msg);
                 app.last_progress_msg_idx = Some(app.messages.len() - 1);
             } else {

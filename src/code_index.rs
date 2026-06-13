@@ -104,7 +104,7 @@ impl CodeIndex {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        *self.last_refresh.lock().unwrap() = now;
+        *self.last_refresh.lock().expect("CodeIndex last_refresh mutex poisoned") = now;
 
         Ok(map.symbols.len())
     }
@@ -113,7 +113,7 @@ impl CodeIndex {
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<IndexedSymbol>> {
         let escaped = query.replace('%', "\\%").replace('_', "\\_");
         let pattern = format!("%{}%", escaped);
-        let conn = self.db.lock().unwrap();
+        let conn = self.db.lock().expect("CodeIndex db mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT name, kind, file, line, context FROM symbols
              WHERE name LIKE ?1
@@ -140,7 +140,7 @@ impl CodeIndex {
 
     /// Get all symbols in a file.
     pub fn symbols_in_file(&self, file: &str) -> Result<Vec<IndexedSymbol>> {
-        let conn = self.db.lock().unwrap();
+        let conn = self.db.lock().expect("CodeIndex db mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT name, kind, file, line, context FROM symbols
              WHERE file = ?1
@@ -166,7 +166,7 @@ impl CodeIndex {
 
     /// Get index statistics.
     pub fn stats(&self) -> Result<(usize, u64)> {
-        let conn = self.db.lock().unwrap();
+        let conn = self.db.lock().expect("CodeIndex db mutex poisoned");
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM symbols", [], |row| row.get(0))
             .unwrap_or(0);
@@ -230,7 +230,11 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("/tmp/openshark_code_index_test_{}_{}.db", std::process::id(), id)
+        format!(
+            "/tmp/openshark_code_index_test_{}_{}.db",
+            std::process::id(),
+            id
+        )
     }
 
     #[test]
@@ -239,7 +243,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
 
         // Create a temp project dir so we're not scanning the real project root
-        let proj_dir = format!("{}", db_path.replace(".db", "_proj"));
+        let proj_dir = db_path.replace(".db", "_proj").to_string();
         let _ = std::fs::remove_dir_all(&proj_dir);
         std::fs::create_dir_all(format!("{}/src", proj_dir)).unwrap();
         std::fs::write(format!("{}/src/main.rs", proj_dir), "fn main() {}\n").unwrap();

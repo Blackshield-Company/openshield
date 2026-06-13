@@ -26,7 +26,11 @@ pub(crate) fn extract_thinking_from_chunk(chunk: &str) -> (Option<String>, Strin
         }
     }
 
-    let reasoning_opt = if reasoning.is_empty() { None } else { Some(reasoning) };
+    let reasoning_opt = if reasoning.is_empty() {
+        None
+    } else {
+        Some(reasoning)
+    };
     (reasoning_opt, content)
 }
 pub(crate) fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
@@ -63,14 +67,15 @@ pub(crate) fn parse_embedded_tools(text: &str) -> Vec<(String, String)> {
 pub(crate) fn parse_json_tool_format(rest: &str) -> Option<(String, String)> {
     // Try bare JSON format first: tool_name {"key": "value"}
     if let Some(space_pos) = rest.find(['{', ':'])
-        && rest.as_bytes().get(space_pos) == Some(&b'{') {
-            let tool_name = rest[..space_pos].trim().to_string();
-            if tool_name.is_empty() {
-                return None;
-            }
-            let json_str = find_balanced_json(&rest[space_pos..])?;
-            return extract_args_from_json(json_str, &tool_name);
+        && rest.as_bytes().get(space_pos) == Some(&b'{')
+    {
+        let tool_name = rest[..space_pos].trim().to_string();
+        if tool_name.is_empty() {
+            return None;
         }
+        let json_str = find_balanced_json(&rest[space_pos..])?;
+        return extract_args_from_json(json_str, &tool_name);
+    }
 
     // Try numeric-indexed format: tool_name:0>{"key": "value"}
     let colon_pos = rest.find(':')?;
@@ -171,7 +176,10 @@ pub(crate) fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<
             let old_str = parts.get(1).cloned().unwrap_or_default();
             let new_str = parts.get(2).cloned().unwrap_or_default();
             if !old_str.is_empty() {
-                return Some((tool_name.to_string(), format!("replace {}\n{}\n---\n{}", file, old_str, new_str)));
+                return Some((
+                    tool_name.to_string(),
+                    format!("replace {}\n{}\n---\n{}", file, old_str, new_str),
+                ));
             }
             return Some((tool_name.to_string(), format!("read {}", file)));
         }
@@ -186,7 +194,10 @@ pub(crate) fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<
         None
     }
 }
-pub(crate) fn extract_generic_args(v: serde_json::Value, tool_name: &str) -> Option<(String, String)> {
+pub(crate) fn extract_generic_args(
+    v: serde_json::Value,
+    tool_name: &str,
+) -> Option<(String, String)> {
     if let Some(obj) = v.as_object() {
         let parts: Vec<String> = obj
             .values()
@@ -219,9 +230,7 @@ pub(crate) fn extract_thinking(text: &str) -> String {
     let start = text.find("<think>");
     let end = text.find("</think>");
     match (start, end) {
-        (Some(s), Some(e)) if e > s => {
-            text[s + 7..e].trim().to_string()
-        }
+        (Some(s), Some(e)) if e > s => text[s + 7..e].trim().to_string(),
         _ => String::new(),
     }
 }
@@ -291,5 +300,8 @@ pub(crate) fn generate_edit_diff(args: &str) -> Option<String> {
 
 /// Check if a tool name is an edit operation that should trigger auto-commit.
 pub(crate) fn is_edit_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "edit" | "write" | "patch" | "replace" | "refactor")
+    matches!(
+        tool_name,
+        "edit" | "write" | "patch" | "replace" | "refactor"
+    )
 }
