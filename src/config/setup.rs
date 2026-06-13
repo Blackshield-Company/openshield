@@ -13,9 +13,10 @@ fn prompt(question: &str, default: Option<&str>) -> Result<String> {
     io::stdin().read_line(&mut input)?;
     let trimmed = input.trim().to_string();
     if trimmed.is_empty()
-        && let Some(d) = default {
-            return Ok(d.to_string());
-        }
+        && let Some(d) = default
+    {
+        return Ok(d.to_string());
+    }
     Ok(trimmed)
 }
 
@@ -135,7 +136,9 @@ pub async fn run() -> Result<()> {
             "Kimi API key (or leave blank to use ~/.config/openshark/kimi.env):",
             None,
         )?;
-        let mut kimi_provider = config.providers.get_mut("kimi").unwrap().clone();
+        let mut kimi_provider = config.providers.get_mut("kimi")
+            .expect("Kimi provider should exist in default config")
+            .clone();
         if !kimi_key.is_empty() {
             kimi_provider.api_key = kimi_key;
         }
@@ -154,9 +157,10 @@ pub async fn run() -> Result<()> {
             None,
         )?;
         if !openai_key.is_empty()
-            && let Some(provider) = config.providers.get_mut("openai") {
-                provider.api_key = openai_key;
-            }
+            && let Some(provider) = config.providers.get_mut("openai")
+        {
+            provider.api_key = openai_key;
+        }
         if config.default_model != "kimi-k2.6" {
             config.default_model = "gpt-4o".to_string();
         }
@@ -184,7 +188,9 @@ pub async fn run() -> Result<()> {
             "OpenRouter API key (or leave blank to use ~/.config/openshark/openrouter.env):",
             None,
         )?;
-        let mut or_provider = config.providers.get("openrouter").unwrap().clone();
+        let mut or_provider = config.providers.get("openrouter")
+            .expect("OpenRouter provider should exist in default config")
+            .clone();
         if !or_key.is_empty() {
             or_provider.api_key = or_key;
         }
@@ -211,7 +217,9 @@ pub async fn run() -> Result<()> {
             "Z.AI API key (or leave blank to use ~/.config/openshark/zai.env):",
             None,
         )?;
-        let mut zai_provider = config.providers.get("zai").unwrap().clone();
+        let mut zai_provider = config.providers.get("zai")
+            .expect("Z.AI provider should exist in default config")
+            .clone();
         if !zai_key.is_empty() {
             zai_provider.api_key = zai_key;
         }
@@ -229,9 +237,10 @@ pub async fn run() -> Result<()> {
             None,
         )?;
         if let Some(provider) = config.providers.get_mut("anthropic")
-            && !anthropic_key.is_empty() {
-                provider.api_key = anthropic_key;
-            }
+            && !anthropic_key.is_empty()
+        {
+            provider.api_key = anthropic_key;
+        }
         println!("✅ Anthropic configured");
     } else {
         config.providers.remove("anthropic");
@@ -245,9 +254,10 @@ pub async fn run() -> Result<()> {
             None,
         )?;
         if let Some(provider) = config.providers.get_mut("gemini")
-            && !gemini_key.is_empty() {
-                provider.api_key = gemini_key;
-            }
+            && !gemini_key.is_empty()
+        {
+            provider.api_key = gemini_key;
+        }
         println!("✅ Gemini configured");
     } else {
         config.providers.remove("gemini");
@@ -380,9 +390,10 @@ pub async fn run() -> Result<()> {
         }
         let default_idx = prompt("Select default model (number):", Some("0"))?;
         if let Ok(idx) = default_idx.parse::<usize>()
-            && let Some(model) = available_models.get(idx) {
-                config.default_model = model.clone();
-            }
+            && let Some(model) = available_models.get(idx)
+        {
+            config.default_model = model.clone();
+        }
     }
     println!();
 

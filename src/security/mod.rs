@@ -213,10 +213,11 @@ impl SecurityConfig {
         let main_config_path = config_dir.join("config.toml");
         if main_config_path.exists()
             && let Ok(content) = std::fs::read_to_string(&main_config_path)
-                && let Ok(main_config) = toml::from_str::<crate::config::Config>(&content)
-                    && !main_config.filesystem.allowed_paths.is_empty() {
-                        config.allowed_paths = main_config.filesystem.allowed_paths.clone();
-                    }
+            && let Ok(main_config) = toml::from_str::<crate::config::Config>(&content)
+            && !main_config.filesystem.allowed_paths.is_empty()
+        {
+            config.allowed_paths = main_config.filesystem.allowed_paths.clone();
+        }
 
         Ok(config)
     }
@@ -398,7 +399,8 @@ impl SecurityEngine {
 
         // Truncate if too large
         if sanitized.len() > self.config.max_model_output_bytes {
-            let truncated = crate::utils::truncate_str(&sanitized, self.config.max_model_output_bytes);
+            let truncated =
+                crate::utils::truncate_str(&sanitized, self.config.max_model_output_bytes);
             sanitized = format!(
                 "{}\n\n[Output truncated: {} bytes total, showing first {}]",
                 truncated,
@@ -492,9 +494,10 @@ impl SecurityEngine {
         // Check for active sudo session
         if let Ok(sessions) = self.sudo_sessions.lock()
             && let Some(expiry) = sessions.get(args)
-                && std::time::Instant::now() < *expiry {
-                    return None; // Session still valid
-                }
+            && std::time::Instant::now() < *expiry
+        {
+            return None; // Session still valid
+        }
 
         Some(SecurityDecision::RequireApproval {
             reason: "Sudo command requires approval".to_string(),

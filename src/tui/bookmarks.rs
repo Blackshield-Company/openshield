@@ -6,11 +6,11 @@
 #![allow(dead_code)]
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 use serde::{Deserialize, Serialize};
 
@@ -187,13 +187,17 @@ impl BookmarkManager {
     /// Load bookmarks from the session file.
     pub fn load_from_file(&mut self, session_id: &str) {
         let path = match dirs::config_dir() {
-            Some(dir) => dir.join("openshark").join("bookmarks").join(format!("{}.json", session_id)),
+            Some(dir) => dir
+                .join("openshark")
+                .join("bookmarks")
+                .join(format!("{}.json", session_id)),
             None => return, // Silently skip if config dir unavailable
         };
         if let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data) {
-                self.bookmarks = bookmarks;
-            }
+            && let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data)
+        {
+            self.bookmarks = bookmarks;
+        }
     }
 
     /// Save bookmarks to the session file.
@@ -245,8 +249,11 @@ fn draw_list_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
     } else {
         Text::from(Line::from(Span::raw(&manager.filter)))
     };
-    let filter_paragraph = Paragraph::new(filter_text)
-        .block(Block::default().borders(Borders::ALL).title(" Bookmarks (Ctrl+N=new, Enter=load, Del=delete) "));
+    let filter_paragraph = Paragraph::new(filter_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Bookmarks (Ctrl+N=new, Enter=load, Del=delete) "),
+    );
     f.render_widget(filter_paragraph, chunks[0]);
 
     let filtered = manager.filtered();
@@ -256,7 +263,10 @@ fn draw_list_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
         .map(|(i, bm)| {
             let is_selected = i == manager.selected;
             let name_style = if is_selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Cyan)
             };
@@ -290,7 +300,11 @@ fn draw_list_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
 fn draw_create_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
         .split(area);
 
     let name_title = if manager.input_stage == 0 {
@@ -299,8 +313,8 @@ fn draw_create_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
         " Bookmark Name "
     };
     let name_text = Text::from(Line::from(Span::raw(&manager.input_name)));
-    let name_paragraph = Paragraph::new(name_text)
-        .block(Block::default().borders(Borders::ALL).title(name_title));
+    let name_paragraph =
+        Paragraph::new(name_text).block(Block::default().borders(Borders::ALL).title(name_title));
     f.render_widget(name_paragraph, chunks[0]);
 
     let desc_title = if manager.input_stage == 1 {
@@ -309,8 +323,8 @@ fn draw_create_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
         " Description "
     };
     let desc_text = Text::from(Line::from(Span::raw(&manager.input_desc)));
-    let desc_paragraph = Paragraph::new(desc_text)
-        .block(Block::default().borders(Borders::ALL).title(desc_title));
+    let desc_paragraph =
+        Paragraph::new(desc_text).block(Block::default().borders(Borders::ALL).title(desc_title));
     f.render_widget(desc_paragraph, chunks[1]);
 
     let help = Text::from(Line::from(Span::styled(

@@ -16,8 +16,9 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use anyhow::Context;
 
-use crate::tools::{detect_tool_suggestions, find_tool};
+use crate::tools::{detect_tool_suggestions, execute_tool, find_async_tool};
 
 /// Structured output event for --json mode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,15 +125,9 @@ pub async fn run_headless(
 ) -> anyhow::Result<String> {
     let start = Instant::now();
     let mut turn = 0usize;
-    let security_engine = crate::security::SecurityEngine::new(
-        crate::security::SecurityConfig::default(),
-    )
-    .unwrap_or_else(|_| {
-        // Fall back to a default engine if config fails
-        crate::security::SecurityEngine::new(
-            crate::security::SecurityConfig::default(),
-        ).expect("Failed to create security engine")
-    });
+    let security_engine =
+        crate::security::SecurityEngine::new(crate::security::SecurityConfig::default())
+            .context("Failed to create security engine")?;
 
     let now = || chrono::Utc::now().to_rfc3339();
 
@@ -166,6 +161,8 @@ pub async fn run_headless(
     ];
 
     let mut summary = String::new();
+    let mut recent_tool_calls: Vec<(String, String, usize, bool)> = Vec::new();
+    let mut stall_turns: usize = 0;
 
     while turn < config.max_turns {
         if start.elapsed() > Duration::from_secs(config.timeout_secs) {
@@ -193,7 +190,11 @@ pub async fn run_headless(
         };
 
         let response_text = match provider.chat(request).await {
-            Ok(r) => r.choices.first().map(|c| c.message.content.clone()).unwrap_or_default(),
+            Ok(r) => r
+                .choices
+                .first()
+                .map(|c| c.message.content.clone())
+                .unwrap_or_default(),
             Err(e) => {
                 let msg = format!("Provider error: {}", e);
                 if let Some(tx) = &event_tx {
@@ -230,7 +231,20 @@ pub async fn run_headless(
 
         if suggestions.is_empty() {
             // No tools detected — check if the model gave a final answer
-            // Push the assistant message and prompt for next step
+            stall_turns += 1;
+            if stall_turns >= 3 {
+                let msg = "Loop detected: model stalled with no tools or completion for 3 turns. Breaking.".to_string();
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(HeadlessEvent::Error {
+                        message: msg.clone(),
+                        turn,
+                        timestamp: now(),
+                    });
+                }
+                summary.push_str(&msg);
+                summary.push('\n');
+                break;
+            }
             messages.push(crate::providers::Message {
                 role: "assistant".to_string(),
                 content: response_text.clone(),
@@ -251,6 +265,7 @@ pub async fn run_headless(
             summary.push('\n');
             continue;
         }
+        stall_turns = 0;
 
         // Add assistant message (with tool calls) to history
         messages.push(crate::providers::Message {
@@ -310,14 +325,72 @@ pub async fn run_headless(
                 }
             }
 
+            let recent_failures = recent_tool_calls
+                .iter()
+                .rev()
+                .take(5)
+                .filter(|(name, args, _, success)| {
+                    !success && name == &suggestion.tool_name && args == &suggestion.args
+                })
+                .count();
+
+            let recent_successes = recent_tool_calls
+                .iter()
+                .rev()
+                .take(10)
+                .filter(|(name, args, _, success)| {
+                    *success && name == &suggestion.tool_name && args == &suggestion.args
+                })
+                .count();
+
+            if recent_failures >= 3 {
+                let msg = format!(
+                    "🔄 Loop detected: {}({}) has failed {} times recently. Breaking to prevent infinite loop.",
+                    suggestion.tool_name, suggestion.args, recent_failures
+                );
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(HeadlessEvent::Error {
+                        message: msg.clone(),
+                        turn,
+                        timestamp: now(),
+                    });
+                }
+                tool_results.push_str(&msg);
+                tool_results.push('\n');
+                summary.push_str(&tool_results);
+                break;
+            }
+
+            if recent_successes >= 2 {
+                let msg = format!(
+                    "🔄 Loop detected: {}({}) has already succeeded {} times. Using cached result to prevent infinite loop.",
+                    suggestion.tool_name, suggestion.args, recent_successes
+                );
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(HeadlessEvent::Error {
+                        message: msg.clone(),
+                        turn,
+                        timestamp: now(),
+                    });
+                }
+                tool_results.push_str(&msg);
+                tool_results.push('\n');
+                recent_tool_calls.push((
+                    suggestion.tool_name.clone(),
+                    suggestion.args.clone(),
+                    turn,
+                    true,
+                ));
+                continue;
+            }
+
             // Find and execute the tool — try async first, then sync
-            let result = if let Some(async_tool) = crate::tools::find_async_tool(&suggestion.tool_name) {
+            let (result, success) = if let Some(async_tool) = find_async_tool(&suggestion.tool_name)
+            {
                 match async_tool.execute_async(&suggestion.args).await {
                     Ok(output) => {
-                        let sanitized = security_engine.sanitize_output(
-                            &suggestion.tool_name,
-                            &output,
-                        );
+                        let sanitized =
+                            security_engine.sanitize_output(&suggestion.tool_name, &output);
                         if let Some(tx) = &event_tx {
                             let _ = tx.send(HeadlessEvent::ToolResult {
                                 name: suggestion.tool_name.clone(),
@@ -327,7 +400,13 @@ pub async fn run_headless(
                                 timestamp: now(),
                             });
                         }
-                        format!("✅ {} ({}): {}", suggestion.tool_name, suggestion.args, sanitized)
+                        (
+                            format!(
+                                "✅ {} ({}): {}",
+                                suggestion.tool_name, suggestion.args, sanitized
+                            ),
+                            true,
+                        )
                     }
                     Err(e) => {
                         let msg = format!("❌ {} failed: {}", suggestion.tool_name, e);
@@ -340,16 +419,14 @@ pub async fn run_headless(
                                 timestamp: now(),
                             });
                         }
-                        msg
+                        (msg, false)
                     }
                 }
-            } else if let Some(tool) = find_tool(&suggestion.tool_name) {
-                match tool.execute(&suggestion.args) {
+            } else if let Some(output) = execute_tool(&suggestion.tool_name, &suggestion.args) {
+                match output {
                     Ok(output) => {
-                        let sanitized = security_engine.sanitize_output(
-                            &suggestion.tool_name,
-                            &output,
-                        );
+                        let sanitized =
+                            security_engine.sanitize_output(&suggestion.tool_name, &output);
                         if let Some(tx) = &event_tx {
                             let _ = tx.send(HeadlessEvent::ToolResult {
                                 name: suggestion.tool_name.clone(),
@@ -359,7 +436,13 @@ pub async fn run_headless(
                                 timestamp: now(),
                             });
                         }
-                        format!("✅ {} ({}): {}", suggestion.tool_name, suggestion.args, sanitized)
+                        (
+                            format!(
+                                "✅ {} ({}): {}",
+                                suggestion.tool_name, suggestion.args, sanitized
+                            ),
+                            true,
+                        )
                     }
                     Err(e) => {
                         let msg = format!("❌ {} failed: {}", suggestion.tool_name, e);
@@ -372,7 +455,7 @@ pub async fn run_headless(
                                 timestamp: now(),
                             });
                         }
-                        msg
+                        (msg, false)
                     }
                 }
             } else {
@@ -384,8 +467,15 @@ pub async fn run_headless(
                         timestamp: now(),
                     });
                 }
-                msg
+                (msg, false)
             };
+
+            recent_tool_calls.push((
+                suggestion.tool_name.clone(),
+                suggestion.args.clone(),
+                turn,
+                success,
+            ));
 
             tool_results.push_str(&result);
             tool_results.push('\n');
@@ -446,7 +536,7 @@ mod tests {
             model: "gpt-4".to_string(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         };
-        let json = serde_json::to_string(&event).unwrap();
+        let json = serde_json::to_string(&event).expect("Headless event serialization should not fail");
         assert!(json.contains("\"type\":\"start\""));
         assert!(json.contains("test"));
     }

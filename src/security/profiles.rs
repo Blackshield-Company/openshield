@@ -103,7 +103,8 @@ impl ProfileRegistry {
             "yolo".to_string(),
             PermissionProfile {
                 name: "yolo".to_string(),
-                description: "DANGER: Auto-approves everything including Critical risk.".to_string(),
+                description: "DANGER: Auto-approves everything including Critical risk."
+                    .to_string(),
                 tool_permissions: yolo_tool_permissions(),
                 auto_approve_risk_level: RiskLevel::Critical,
                 sudo_enabled: true,
@@ -190,7 +191,11 @@ impl ProfileRegistry {
                 p.description,
                 p.auto_approve_risk_level,
                 if p.sudo_enabled { "on" } else { "off" },
-                if p.allow_escape_working_dir { "on" } else { "off" },
+                if p.allow_escape_working_dir {
+                    "on"
+                } else {
+                    "off"
+                },
                 if p.pii_redaction_enabled { "on" } else { "off" }
             ),
             None => format!("Profile: {} (not found)", self.active),
@@ -319,6 +324,9 @@ mod tests {
         let mut reg = ProfileRegistry::new();
         reg.switch("readonly").unwrap();
         let readonly = reg.apply_to_config(&base);
-        assert_eq!(readonly.get_tool_permission("terminal"), PermissionLevel::Deny);
+        assert_eq!(
+            readonly.get_tool_permission("terminal"),
+            PermissionLevel::Deny
+        );
     }
 }

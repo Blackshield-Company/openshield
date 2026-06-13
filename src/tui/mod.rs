@@ -1,49 +1,56 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    backend::Backend,
-    Terminal,
-};
+use ratatui::{Terminal, backend::Backend};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use crate::agent::AgentConfig;
 use crate::config::Config;
 use crate::memory::{ContextInjector, MemoryStore, Message as MemoryMessage, ToolCall};
 use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetrics};
-use crate::tools::{get_tools, AsyncToolExecutor, Tool, ToolSuggestion};
+use crate::session::{ExportBranch, ExportMessage, SessionExport, export_to_default, list_exports};
+use crate::skills::SkillRegistry;
+use crate::tools::{AsyncToolExecutor, Tool, ToolSuggestion, get_tools};
+use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
-use crate::skills::SkillRegistry;
-use crate::session::{SessionExport, ExportMessage, ExportBranch, export_to_default, list_exports};
 
-mod theme;
+mod bookmarks;
 mod clipboard_image;
 mod command_palette;
-mod bookmarks;
 mod image_display;
-mod vim_input;
 mod mouse;
+mod theme;
+mod vim_input;
 use theme::*;
 
 mod ascii_art;
-mod syntax_highlight;
-mod stream;
-mod render;
-mod tool_parsing;
-mod thinking;
 mod chat;
+mod render;
+mod stream;
+mod syntax_highlight;
+mod thinking;
+mod tool_parsing;
 
-pub(crate) use stream::{StreamEvent, ToolResultEntry, SecondaryResponse, AgentStreamState, apply_stream_event};
+pub(crate) use chat::{detect_high_confidence_suggestion, handle_user_tool_invocation};
 pub(crate) use render::draw_ui;
-pub(crate) use tool_parsing::{parse_embedded_tools, extract_args_from_json, strip_tool_lines, strip_think_tags, generate_edit_diff, is_edit_tool};
-pub(crate) use thinking::{emergency_truncate_messages};
-pub(crate) use chat::{handle_user_tool_invocation, detect_high_confidence_suggestion};
-
+pub(crate) use stream::{
+    AgentStreamState, SecondaryResponse, StreamEvent, ToolResultEntry, apply_stream_event,
+};
+pub(crate) use thinking::emergency_truncate_messages;
+pub(crate) use tool_parsing::{
+    extract_args_from_json, generate_edit_diff, is_edit_tool, parse_embedded_tools,
+    strip_think_tags, strip_tool_lines,
+};
 
 #[allow(dead_code)]
 const MAX_CONTEXT_MESSAGES: usize = 5;
 const TICK_RATE: Duration = Duration::from_millis(16); // ~60fps for responsive input
+
+/// Centralized tool result formatting for consistent model context.
+pub(crate) fn format_tool_result(name: &str, args: &str, result: &str, success: bool) -> String {
+    let status = if success { "result" } else { "error" };
+    format!("[tool:{} args={}] {}: {}", name, args, status, result)
+}
 
 /// Events sent from the background streaming task to the main TUI loop.
 /// A single message in the chat history.
@@ -264,19 +271,25 @@ impl SessionPerformance {
     }
 
     fn avg_first_token(&self) -> u64 {
-        if self.first_token_ms.is_empty() { 0 } else {
+        if self.first_token_ms.is_empty() {
+            0
+        } else {
             self.first_token_ms.iter().sum::<u64>() / self.first_token_ms.len() as u64
         }
     }
 
     fn avg_total_latency(&self) -> u64 {
-        if self.total_latency_ms.is_empty() { 0 } else {
+        if self.total_latency_ms.is_empty() {
+            0
+        } else {
             self.total_latency_ms.iter().sum::<u64>() / self.total_latency_ms.len() as u64
         }
     }
 
     fn avg_tool_exec(&self) -> u64 {
-        if self.tool_exec_ms.is_empty() { 0 } else {
+        if self.tool_exec_ms.is_empty() {
+            0
+        } else {
             self.tool_exec_ms.iter().sum::<u64>() / self.tool_exec_ms.len() as u64
         }
     }
@@ -284,17 +297,28 @@ impl SessionPerformance {
 
 impl App {
     fn new(config: Config) -> Result<Self> {
-        let (provider_name, provider_config) = config.find_provider_for_model(&config.default_model)
-            .unwrap_or_else(|| config.providers.iter().next()
-                .map(|(name, cfg)| (name.clone(), cfg.clone()))
-                .unwrap_or_else(|| ("local".to_string(), crate::config::ProviderConfig {
-                    base_url: "http://127.0.0.1:8080/v1".to_string(),
-                    api_key: "local".to_string(),
-                    models: vec![],
-                    kind: crate::config::ProviderKind::OpenAiCompatible,
-                    headers: std::collections::HashMap::new(),
-                    env_file: None,
-                })));
+        let (provider_name, provider_config) = config
+            .find_provider_for_model(&config.default_model)
+            .unwrap_or_else(|| {
+                config
+                    .providers
+                    .iter()
+                    .next()
+                    .map(|(name, cfg)| (name.clone(), cfg.clone()))
+                    .unwrap_or_else(|| {
+                        (
+                            "local".to_string(),
+                            crate::config::ProviderConfig {
+                                base_url: "http://127.0.0.1:8080/v1".to_string(),
+                                api_key: "local".to_string(),
+                                models: vec![],
+                                kind: crate::config::ProviderKind::OpenAiCompatible,
+                                headers: std::collections::HashMap::new(),
+                                env_file: None,
+                            },
+                        )
+                    })
+            });
 
         let provider = Provider::new(
             provider_name.clone(),
@@ -308,10 +332,13 @@ impl App {
         let session_id = Uuid::new_v4().to_string();
         let model = config.default_model.clone();
 
-        let model_config = provider_config.models.iter()
+        let model_config = provider_config
+            .models
+            .iter()
             .find(|m| m.name == model)
             .cloned();
-        let model_context_length = model_config.as_ref()
+        let model_context_length = model_config
+            .as_ref()
             .map(|m| m.context_length)
             .unwrap_or(128000);
 
@@ -319,7 +346,11 @@ impl App {
             .filesystem
             .working_directory
             .clone()
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_else(|| "/home/synth".to_string());
 
         let project_path_for_engine = project_path.clone();
@@ -351,7 +382,8 @@ impl App {
         // Build filesystem capabilities description
         let fs_capabilities = if config.filesystem.allowed_paths.is_empty() {
             "You have FULL filesystem access to the entire system. \
-             You can read, write, list, and search any directory.".to_string()
+             You can read, write, list, and search any directory."
+                .to_string()
         } else {
             let paths = config.filesystem.allowed_paths.join(", ");
             format!(
@@ -394,13 +426,13 @@ impl App {
                 tool_descriptions
             ),
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
         };
 
         let security_engine = crate::security::SecurityEngine::new(
-            crate::security::SecurityConfig::load().unwrap_or_default()
+            crate::security::SecurityConfig::load().unwrap_or_default(),
         )?;
 
         Ok(Self {
@@ -470,8 +502,7 @@ impl App {
                     .map(|d| d.join("openshark"))
                     .unwrap_or_else(|| std::path::PathBuf::from(".openshark"));
                 let db_path = config_dir.join("code_index.db");
-                let cwd = std::env::current_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                 match crate::code_index::CodeIndex::open(
                     db_path.to_str().unwrap_or(".openshark/code_index.db"),
                     cwd.to_str().unwrap_or("."),
@@ -527,7 +558,8 @@ impl App {
             mouse_enabled: true,
             context_mode_engine: {
                 if !project_path_for_engine.is_empty() {
-                    let engine = crate::context_mode::ContextModeEngine::new(project_path_for_engine);
+                    let engine =
+                        crate::context_mode::ContextModeEngine::new(project_path_for_engine);
                     Some(engine)
                 } else {
                     None
@@ -549,7 +581,8 @@ impl App {
         self.active_branch = self.branches.len() - 1;
         self.add_system_message(format!(
             "Created branch '{}' ({} total branches)",
-            name, self.branches.len()
+            name,
+            self.branches.len()
         ));
     }
 
@@ -565,10 +598,7 @@ impl App {
         self.messages = branch.messages.clone();
         self.model_messages = branch.model_messages.clone();
         self.active_branch = index;
-        self.add_system_message(format!(
-            "Switched to branch '{}' ({})",
-            branch.name, index
-        ));
+        self.add_system_message(format!("Switched to branch '{}' ({})", branch.name, index));
         Ok(())
     }
 
@@ -594,13 +624,11 @@ impl App {
             let mcp_tools = mgr.all_tools().await;
             let mut adapted_tools: Vec<std::sync::Arc<dyn crate::tools::Tool>> = Vec::new();
             for (server_name, tool) in mcp_tools {
-                adapted_tools.push(std::sync::Arc::new(
-                    crate::tools::mcp::McpToolAdapter::new(
-                        tool,
-                        server_name,
-                        std::sync::Arc::clone(&arc_manager),
-                    )
-                ));
+                adapted_tools.push(std::sync::Arc::new(crate::tools::mcp::McpToolAdapter::new(
+                    tool,
+                    server_name,
+                    std::sync::Arc::clone(&arc_manager),
+                )));
             }
             if !adapted_tools.is_empty() {
                 crate::tools::register_mcp_tools(adapted_tools);
@@ -636,7 +664,11 @@ impl App {
     fn list_branches(&mut self) {
         let mut msg = format!("Branches ({} total):\n", self.branches.len());
         for (i, branch) in self.branches.iter().enumerate() {
-            let marker = if i == self.active_branch { "●" } else { "○" };
+            let marker = if i == self.active_branch {
+                "●"
+            } else {
+                "○"
+            };
             msg.push_str(&format!(
                 "  {} {}: {} messages\n",
                 marker,
@@ -651,20 +683,26 @@ impl App {
     fn toggle_multi_model(&mut self) {
         self.multi_model_mode = !self.multi_model_mode;
         if self.multi_model_mode {
-            self.secondary_providers = self.config.providers.iter()
+            self.secondary_providers = self
+                .config
+                .providers
+                .iter()
                 .filter(|(name, _)| **name != "kimi")
                 .map(|(name, provider)| {
-                    (name.clone(), Provider::new(
+                    (
                         name.clone(),
-                        provider.base_url.clone(),
-                        provider.api_key.clone(),
-                        provider.kind.clone(),
-                        provider.headers.clone(),
-                    ))
+                        Provider::new(
+                            name.clone(),
+                            provider.base_url.clone(),
+                            provider.api_key.clone(),
+                            provider.kind.clone(),
+                            provider.headers.clone(),
+                        ),
+                    )
                 })
                 .collect();
             self.add_system_message(
-                "Multi-model mode ON. Responses will stream from all models.".to_string()
+                "Multi-model mode ON. Responses will stream from all models.".to_string(),
             );
         } else {
             self.secondary_providers.clear();
@@ -698,8 +736,10 @@ impl App {
             } else {
                 "○"
             };
-            msg.push_str(&format!("  {} {} (type /model {} to switch)\n", indicator, display, i)
-            );
+            msg.push_str(&format!(
+                "  {} {} (type /model {} to switch)\n",
+                indicator, display, i
+            ));
         }
         msg.push_str("\nOr type: /model <model_name>");
         self.add_system_message(msg);
@@ -725,13 +765,15 @@ impl App {
                 return Ok(());
             }
         }
-        Err(anyhow::anyhow!("Model '{}' not found in config. Run /models to see available models.", model_name))
+        Err(anyhow::anyhow!(
+            "Model '{}' not found in config. Run /models to see available models.",
+            model_name
+        ))
     }
 
     fn add_user_message(&mut self, content: String) {
         let token_count = content.split_whitespace().count() as u64;
         let images = self.pending_image.take();
-        let has_image = images.is_some();
         let msg = ChatMessage {
             role: "user".to_string(),
             content: content.clone(),
@@ -752,20 +794,17 @@ impl App {
         };
         let _ = self.memory.save_message(&memory_msg);
 
-        if has_image {
-            self.model_messages.push(Message::with_image(
-                "user",
-                content,
-                images.unwrap(),
-            ));
+        if let Some(images) = images {
+            self.model_messages
+                .push(Message::with_image("user", content, images));
         } else {
             self.model_messages.push(Message {
                 role: "user".to_string(),
                 content,
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
         }
 
@@ -780,7 +819,7 @@ impl App {
             images: None,
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
-            reasoning,
+            reasoning: reasoning.clone(),
         };
         self.messages.push(msg);
 
@@ -798,9 +837,9 @@ impl App {
             role: "assistant".to_string(),
             content,
             images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: reasoning,
         });
 
         self.tokens_used += token_count;
@@ -825,7 +864,8 @@ impl App {
 
         let fs_capabilities = if self.config.filesystem.allowed_paths.is_empty() {
             "You have FULL filesystem access to the entire system. \
-             You can read, write, list, and search any directory.".to_string()
+             You can read, write, list, and search any directory."
+                .to_string()
         } else {
             let paths = self.config.filesystem.allowed_paths.join(", ");
             format!(
@@ -854,16 +894,27 @@ impl App {
         };
 
         let effort_instruction = match self.config.effort_level.as_str() {
-            "low" => "\n\n⚡ EFFORT: LOW. Be concise. Minimal explanation. One sentence if it fits. No fluff.",
-            "medium" => "\n\n⚡ EFFORT: MEDIUM. Standard detail level. Balance thoroughness with brevity.",
-            "high" => "\n\n⚡ EFFORT: HIGH. Thorough analysis with reasoning. Explain your thinking. Explore implications.",
-            "xhigh" => "\n\n⚡ EFFORT: XHIGH. Extremely thorough. Explore edge cases, alternatives, trade-offs. Deep dive.",
+            "low" => {
+                "\n\n⚡ EFFORT: LOW. Be concise. Minimal explanation. One sentence if it fits. No fluff."
+            }
+            "medium" => {
+                "\n\n⚡ EFFORT: MEDIUM. Standard detail level. Balance thoroughness with brevity."
+            }
+            "high" => {
+                "\n\n⚡ EFFORT: HIGH. Thorough analysis with reasoning. Explain your thinking. Explore implications."
+            }
+            "xhigh" => {
+                "\n\n⚡ EFFORT: XHIGH. Extremely thorough. Explore edge cases, alternatives, trade-offs. Deep dive."
+            }
             _ => "",
         };
 
         let context_mode_block = if let Some(ref mut engine) = self.context_mode_engine {
             // Get the last user message for context identification
-            let last_user_query = self.model_messages.iter().rev()
+            let last_user_query = self
+                .model_messages
+                .iter()
+                .rev()
                 .find(|m| m.role == "user")
                 .map(|m| m.content.as_str())
                 .unwrap_or("");
@@ -951,14 +1002,17 @@ impl App {
                 .join("; ")
         );
 
-        self.model_messages.insert(1, Message {
-            role: "system".to_string(),
-            content: summary,
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        });
+        self.model_messages.insert(
+            1,
+            Message {
+                role: "system".to_string(),
+                content: summary,
+                images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            },
+        );
 
         self.add_system_message(format!(
             "🗜️ Context compacted: {} messages summarized into system context.",
@@ -981,8 +1035,16 @@ impl App {
     /// Scan the project directory and build the file tree.
     #[allow(dead_code)]
     fn refresh_file_tree(&mut self) {
-        let project_path = self.config.filesystem.working_directory.clone()
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+        let project_path = self
+            .config
+            .filesystem
+            .working_directory
+            .clone()
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_else(|| "/home/synth".to_string());
 
         let mut entries = Vec::new();
@@ -1024,10 +1086,21 @@ impl App {
         }
 
         let line = &self.file_tree[index];
-        let name = line.trim_start_matches("  📄 ").trim_start_matches("  📁 ").to_string();
+        let name = line
+            .trim_start_matches("  📄 ")
+            .trim_start_matches("  📁 ")
+            .to_string();
 
-        let project_path = self.config.filesystem.working_directory.clone()
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+        let project_path = self
+            .config
+            .filesystem
+            .working_directory
+            .clone()
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_else(|| "/home/synth".to_string());
 
         let file_path = std::path::Path::new(&project_path).join(&name);
@@ -1040,7 +1113,11 @@ impl App {
         match std::fs::read_to_string(&file_path) {
             Ok(content) => {
                 let preview = if content.len() > 800 {
-                    format!("{}\n... ({} more chars)", crate::utils::truncate_str(&content, 800), content.len() - 800)
+                    format!(
+                        "{}\n... ({} more chars)",
+                        crate::utils::truncate_str(&content, 800),
+                        content.len() - 800
+                    )
                 } else {
                     content
                 };
@@ -1097,9 +1174,7 @@ impl App {
     /// Estimate context used in tokens (rough word-count based).
     fn context_used(&self) -> usize {
         // Rough token estimate: ~4 chars per token for English text
-        let total_chars: usize = self.model_messages.iter()
-            .map(|m| m.content.len())
-            .sum();
+        let total_chars: usize = self.model_messages.iter().map(|m| m.content.len()).sum();
         total_chars / 4
     }
 }
@@ -1157,7 +1232,16 @@ async fn run_app(
             }
             // Only keep the receiver if the channel is still open.
             // Drop it when the background task finishes (sender dropped).
-            if !rx.is_closed() {
+            if rx.is_closed() {
+                // Stream ended unexpectedly — background task died or sender was dropped
+                if app.is_streaming {
+                    app.is_streaming = false;
+                    app.stream_start_time = None;
+                    app.add_system_message(
+                        "Stream ended unexpectedly. Type 'continue' to retry.".to_string(),
+                    );
+                }
+            } else {
                 app.stream_rx = Some(rx);
             }
         }
@@ -1170,11 +1254,17 @@ async fn run_app(
             match event::read()? {
                 Event::Key(key) => {
                     // Vim mode intercepts keys for the input area
-                    if app.vim_mode && !app.command_palette.visible && !app.bookmark_manager.visible
-                        && app.mode != AppMode::ToolApproval && app.mode != AppMode::DiffPreview
+                    if app.vim_mode
+                        && !app.command_palette.visible
+                        && !app.bookmark_manager.visible
+                        && app.mode != AppMode::ToolApproval
+                        && app.mode != AppMode::DiffPreview
                     {
                         let (should_quit, handled) = vim_input::handle_vim_key(
-                            key, &mut app.vim_state, &mut app.input, &mut app.cursor_position,
+                            key,
+                            &mut app.vim_state,
+                            &mut app.input,
+                            &mut app.cursor_position,
                         );
                         if should_quit {
                             break;
@@ -1188,75 +1278,75 @@ async fn run_app(
                         break;
                     }
                 }
-                Event::Mouse(mouse_event)
-                    if app.mouse_enabled => {
-                        let action = mouse::translate_mouse_event(mouse_event, app);
-                        match action {
-                            mouse::MouseAction::ChatClick { y } => {
-                                app.scroll = y.saturating_sub(5);
-                            }
-                            mouse::MouseAction::InputClick => {
-                                // Focus input — already focused in this design
-                            }
-                            mouse::MouseAction::SidebarClick { y } => {
-                                app.sidebar_scroll = y;
-                            }
-                            mouse::MouseAction::ScrollUp => {
-                                app.scroll_up(1);
-                            }
-                            mouse::MouseAction::ScrollDown => {
-                                app.scroll_down(1);
-                            }
-                            mouse::MouseAction::DragStart { x, y } => {
-                                app.mouse_state.selecting = true;
-                                app.mouse_state.selection_start = Some((x, y));
+                Event::Mouse(mouse_event) if app.mouse_enabled => {
+                    let action = mouse::translate_mouse_event(mouse_event, app);
+                    match action {
+                        mouse::MouseAction::ChatClick { y } => {
+                            app.scroll = y.saturating_sub(5);
+                        }
+                        mouse::MouseAction::InputClick => {
+                            // Focus input — already focused in this design
+                        }
+                        mouse::MouseAction::SidebarClick { y } => {
+                            app.sidebar_scroll = y;
+                        }
+                        mouse::MouseAction::ScrollUp => {
+                            app.scroll_up(1);
+                        }
+                        mouse::MouseAction::ScrollDown => {
+                            app.scroll_down(1);
+                        }
+                        mouse::MouseAction::DragStart { x, y } => {
+                            app.mouse_state.selecting = true;
+                            app.mouse_state.selection_start = Some((x, y));
+                            app.mouse_state.selection_end = Some((x, y));
+                        }
+                        mouse::MouseAction::DragEnd { x, y } => {
+                            if app.mouse_state.selecting {
                                 app.mouse_state.selection_end = Some((x, y));
-                            }
-                            mouse::MouseAction::DragEnd { x, y } => {
-                                if app.mouse_state.selecting {
-                                    app.mouse_state.selection_end = Some((x, y));
-                                    app.mouse_state.selecting = false;
-                                    // Copy-on-select: extract text and copy to clipboard
-                                    if let (Some(start), Some(end)) = (
-                                        app.mouse_state.selection_start,
-                                        app.mouse_state.selection_end,
-                                    ) {
-                                        let start_row = start.1.min(end.1) as usize;
-                                        let end_row = start.1.max(end.1) as usize;
-                                        if end_row > start_row {
-                                            // Use chat area inner width for accurate wrapping
-                                            let chat_width = app.chat_area_rect
-                                                .map(|r| r.width.saturating_sub(2) as usize)
-                                                .unwrap_or(80);
-                                            // Convert absolute terminal rows to content-relative
-                                            let content_top = app.chat_area_rect
-                                                .map(|r| r.y + 1)
-                                                .unwrap_or(0) as usize;
-                                            let rel_start = start_row.saturating_sub(content_top);
-                                            let rel_end = end_row.saturating_sub(content_top);
-                                            let text = mouse::extract_selection_text_wrapped(
-                                                &app.messages,
-                                                app.scroll,
-                                                rel_start,
-                                                rel_end,
-                                                chat_width,
-                                            );
-                                            if !text.is_empty() {
-                                                let _ = mouse::copy_to_clipboard(&text);
-                                                app.add_system_message(format!(
-                                                    "📋 Copied {} chars to clipboard",
-                                                    text.len()
-                                                ));
-                                            }
+                                app.mouse_state.selecting = false;
+                                // Copy-on-select: extract text and copy to clipboard
+                                if let (Some(start), Some(end)) = (
+                                    app.mouse_state.selection_start,
+                                    app.mouse_state.selection_end,
+                                ) {
+                                    let start_row = start.1.min(end.1) as usize;
+                                    let end_row = start.1.max(end.1) as usize;
+                                    if end_row > start_row {
+                                        // Use chat area inner width for accurate wrapping
+                                        let chat_width = app
+                                            .chat_area_rect
+                                            .map(|r| r.width.saturating_sub(2) as usize)
+                                            .unwrap_or(80);
+                                        // Convert absolute terminal rows to content-relative
+                                        let content_top =
+                                            app.chat_area_rect.map(|r| r.y + 1).unwrap_or(0)
+                                                as usize;
+                                        let rel_start = start_row.saturating_sub(content_top);
+                                        let rel_end = end_row.saturating_sub(content_top);
+                                        let text = mouse::extract_selection_text_wrapped(
+                                            &app.messages,
+                                            app.scroll,
+                                            rel_start,
+                                            rel_end,
+                                            chat_width,
+                                        );
+                                        if !text.is_empty() {
+                                            let _ = mouse::copy_to_clipboard(&text);
+                                            app.add_system_message(format!(
+                                                "📋 Copied {} chars to clipboard",
+                                                text.len()
+                                            ));
                                         }
                                     }
-                                    app.mouse_state.selection_start = None;
-                                    app.mouse_state.selection_end = None;
                                 }
+                                app.mouse_state.selection_start = None;
+                                app.mouse_state.selection_end = None;
                             }
-                            mouse::MouseAction::None => {}
                         }
+                        mouse::MouseAction::None => {}
                     }
+                }
                 _ => {}
             }
         }
@@ -1277,12 +1367,21 @@ async fn run_app(
                         crate::swarm::SwarmEvent::AgentActivity { agent_id, activity } => {
                             swarm_updates.push(format!("🐝 **{}**: {}", agent_id, activity));
                         }
-                        crate::swarm::SwarmEvent::AgentToolCall { agent_id, tool_name, args } => {
+                        crate::swarm::SwarmEvent::AgentToolCall {
+                            agent_id,
+                            tool_name,
+                            args,
+                        } => {
                             app.tool_calls_count += 1;
                             swarm_updates.push(format!(
                                 "🐝 **{}** → 🔧 `{}` {}",
-                                agent_id, tool_name,
-                                if args.is_empty() { "".to_string() } else { format!("({})", args) }
+                                agent_id,
+                                tool_name,
+                                if args.is_empty() {
+                                    "".to_string()
+                                } else {
+                                    format!("({})", args)
+                                }
                             ));
                         }
                         crate::swarm::SwarmEvent::AgentThinking { agent_id, thought } => {
@@ -1295,7 +1394,13 @@ async fn run_app(
                         crate::swarm::SwarmEvent::AgentError { agent_id, error } => {
                             swarm_updates.push(format!("🐝 **{}** ❌ {}", agent_id, error));
                         }
-                        crate::swarm::SwarmEvent::AgentChunk { agent_id, agent_name, role, chunk, is_final } => {
+                        crate::swarm::SwarmEvent::AgentChunk {
+                            agent_id,
+                            agent_name,
+                            role,
+                            chunk,
+                            is_final,
+                        } => {
                             use std::collections::hash_map::Entry;
                             match app.agent_streams.entry(agent_id.clone()) {
                                 Entry::Occupied(mut entry) => {
@@ -1315,7 +1420,12 @@ async fn run_app(
                                 }
                             }
                         }
-                        crate::swarm::SwarmEvent::AgentToolResult { agent_id, tool_name, result, success } => {
+                        crate::swarm::SwarmEvent::AgentToolResult {
+                            agent_id,
+                            tool_name,
+                            result,
+                            success,
+                        } => {
                             if let Some(state) = app.agent_streams.get_mut(&agent_id) {
                                 state.tool_results.push((tool_name, result, success));
                             }
@@ -1331,43 +1441,43 @@ async fn run_app(
             if let Some(ref engine) = app.swarm {
                 let status = engine.status().await;
                 let agents = engine.agent_snapshot().await;
-                
+
                 // Collect updates to apply after dropping references
                 let mut updates: Vec<String> = Vec::new();
-                
+
                 // Check for newly completed agents
                 for agent in &agents {
                     if let Some(prev) = app.swarm_agents.iter().find(|a| a.id == agent.id) {
                         // Status changed from working to completed
                         if matches!(prev.status, crate::swarm::AgentStatus::Working { .. })
                             && matches!(agent.status, crate::swarm::AgentStatus::Completed { .. })
-                            && let crate::swarm::AgentStatus::Completed { ref result } = agent.status {
-                                updates.push(format!(
-                                    "🐝 **{}** completed:\n{}",
-                                    agent.name,
-                                    &result[..result.len().min(500)]
-                                ));
-                            }
+                            && let crate::swarm::AgentStatus::Completed { ref result } =
+                                agent.status
+                        {
+                            updates.push(format!(
+                                "🐝 **{}** completed:\n{}",
+                                agent.name,
+                                &result[..result.len().min(500)]
+                            ));
+                        }
                         // Agent hit an error
                         if matches!(agent.status, crate::swarm::AgentStatus::Error { .. })
                             && !matches!(prev.status, crate::swarm::AgentStatus::Error { .. })
-                            && let crate::swarm::AgentStatus::Error { ref message } = agent.status {
-                                updates.push(format!(
-                                    "🐝 **{}** error: {}",
-                                    agent.name, message
-                                ));
-                            }
+                            && let crate::swarm::AgentStatus::Error { ref message } = agent.status
+                        {
+                            updates.push(format!("🐝 **{}** error: {}", agent.name, message));
+                        }
                     }
                 }
-                
+
                 // Apply all updates
                 for update in updates {
                     app.add_system_message(update);
                 }
-                
+
                 // Update cached state
                 app.swarm_agents = agents;
-                
+
                 // Swarm finished (all agents idle/completed and not running)
                 if !status.running && status.cycles_completed > 0 {
                     app.swarm_running = false;
@@ -1380,16 +1490,25 @@ async fn run_app(
         }
         if app.mode == AppMode::ToolApproval
             && let Some(shown_at) = app.tool_approval_shown_at
-                && shown_at.elapsed() >= Duration::from_secs(60) {
-                    let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
-                    app.pending_suggestion = None;
-                    app.mode = AppMode::Normal;
-                    app.tool_approval_shown_at = None;
-                    app.add_system_message(format!(
-                        "⏭ Tool approval timed out after 60s{}.",
-                        if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
-                    ));
+            && shown_at.elapsed() >= Duration::from_secs(60)
+        {
+            let tool_name = app
+                .pending_suggestion
+                .as_ref()
+                .map(|s| s.tool_name.clone())
+                .unwrap_or_default();
+            app.pending_suggestion = None;
+            app.mode = AppMode::Normal;
+            app.tool_approval_shown_at = None;
+            app.add_system_message(format!(
+                "⏭ Tool approval timed out after 60s{}.",
+                if tool_name.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" for {}", tool_name)
                 }
+            ));
+        }
 
         if app.should_exit {
             break;
@@ -1520,17 +1639,26 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                             model_messages,
                             security_engine,
                             suggestion,
-                        ).await;
+                        )
+                        .await;
                     });
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
+                let tool_name = app
+                    .pending_suggestion
+                    .as_ref()
+                    .map(|s| s.tool_name.clone())
+                    .unwrap_or_default();
                 app.pending_suggestion = None;
                 app.mode = AppMode::Normal;
                 app.add_system_message(format!(
                     "⏭ Skipped tool suggestion{}.",
-                    if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
+                    if tool_name.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(" for {}", tool_name)
+                    }
                 ));
             }
             _ => {
@@ -1549,17 +1677,27 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.mode = AppMode::ToolApproval;
                 app.pending_diff = None;
                 app.diff_scroll = 0;
-                app.add_system_message("Diff approved. Press 'y' again to execute or 'n' to cancel.".to_string());
+                app.add_system_message(
+                    "Diff approved. Press 'y' again to execute or 'n' to cancel.".to_string(),
+                );
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                let tool_name = app.pending_suggestion.as_ref().map(|s| s.tool_name.clone()).unwrap_or_default();
+                let tool_name = app
+                    .pending_suggestion
+                    .as_ref()
+                    .map(|s| s.tool_name.clone())
+                    .unwrap_or_default();
                 app.pending_suggestion = None;
                 app.pending_diff = None;
                 app.diff_scroll = 0;
                 app.mode = AppMode::Normal;
                 app.add_system_message(format!(
                     "⏭ Skipped edit suggestion{}.",
-                    if tool_name.is_empty() { "".to_string() } else { format!(" for {}", tool_name) }
+                    if tool_name.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(" for {}", tool_name)
+                    }
                 ));
             }
             KeyCode::Up => {
@@ -1585,21 +1723,26 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.show_comparison = false;
             } else {
                 let now = Instant::now();
-                let within_window = app.last_ctrl_c.map(|t| now.duration_since(t).as_secs() < 2).unwrap_or(false);
-                
+                let within_window = app
+                    .last_ctrl_c
+                    .map(|t| now.duration_since(t).as_secs() < 2)
+                    .unwrap_or(false);
+
                 if within_window {
                     app.ctrl_c_count += 1;
                 } else {
                     app.ctrl_c_count = 1;
                 }
                 app.last_ctrl_c = Some(now);
-                
+
                 if app.ctrl_c_count >= 2 {
                     return Ok(true);
                 } else if !app.input.is_empty() {
                     app.input.clear();
                     app.cursor_position = 0;
-                    app.add_system_message("Input cleared. Press Ctrl+C again to quit.".to_string());
+                    app.add_system_message(
+                        "Input cleared. Press Ctrl+C again to quit.".to_string(),
+                    );
                 } else {
                     app.add_system_message("Press Ctrl+C again to quit.".to_string());
                 }
@@ -1612,21 +1755,69 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             // Show current keybindings — clone to avoid borrow issues
             let kb = app.config.keybindings.clone();
             app.add_system_message("⌨️  Keybindings (custom overrides shown if set):".to_string());
-            app.add_system_message(format!("  Ctrl+B  — Toggle sidebar {}", kb.toggle_sidebar.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
-            app.add_system_message(format!("  Ctrl+S  — Cycle sidebar tab {}", kb.cycle_sidebar_tab.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
-            app.add_system_message(format!("  Ctrl+M  — Toggle multi-model {}", kb.toggle_multi_model.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
-            app.add_system_message(format!("  Ctrl+W  — Toggle swarm {}", kb.toggle_swarm.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
-            app.add_system_message(format!("  Ctrl+L  — Clear chat {}", kb.clear_chat.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
-            app.add_system_message(format!("  Ctrl+Y  — Copy last response {}", kb.copy_last.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
-            app.add_system_message(format!("  Ctrl+C×2 — Quit {}", kb.quit.as_ref().map(|s| format!("[custom: {}]", s)).unwrap_or_default()));
+            app.add_system_message(format!(
+                "  Ctrl+B  — Toggle sidebar {}",
+                kb.toggle_sidebar
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+S  — Cycle sidebar tab {}",
+                kb.cycle_sidebar_tab
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+M  — Toggle multi-model {}",
+                kb.toggle_multi_model
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+W  — Toggle swarm {}",
+                kb.toggle_swarm
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+L  — Clear chat {}",
+                kb.clear_chat
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+Y  — Copy last response {}",
+                kb.copy_last
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+C×2 — Quit {}",
+                kb.quit
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
             app.add_system_message("".to_string());
-            app.add_system_message("Add to ~/.config/openshark/config.toml under [keybindings] to customize.".to_string());
+            app.add_system_message(
+                "Add to ~/.config/openshark/config.toml under [keybindings] to customize."
+                    .to_string(),
+            );
             app.add_system_message("Example: toggle_sidebar = \"ctrl+f\"".to_string());
         }
         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.sidebar_expanded = !app.sidebar_expanded;
         }
-        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+        KeyCode::Char('p')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
             app.toggle_plan_mode();
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1636,7 +1827,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.command_palette.show();
             }
         }
-        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+        KeyCode::Char('b')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
             app.bookmark_manager.toggle();
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1676,7 +1870,9 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.swarm_active = !app.swarm_active;
             if app.swarm_active {
                 app.sidebar_tab = 2;
-                app.add_system_message("🐝 Swarm mode active. Use /swarm init <prompt> to spawn agents.".to_string());
+                app.add_system_message(
+                    "🐝 Swarm mode active. Use /swarm init <prompt> to spawn agents.".to_string(),
+                );
             } else {
                 app.sidebar_tab = 0;
                 app.add_system_message("🐝 Swarm mode deactivated.".to_string());
@@ -1687,7 +1883,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             match crate::tui::clipboard_image::try_paste_image_from_clipboard() {
                 Ok(Some(data_url)) => {
                     app.pending_image = Some(data_url.clone());
-                    app.add_system_message("📎 Image pasted from clipboard (will be sent with your next message)".to_string());
+                    app.add_system_message(
+                        "📎 Image pasted from clipboard (will be sent with your next message)"
+                            .to_string(),
+                    );
                 }
                 Ok(None) => {
                     // No image in clipboard — silently ignore, user can use Ctrl+Shift+V for text
@@ -1713,9 +1912,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 let b64 = BASE64.encode(text.as_bytes());
                 print!("\x1b]52;c;{}\x07", b64);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
-                app.add_system_message(format!(
-                    "📋 Copied ({} chars)", text_len
-                ));
+                app.add_system_message(format!("📋 Copied ({} chars)", text_len));
             } else {
                 app.add_system_message("📋 No assistant message to copy".to_string());
             }
@@ -1736,10 +1933,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.input_history.push(input.clone());
                     app.history_index = None;
                     app.history_draft = None;
-                    let _ = std::fs::write(
-                        &app.history_file,
-                        app.input_history.join("\n")
-                    );
+                    let _ = std::fs::write(&app.history_file, app.input_history.join("\n"));
                     app.input.clear();
                     app.cursor_position = 0;
                     process_user_input(app, input).await?;
@@ -1747,28 +1941,30 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char(c) => {
+            let char_len = c.len_utf8();
             app.input.insert(app.cursor_position, c);
-            app.cursor_position += 1;
+            app.cursor_position += char_len;
         }
-        KeyCode::Backspace => {
-            if app.cursor_position > 0 {
-                app.cursor_position -= 1;
-                app.input.remove(app.cursor_position);
-            }
+        KeyCode::Backspace if app.cursor_position > 0 => {
+            let prev = app
+                .input
+                .floor_char_boundary(app.cursor_position.saturating_sub(1));
+            app.input.remove(prev);
+            app.cursor_position = prev;
         }
-        KeyCode::Delete => {
-            if app.cursor_position < app.input.len() {
-                app.input.remove(app.cursor_position);
-            }
+        KeyCode::Delete if app.cursor_position < app.input.len() => {
+            app.input.remove(app.cursor_position);
         }
         KeyCode::Left => {
             if app.cursor_position > 0 {
-                app.cursor_position -= 1;
+                app.cursor_position = app
+                    .input
+                    .floor_char_boundary(app.cursor_position.saturating_sub(1));
             }
         }
         KeyCode::Right => {
             if app.cursor_position < app.input.len() {
-                app.cursor_position += 1;
+                app.cursor_position = app.input.ceil_char_boundary(app.cursor_position + 1);
             }
         }
         KeyCode::Home => {
@@ -1791,10 +1987,11 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if app.history_index.is_none() {
                     app.history_draft = Some(app.input.clone());
                 }
-                let idx = app.history_index.map_or(
-                    app.input_history.len().saturating_sub(1),
-                    |i| i.saturating_sub(1)
-                );
+                let idx = app
+                    .history_index
+                    .map_or(app.input_history.len().saturating_sub(1), |i| {
+                        i.saturating_sub(1)
+                    });
                 app.input = app.input_history[idx].clone();
                 app.cursor_position = app.input.len();
                 app.history_index = Some(idx);
@@ -1802,13 +1999,16 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Down => {
             if app.show_comparison {
-                let max_responses = app.messages.iter()
+                let max_responses = app
+                    .messages
+                    .iter()
                     .filter(|m| m.role == "assistant")
                     .map(|m| m.multi_model_responses.len())
                     .max()
                     .unwrap_or(0);
                 if max_responses > 0 {
-                    app.comparison_selected = (app.comparison_selected + 1).min(max_responses.saturating_sub(1));
+                    app.comparison_selected =
+                        (app.comparison_selected + 1).min(max_responses.saturating_sub(1));
                 }
             } else if app.focused_pane == 0 && app.sidebar_tab == 4 {
                 // Files tab: navigate file tree selection
@@ -1916,7 +2116,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     app.add_system_message(format!("🔍 No results for '{}'", query));
                 } else {
                     let mut lines = vec![
-                        format!("🔍 Search Results for '{}' ({} found):", query, messages.len()),
+                        format!(
+                            "🔍 Search Results for '{}' ({} found):",
+                            query,
+                            messages.len()
+                        ),
                         "─".repeat(50),
                     ];
                     for (i, msg) in messages.iter().take(10).enumerate() {
@@ -2008,9 +2212,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         ));
 
         let query = query.to_string();
-        let system = Some(
-            "You are a helpful coding assistant. Be concise and direct.".to_string(),
-        );
+        let system = Some("You are a helpful coding assistant. Be concise and direct.".to_string());
         let results = crate::swarm::swarm_query(&query, &providers, system.as_deref()).await;
         let formatted = crate::swarm::format_swarm_consensus(&results);
         app.add_system_message(formatted);
@@ -2142,14 +2344,18 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/compare" {
         // Find the last assistant message with secondary responses
-        let has_alternates = app.messages.iter()
+        let has_alternates = app
+            .messages
+            .iter()
             .filter(|m| m.role == "assistant")
             .any(|m| !m.multi_model_responses.is_empty());
-        
+
         if has_alternates {
             app.show_comparison = true;
             app.comparison_selected = 0;
-            app.add_system_message("📊 Comparison mode ON. Use ↑/↓ to navigate models, Ctrl+C to close.".to_string());
+            app.add_system_message(
+                "📊 Comparison mode ON. Use ↑/↓ to navigate models, Ctrl+C to close.".to_string(),
+            );
         } else {
             app.add_system_message("No alternate responses available. Enable multi-model mode with /multi and send a message first.".to_string());
         }
@@ -2165,8 +2371,12 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input == "/diff" {
-        app.add_system_message("💡 Diff preview is shown automatically when file edits are suggested.".to_string());
-        app.add_system_message("   When a write/replace/patch is proposed, you'll see the diff first.".to_string());
+        app.add_system_message(
+            "💡 Diff preview is shown automatically when file edits are suggested.".to_string(),
+        );
+        app.add_system_message(
+            "   When a write/replace/patch is proposed, you'll see the diff first.".to_string(),
+        );
         app.add_system_message("   Press 'y' to apply, 'n' to skip.".to_string());
         return Ok(());
     }
@@ -2213,12 +2423,21 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             app.add_system_message("🤖 Generating commit message...".to_string());
             match generate_commit_message(app).await {
                 Ok(generated) => {
-                    app.add_system_message(format!("📝 Generated commit message: \"{}\"", generated));
+                    app.add_system_message(format!(
+                        "📝 Generated commit message: \"{}\"",
+                        generated
+                    ));
                     generated
                 }
                 Err(e) => {
-                    app.add_system_message(format!("⚠️ Failed to generate commit message: {}. Using fallback.", e));
-                    format!("wip: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+                    app.add_system_message(format!(
+                        "⚠️ Failed to generate commit message: {}. Using fallback.",
+                        e
+                    ));
+                    format!(
+                        "wip: auto-commit at {}",
+                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+                    )
                 }
             }
         } else {
@@ -2227,7 +2446,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
         match git_tool.execute(&format!("commit {}", commit_msg)) {
             Ok(output) => {
-                app.add_system_message(format!("✅ Committed: {}\n```\n{}\n```", commit_msg, output.trim()));
+                app.add_system_message(format!(
+                    "✅ Committed: {}\n```\n{}\n```",
+                    commit_msg,
+                    output.trim()
+                ));
             }
             Err(e) => app.add_system_message(format!("❌ Commit failed: {}", e)),
         }
@@ -2240,12 +2463,20 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
         // Get current branch
         let current_branch = match git_tool.execute("branch") {
-            Ok(out) => out.lines().find(|l| l.starts_with('*')).map(|l| l[2..].trim().to_string()),
+            Ok(out) => out
+                .lines()
+                .find(|l| l.starts_with('*'))
+                .map(|l| l[2..].trim().to_string()),
             Err(_) => None,
-        }.unwrap_or_else(|| "feature/auto".to_string());
+        }
+        .unwrap_or_else(|| "feature/auto".to_string());
 
         let branch_name = if title.is_empty() {
-            format!("auto/{}-{}", current_branch.replace('/', "-"), &uuid::Uuid::new_v4().to_string()[..8])
+            format!(
+                "auto/{}-{}",
+                current_branch.replace('/', "-"),
+                &uuid::Uuid::new_v4().to_string()[..8]
+            )
         } else {
             format!("auto/{}", title.to_lowercase().replace([' ', '/'], "-"))
         };
@@ -2277,7 +2508,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
 
         // Suggest gh pr create if available
-        app.add_system_message(format!("💡 Run `gh pr create --title \"{}\" --body \"Auto-generated PR\"` to open PR", commit_msg));
+        app.add_system_message(format!(
+            "💡 Run `gh pr create --title \"{}\" --body \"Auto-generated PR\"` to open PR",
+            commit_msg
+        ));
         return Ok(());
     }
 
@@ -2288,8 +2522,14 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 if diff.trim().is_empty() {
                     app.add_system_message("No staged changes to review.".to_string());
                 } else {
-                    app.add_system_message(format!("📋 Staged diff for review:\n```\n{}\n```", diff.trim()));
-                    app.add_system_message("💡 LLM-powered review coming soon. For now, review the diff above.".to_string());
+                    app.add_system_message(format!(
+                        "📋 Staged diff for review:\n```\n{}\n```",
+                        diff.trim()
+                    ));
+                    app.add_system_message(
+                        "💡 LLM-powered review coming soon. For now, review the diff above."
+                            .to_string(),
+                    );
                 }
             }
             Err(e) => app.add_system_message(format!("❌ Diff failed: {}", e)),
@@ -2315,9 +2555,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         match git_tool.execute(subcmd) {
             Ok(output) => {
                 if output.trim().is_empty() {
-                    app.add_system_message(format!("✅ git {} (no output)", subcmd.split_whitespace().next().unwrap_or(subcmd)));
+                    app.add_system_message(format!(
+                        "✅ git {} (no output)",
+                        subcmd.split_whitespace().next().unwrap_or(subcmd)
+                    ));
                 } else {
-                    app.add_system_message(format!("📦 git {}:\n```\n{}\n```", subcmd, output.trim()));
+                    app.add_system_message(format!(
+                        "📦 git {}:\n```\n{}\n```",
+                        subcmd,
+                        output.trim()
+                    ));
                 }
             }
             Err(e) => {
@@ -2336,7 +2583,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         app.add_system_message(format!("🔍 Searching for '{}'...", query));
         match crate::capabilities::web::web_search(query) {
             Ok(results) => {
-                app.add_system_message(format!("🔍 Results for '{}':\n```\n{}\n```", query, results));
+                app.add_system_message(format!(
+                    "🔍 Results for '{}':\n```\n{}\n```",
+                    query, results
+                ));
             }
             Err(e) => {
                 app.add_system_message(format!("❌ Search failed: {}", e));
@@ -2347,14 +2597,19 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/run" {
         // Find last assistant message with code blocks
-        let last_content = app.messages.iter().rev()
+        let last_content = app
+            .messages
+            .iter()
+            .rev()
             .find(|m| m.role == "assistant")
             .map(|m| m.content.clone());
-        
+
         if let Some(content) = last_content {
             let blocks = crate::sandbox::extract_code_blocks(&content);
             if blocks.is_empty() {
-                app.add_system_message("No code blocks found in the last assistant message.".to_string());
+                app.add_system_message(
+                    "No code blocks found in the last assistant message.".to_string(),
+                );
             } else {
                 app.add_system_message(format!("🔧 Executing {} code block(s)...", blocks.len()));
                 let results = crate::sandbox::run_code_blocks(&content);
@@ -2378,26 +2633,38 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     // ── Session Export ──────────────────────────────────────────────────────
     if input == "/export" || input.starts_with("/export ") {
         let path_override = input.strip_prefix("/export ").map(|s| s.trim());
-        
-        let export_messages: Vec<ExportMessage> = app.messages.iter().map(|m| ExportMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
-            images: m.images.clone(),
-            reasoning: m.reasoning.clone(),
-            timestamp: m.timestamp,
-        }).collect();
 
-        let export_branches: Vec<ExportBranch> = app.branches.iter().map(|b| ExportBranch {
-            name: b.name.clone(),
-            messages: b.messages.iter().map(|m| ExportMessage {
+        let export_messages: Vec<ExportMessage> = app
+            .messages
+            .iter()
+            .map(|m| ExportMessage {
                 role: m.role.clone(),
                 content: m.content.clone(),
                 images: m.images.clone(),
                 reasoning: m.reasoning.clone(),
                 timestamp: m.timestamp,
-            }).collect(),
-            created_at: b.created_at,
-        }).collect();
+            })
+            .collect();
+
+        let export_branches: Vec<ExportBranch> = app
+            .branches
+            .iter()
+            .map(|b| ExportBranch {
+                name: b.name.clone(),
+                messages: b
+                    .messages
+                    .iter()
+                    .map(|m| ExportMessage {
+                        role: m.role.clone(),
+                        content: m.content.clone(),
+                        images: m.images.clone(),
+                        reasoning: m.reasoning.clone(),
+                        timestamp: m.timestamp,
+                    })
+                    .collect(),
+                created_at: b.created_at,
+            })
+            .collect();
 
         let export = SessionExport::from_tui_state(
             app.session_id.clone(),
@@ -2427,29 +2694,41 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         match SessionExport::load_from_file(path) {
             Ok(export) => {
                 // Convert export messages to ChatMessages
-                let imported_messages: Vec<ChatMessage> = export.messages.iter().map(|m| ChatMessage {
-                    role: m.role.clone(),
-                    content: m.content.clone(),
-                    images: m.images.clone(),
-                    timestamp: m.timestamp,
-                    multi_model_responses: Vec::new(),
-                    reasoning: m.reasoning.clone(),
-                }).collect();
-
-                // Convert export branches
-                let imported_branches: Vec<SessionBranch> = export.branches.iter().map(|b| SessionBranch {
-                    name: b.name.clone(),
-                    messages: b.messages.iter().map(|m| ChatMessage {
+                let imported_messages: Vec<ChatMessage> = export
+                    .messages
+                    .iter()
+                    .map(|m| ChatMessage {
                         role: m.role.clone(),
                         content: m.content.clone(),
                         images: m.images.clone(),
                         timestamp: m.timestamp,
                         multi_model_responses: Vec::new(),
                         reasoning: m.reasoning.clone(),
-                    }).collect(),
-                    model_messages: Vec::new(),
-                    created_at: b.created_at,
-                }).collect();
+                    })
+                    .collect();
+
+                // Convert export branches
+                let imported_branches: Vec<SessionBranch> = export
+                    .branches
+                    .iter()
+                    .map(|b| SessionBranch {
+                        name: b.name.clone(),
+                        messages: b
+                            .messages
+                            .iter()
+                            .map(|m| ChatMessage {
+                                role: m.role.clone(),
+                                content: m.content.clone(),
+                                images: m.images.clone(),
+                                timestamp: m.timestamp,
+                                multi_model_responses: Vec::new(),
+                                reasoning: m.reasoning.clone(),
+                            })
+                            .collect(),
+                        model_messages: Vec::new(),
+                        created_at: b.created_at,
+                    })
+                    .collect();
 
                 app.messages = imported_messages;
                 app.branches = imported_branches;
@@ -2486,7 +2765,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             Ok(exports) => {
                 app.add_system_message(format!("📂 Exported sessions ({} found):", exports.len()));
                 for (i, (path, export)) in exports.iter().take(10).enumerate() {
-                    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
+                    let filename = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown");
                     app.add_system_message(format!(
                         "  {}. {} — {} messages, {} branches — {}",
                         i + 1,
@@ -2524,10 +2806,13 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             "init" => {
                 if prompt.is_empty() {
                     app.add_system_message("Usage: /swarm init <seed prompt>".to_string());
-                    app.add_system_message("Example: /swarm init Build a REST API with auth".to_string());
+                    app.add_system_message(
+                        "Example: /swarm init Build a REST API with auth".to_string(),
+                    );
                 } else {
                     // Reload config from disk to pick up any edits
-                    let fresh_config = crate::config::Config::load_or_default().unwrap_or_else(|_| app.config.clone());
+                    let fresh_config = crate::config::Config::load_or_default()
+                        .unwrap_or_else(|_| app.config.clone());
                     // Update cached config
                     app.config = fresh_config.clone();
                     let engine = crate::swarm::SwarmEngine::new(app.config.swarm.clone());
@@ -2536,11 +2821,19 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                             let agents = engine.agent_snapshot().await;
                             app.swarm_agents = agents.clone();
                             app.swarm_running = false;
-                            app.add_system_message(format!("🐝 Swarm initialized with {} agents", agents.len()));
+                            app.add_system_message(format!(
+                                "🐝 Swarm initialized with {} agents",
+                                agents.len()
+                            ));
                             for agent in agents {
-                                app.add_system_message(format!("  🐝 {} ({}) — {}", agent.name, agent.role.name, agent.status));
+                                app.add_system_message(format!(
+                                    "  🐝 {} ({}) — {}",
+                                    agent.name, agent.role.name, agent.status
+                                ));
                             }
-                            app.add_system_message("Run /swarm start to begin the autonomous loop.".to_string());
+                            app.add_system_message(
+                                "Run /swarm start to begin the autonomous loop.".to_string(),
+                            );
                             app.swarm = Some(engine);
                             app.swarm_active = true;
                             app.sidebar_tab = 2;
@@ -2558,12 +2851,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                             app.swarm_event_rx = Some(engine.subscribe());
                             // Initialize swarm_agents so we can detect state changes
                             app.swarm_agents = engine.agent_snapshot().await;
-                            app.add_system_message("🐝 Swarm loop started. Agents are working...".to_string());
+                            app.add_system_message(
+                                "🐝 Swarm loop started. Agents are working...".to_string(),
+                            );
                         }
                         Err(e) => app.add_system_message(format!("❌ Swarm start failed: {}", e)),
                     }
                 } else {
-                    app.add_system_message("🐝 No swarm initialized. Run /swarm init <prompt> first.".to_string());
+                    app.add_system_message(
+                        "🐝 No swarm initialized. Run /swarm init <prompt> first.".to_string(),
+                    );
                 }
             }
             "stop" => {
@@ -2586,15 +2883,18 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     app.add_system_message(format!("{}", status));
                 } else {
                     app.add_system_message("🐝 No swarm active.".to_string());
-                    app.add_system_message(format!("Config: max_agents={}, roles={:?}",
-                        app.config.swarm.max_agents,
-                        app.config.swarm.roles));
+                    app.add_system_message(format!(
+                        "Config: max_agents={}, roles={:?}",
+                        app.config.swarm.max_agents, app.config.swarm.roles
+                    ));
                 }
             }
             _ => {
                 app.add_system_message("🐝 Swarm Commands:".to_string());
                 app.add_system_message("  /swarm init <prompt>  — Initialize swarm".to_string());
-                app.add_system_message("  /swarm start          — Start autonomous loop".to_string());
+                app.add_system_message(
+                    "  /swarm start          — Start autonomous loop".to_string(),
+                );
                 app.add_system_message("  /swarm stop           — Stop swarm".to_string());
                 app.add_system_message("  /swarm status         — Show swarm status".to_string());
             }
@@ -2609,7 +2909,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         match crate::image_utils::encode_image_to_data_url(path) {
             Ok(data_url) => {
                 app.pending_image = Some(data_url);
-                app.add_system_message(format!("📎 Image attached: {} (will be sent with your next message)", path.display()));
+                app.add_system_message(format!(
+                    "📎 Image attached: {} (will be sent with your next message)",
+                    path.display()
+                ));
             }
             Err(e) => {
                 app.add_system_message(format!("❌ Failed to encode image: {}", e));
@@ -2673,8 +2976,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/lint" {
         app.add_system_message("🔍 Running linter...".to_string());
-        let path = app.config.filesystem.working_directory.clone()
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+        let path = app
+            .config
+            .filesystem
+            .working_directory
+            .clone()
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_else(|| ".".to_string());
         match crate::linting::detect_linter(&path) {
             Some(linter) => {
@@ -2684,12 +2995,24 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         if results.is_empty() {
                             app.add_system_message("✅ No issues found!".to_string());
                         } else {
-                            let summary = results.iter()
-                                .map(|r| format!("[{}] {}:{} — {}", r.severity, r.file, r.line, r.message))
+                            let summary = results
+                                .iter()
+                                .map(|r| {
+                                    format!(
+                                        "[{}] {}:{} — {}",
+                                        r.severity, r.file, r.line, r.message
+                                    )
+                                })
                                 .collect::<Vec<_>>()
                                 .join("\n");
-                            let errors = results.iter().filter(|r| r.severity == crate::linting::Severity::Error).count();
-                            let warnings = results.iter().filter(|r| r.severity == crate::linting::Severity::Warning).count();
+                            let errors = results
+                                .iter()
+                                .filter(|r| r.severity == crate::linting::Severity::Error)
+                                .count();
+                            let warnings = results
+                                .iter()
+                                .filter(|r| r.severity == crate::linting::Severity::Warning)
+                                .count();
                             app.add_system_message(format!(
                                 "🔍 Linter results ({} errors, {} warnings):\n```\n{}\n```",
                                 errors, warnings, summary
@@ -2705,8 +3028,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
 
     if input == "/repo-map" || input == "/map" {
-        let path = app.config.filesystem.working_directory.clone()
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+        let path = app
+            .config
+            .filesystem
+            .working_directory
+            .clone()
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_else(|| ".".to_string());
         app.add_system_message(format!("🗺️ Building repo map for {}...", path));
         match crate::repo_map::build_repo_map(&path) {
@@ -2722,7 +3053,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     if input == "/yolo" {
         app.yolo_mode = !app.yolo_mode;
         let status = if app.yolo_mode { "ON ✅" } else { "OFF ❌" };
-        app.add_system_message(format!("🤘 YOLO mode is {} — tool calls will {}be auto-approved.", status, if app.yolo_mode { "" } else { "NOT " }));
+        app.add_system_message(format!(
+            "🤘 YOLO mode is {} — tool calls will {}be auto-approved.",
+            status,
+            if app.yolo_mode { "" } else { "NOT " }
+        ));
         return Ok(());
     }
 
@@ -2769,7 +3104,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     app.add_system_message("✅ No uncommitted changes.".to_string());
                 } else {
                     // Show stat summary
-                    app.add_system_message(format!("📊 Changes since last checkpoint:\n{}", stdout.trim()));
+                    app.add_system_message(format!(
+                        "📊 Changes since last checkpoint:\n{}",
+                        stdout.trim()
+                    ));
                     // Also show full diff if it's not too large
                     let full = std::process::Command::new("git")
                         .args(["diff", path])
@@ -2818,6 +3156,46 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     for (word, response) in &control_words {
         if input_lower == *word || input_lower.starts_with(&format!("{} ", word)) {
+            // For resume commands, actually restart the stream if it died
+            if *word == "continue" || *word == "go" || *word == "proceed" || *word == "carry on" {
+                app.add_system_message(response.to_string());
+                if app.is_streaming && app.stream_rx.is_none() {
+                    // Background task died; re-send the last user message
+                    if let Some(_last_user) = app
+                        .model_messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == "user" && !m.content.starts_with("Tool result"))
+                        .cloned()
+                    {
+                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                        app.stream_rx = Some(rx);
+                        let provider = app.provider.clone();
+                        let model = app.model.clone();
+                        let model_config = app.model_config.clone();
+                        let model_messages = app.model_messages.clone();
+                        let is_multi_model = app.multi_model_mode;
+                        let config = app.config.clone();
+                        tokio::spawn(async move {
+                            let _ = stream_model_response_task(
+                                tx,
+                                provider,
+                                model,
+                                model_config,
+                                model_messages,
+                                is_multi_model,
+                                config,
+                            )
+                            .await;
+                        });
+                    } else {
+                        app.add_system_message(
+                            "⚠️ No previous user message to resume from.".to_string(),
+                        );
+                    }
+                }
+                return Ok(());
+            }
             app.add_system_message(response.to_string());
             return Ok(());
         }
@@ -2825,18 +3203,33 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     // ── Direct tool routing for common commands ─────────────────────────────
     // If user types exactly "test" or "/test", route directly to test tool
-    if input.trim().eq_ignore_ascii_case("test") || input.trim().eq_ignore_ascii_case("/test") || input.starts_with("/test ") {
+    if input.trim().eq_ignore_ascii_case("test")
+        || input.trim().eq_ignore_ascii_case("/test")
+        || input.starts_with("/test ")
+    {
         let project_path = if input.starts_with("/test ") {
-            input.strip_prefix("/test ").unwrap_or("").trim().to_string()
+            input
+                .strip_prefix("/test ")
+                .unwrap_or("")
+                .trim()
+                .to_string()
         } else {
             app.config
                 .filesystem
                 .working_directory
                 .clone()
-                .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))
+                .or_else(|| {
+                    std::env::current_dir()
+                        .ok()
+                        .map(|p| p.to_string_lossy().to_string())
+                })
                 .unwrap_or_else(|| "/home/synth".to_string())
         };
-        let path_display = if project_path.is_empty() { ".".to_string() } else { project_path.clone() };
+        let path_display = if project_path.is_empty() {
+            ".".to_string()
+        } else {
+            project_path.clone()
+        };
         app.add_user_message(input.clone());
         let test_tool = crate::tools::test_runner::TestTool;
         match crate::tools::Tool::execute(&test_tool, &format!("run {}", path_display)) {
@@ -2846,9 +3239,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     role: "user".to_string(),
                     content: format!("Test results: {}", result),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 });
             }
             Err(e) => app.add_system_message(format!("Test error: {}", e)),
@@ -2900,12 +3293,14 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             Ok(agent) => {
                 let mut progress_messages: Vec<String> = Vec::new();
 
-                let result = agent.run_coding_task(task, |progress| {
-                    let msg = format_progress(&progress);
-                    progress_messages.push(msg.clone());
-                    // We can't directly mutate app here due to closure borrowing,
-                    // so we collect messages and display them after.
-                }).await;
+                let result = agent
+                    .run_coding_task(task, |progress| {
+                        let msg = format_progress(&progress);
+                        progress_messages.push(msg.clone());
+                        // We can't directly mutate app here due to closure borrowing,
+                        // so we collect messages and display them after.
+                    })
+                    .await;
 
                 // Display all progress messages
                 for msg in progress_messages {
@@ -2916,7 +3311,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     Ok(task_result) => {
                         let mut response = format!(
                             "Agent Result: {}\nMessage: {}\nIterations: {}",
-                            if task_result.success { "✅ Success" } else { "⚠️ Partial" },
+                            if task_result.success {
+                                "✅ Success"
+                            } else {
+                                "⚠️ Partial"
+                            },
                             task_result.message,
                             task_result.total_iterations
                         );
@@ -2969,9 +3368,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     let stats = compressor.stats();
                     Some(format!(
                         "🗜 Context compressed: {} messages → summaries ({} compressions, ~{} tokens saved)",
-                        stats.messages_summarized,
-                        stats.compressions_done,
-                        stats.tokens_saved
+                        stats.messages_summarized, stats.compressions_done, stats.tokens_saved
                     ))
                 }
                 Ok(false) if hard_limit_trigger => {
@@ -2991,10 +3388,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         let preserve_count = (app.model_context_length * 90 / 100).max(1000);
                         emergency_truncate_messages(&mut model_messages, preserve_count);
                     }
-                    Some(format!(
-                        "⚠️ Context compression failed: {}",
-                        e
-                    ))
+                    Some(format!("⚠️ Context compression failed: {}", e))
                 }
             }
         } else {
@@ -3013,11 +3407,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         } else {
             String::new()
         };
-        let enriched = evolution.build_enriched_prompt(
-            &base_prompt,
-            &input,
-            &app.session_id,
-        );
+        let enriched = evolution.build_enriched_prompt(&base_prompt, &input, &app.session_id);
         if !model_messages.is_empty() {
             model_messages[0].content = enriched;
         }
@@ -3038,7 +3428,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             model_messages,
             is_multi_model,
             config,
-        ).await;
+        )
+        .await;
     });
 
     Ok(())
@@ -3054,34 +3445,33 @@ async fn execute_tool_chain(
     model_messages: &[Message],
     security_engine: &crate::security::SecurityEngine,
     tools: &[(String, String)],
-    original_content: &str,
+    _original_content: &str,
 ) -> Result<()> {
     if tools.is_empty() {
         return Ok(());
     }
 
-    let mut follow_messages = model_messages.to_vec();
-    // Include the assistant's original message (with tool lines stripped for context)
-    follow_messages.push(Message {
-        role: "assistant".to_string(),
-        content: strip_tool_lines(original_content),
-        images: None,
-    tool_call_id: None,
-    tool_calls: None,
-    reasoning_content: None,
-    });
+    // Remove the last assistant message (from current turn) to prevent
+    // context regurgitation. The follow-up should only see: system → user
+    // request → tool results → synthesis instruction.
+    let mut follow_messages: Vec<Message> = model_messages.to_vec();
+    if let Some(last_assistant_idx) = follow_messages.iter().rposition(|m| m.role == "assistant") {
+        follow_messages.remove(last_assistant_idx);
+    }
 
     let executor = AsyncToolExecutor::new();
 
-        let total = tools.len();
+    let total = tools.len();
     let mut batch_results: Vec<ToolResultEntry> = Vec::with_capacity(total);
 
-for (idx, (tool_name, args)) in tools.iter().enumerate() {
+    for (idx, (tool_name, args)) in tools.iter().enumerate() {
         // Show progress indicator (throttled — every 5th tool + first + last)
         if idx == 0 || idx % 5 == 0 || idx == total - 1 {
             let _ = tx.send(StreamEvent::SystemMessage(format!(
                 "🔧 Tool {}/{}: {} …",
-                idx + 1, total, tool_name
+                idx + 1,
+                total,
+                tool_name
             )));
         }
 
@@ -3121,11 +3511,11 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
                 });
                 follow_messages.push(Message {
                     role: "user".to_string(),
-                    content: format!("Tool result ({} {}): {}", tool_name, args, sanitized),
+                    content: format_tool_result(tool_name, args, &sanitized, true),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 });
             }
             Err(e) => {
@@ -3137,11 +3527,11 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
                 });
                 follow_messages.push(Message {
                     role: "user".to_string(),
-                    content: format!("Tool error ({} {}): {}", tool_name, args, e),
+                    content: format_tool_result(tool_name, args, &e.to_string(), false),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 });
             }
         }
@@ -3155,24 +3545,31 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
     let mut tool_summary = String::from("TOOL EXECUTION COMPLETE. Here are the results:\n\n");
     for (idx, (tool_name, args)) in tools.iter().enumerate() {
         // Find the result for this tool from follow_messages
-        let result_prefix = format!("Tool result ({} {}):", tool_name, args);
-        if let Some(msg) = follow_messages.iter().find(|m| m.role == "user" && m.content.starts_with(&result_prefix)) {
+        let result_prefix = format!("[tool:{} args={}] result:", tool_name, args);
+        let error_prefix = format!("[tool:{} args={}] error:", tool_name, args);
+        if let Some(msg) = follow_messages
+            .iter()
+            .find(|m| m.role == "user" && m.content.starts_with(&result_prefix))
+        {
             tool_summary.push_str(&format!("{}. {}\n{}", idx + 1, tool_name, msg.content));
             tool_summary.push_str("\n\n");
-        } else if let Some(msg) = follow_messages.iter().find(|m| m.role == "user" && m.content.starts_with(&format!("Tool error ({} {}):", tool_name, args))) {
+        } else if let Some(msg) = follow_messages
+            .iter()
+            .find(|m| m.role == "user" && m.content.starts_with(&error_prefix))
+        {
             tool_summary.push_str(&format!("{}. {}\n{}", idx + 1, tool_name, msg.content));
             tool_summary.push_str("\n\n");
         }
     }
-    tool_summary.push_str("Based on these tool results, provide a complete response. Explain what was found, what it means, and what to do next. If a tool result is empty or missing, state that explicitly — do not hallucinate.");
+    tool_summary.push_str("SYNTHESIS PHASE — NO MORE TOOLS. Based on these tool results, provide a complete response. Explain what was found, what it means, and what to do next. Do NOT output any TOOL: lines. Do NOT call any more tools. Just write your response.");
 
     follow_messages.push(Message {
         role: "user".to_string(),
         content: tool_summary,
         images: None,
-    tool_call_id: None,
-    tool_calls: None,
-    reasoning_content: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
     });
 
     let follow_up = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
@@ -3182,7 +3579,8 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
             let trimmed = follow_content.trim();
             if trimmed.is_empty() {
                 let _ = tx.send(StreamEvent::Error(
-                    "Model returned empty follow-up after tool execution. Re-prompting...".to_string()
+                    "Model returned empty follow-up after tool execution. Re-prompting..."
+                        .to_string(),
                 ));
                 // Re-prompt with stronger mandate — include tool results so model sees them
                 let mut retry_messages = follow_messages.clone();
@@ -3195,34 +3593,42 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
                 reasoning_content: None,
                 });
                 let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
+                match tokio::time::timeout(
+                    Duration::from_secs(120),
+                    provider.chat_stream(retry_req),
+                )
+                .await
+                {
                     Ok(Ok((retry_chunks, _retry_metrics))) => {
                         let retry_content: String = retry_chunks.join("");
                         let _ = tx.send(StreamEvent::FollowUp(retry_content));
                         let _ = tx.send(StreamEvent::Done);
                     }
                     Ok(Err(e)) => {
-                        let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ =
+                            tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
                         let _ = tx.send(StreamEvent::Done);
                     }
                     Err(_) => {
-                        let _ = tx.send(StreamEvent::Error("Follow-up timed out after 120s".to_string()));
+                        let _ = tx.send(StreamEvent::Error(
+                            "Follow-up timed out after 120s".to_string(),
+                        ));
                         let _ = tx.send(StreamEvent::Done);
                     }
                 }
             } else if trimmed.split_whitespace().count() < 15 {
                 // Too short — treat as incomplete and re-prompt
                 let _ = tx.send(StreamEvent::SystemMessage(
-                    "⚠️ Follow-up too brief — requesting complete response...".to_string()
+                    "⚠️ Follow-up too brief — requesting complete response...".to_string(),
                 ));
                 let mut retry_messages = follow_messages.clone();
                 retry_messages.push(Message {
                     role: "assistant".to_string(),
                     content: follow_content.clone(),
                     images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
                 });
                 retry_messages.push(Message {
                     role: "user".to_string(),
@@ -3233,18 +3639,26 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
                 reasoning_content: None,
                 });
                 let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
+                match tokio::time::timeout(
+                    Duration::from_secs(120),
+                    provider.chat_stream(retry_req),
+                )
+                .await
+                {
                     Ok(Ok((retry_chunks, _retry_metrics))) => {
                         let retry_content: String = retry_chunks.join("");
                         let _ = tx.send(StreamEvent::FollowUp(retry_content));
                         let _ = tx.send(StreamEvent::Done);
                     }
                     Ok(Err(e)) => {
-                        let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                        let _ =
+                            tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
                         let _ = tx.send(StreamEvent::Done);
                     }
                     Err(_) => {
-                        let _ = tx.send(StreamEvent::Error("Follow-up timed out after 120s".to_string()));
+                        let _ = tx.send(StreamEvent::Error(
+                            "Follow-up timed out after 120s".to_string(),
+                        ));
                         let _ = tx.send(StreamEvent::Done);
                     }
                 }
@@ -3258,7 +3672,9 @@ for (idx, (tool_name, args)) in tools.iter().enumerate() {
             let _ = tx.send(StreamEvent::Done);
         }
         Err(_) => {
-            let _ = tx.send(StreamEvent::Error("Follow-up timed out after 120s".to_string()));
+            let _ = tx.send(StreamEvent::Error(
+                "Follow-up timed out after 120s".to_string(),
+            ));
             let _ = tx.send(StreamEvent::Done);
         }
     }
@@ -3280,33 +3696,43 @@ async fn stream_model_response_task(
 
     // Create security engine for this task
     let security_engine = match crate::security::SecurityEngine::new(
-        crate::security::SecurityConfig::load().unwrap_or_default()
+        crate::security::SecurityConfig::load().unwrap_or_default(),
     ) {
         Ok(engine) => engine,
         Err(e) => {
-            let _ = tx.send(StreamEvent::Error(format!("Security engine init failed: {}", e)));
+            let _ = tx.send(StreamEvent::Error(format!(
+                "Security engine init failed: {}",
+                e
+            )));
             return Ok(());
         }
     };
 
     let mut request = ChatRequest::new(model.clone(), model_messages.clone(), true);
     if let Some(ref model_config) = model_config {
-        request.max_tokens = Some(model_config.context_length as u32);
+        let sensible_max = (model_config.context_length as u32 / 4).clamp(256, 4096);
+        request.max_tokens = Some(sensible_max);
     }
-    // Attach OpenAI-compatible tool definitions so the model knows it can call tools
-    request.tools = Some(crate::tools::get_openai_tool_definitions());
+    // NOTE: Native function calling disabled. The model uses TOOL: syntax instead.
+    // OpenAI tool definitions cause confusion when the system prompt also teaches TOOL: format.
+    // request.tools = Some(crate::tools::get_openai_tool_definitions());
 
     let _secondary_providers: Vec<(String, Provider)> = if is_multi_model {
-        config.providers.iter()
+        config
+            .providers
+            .iter()
             .filter(|(name, _)| **name != "kimi")
             .map(|(name, provider_cfg)| {
-                (name.clone(), Provider::new(
+                (
                     name.clone(),
-                    provider_cfg.base_url.clone(),
-                    provider_cfg.api_key.clone(),
-                    provider_cfg.kind.clone(),
-                    provider_cfg.headers.clone(),
-                ))
+                    Provider::new(
+                        name.clone(),
+                        provider_cfg.base_url.clone(),
+                        provider_cfg.api_key.clone(),
+                        provider_cfg.kind.clone(),
+                        provider_cfg.headers.clone(),
+                    ),
+                )
             })
             .collect()
     } else {
@@ -3336,7 +3762,11 @@ async fn stream_model_response_task(
                         token_count += 1;
                         let _ = tx.send(StreamEvent::Chunk(c));
                     }
-                    StreamChunk::ToolCall { id, name, arguments: args } => {
+                    StreamChunk::ToolCall {
+                        id,
+                        name,
+                        arguments: args,
+                    } => {
                         // Native tool call from the model — execute it directly
                         let _ = tx.send(StreamEvent::SystemMessage(format!(
                             "🔧 Tool call: {} {}",
@@ -3359,7 +3789,8 @@ async fn stream_model_response_task(
                                     .await
                                 {
                                     Ok(result) => {
-                                        let sanitized = security_engine.sanitize_output(&name, &result);
+                                        let sanitized =
+                                            security_engine.sanitize_output(&name, &result);
                                         let _ = tx.send(StreamEvent::ToolResult {
                                             name: name.clone(),
                                             args: tool_args.clone(),
@@ -3392,7 +3823,7 @@ async fn stream_model_response_task(
                                                     },
                                                 },
                                             ]),
-                                            reasoning_content: None,
+                                            reasoning_content: Some(accumulated_reasoning.clone()),
                                         });
                                         // Tool result message MUST include tool_call_id matching the assistant's tool_calls
                                         follow_messages.push(Message {
@@ -3409,7 +3840,8 @@ async fn stream_model_response_task(
                                             follow_messages.clone(),
                                             true,
                                         );
-                                        follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
+                                        follow_up.tools =
+                                            Some(crate::tools::get_openai_tool_definitions());
 
                                         match provider.chat_stream_realtime(follow_up).await {
                                             Ok((mut follow_rx, _)) => {
@@ -3421,16 +3853,22 @@ async fn stream_model_response_task(
                                                             let _ = tx.send(StreamEvent::Chunk(c));
                                                         }
                                                         StreamChunk::Reasoning(r) => {
-                                                            let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                                                            let _ = tx.send(
+                                                                StreamEvent::ReasoningChunk(r),
+                                                            );
                                                         }
                                                         _ => {}
                                                     }
                                                 }
-                                                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                                let _ =
+                                                    tx.send(StreamEvent::FollowUp(follow_content));
                                                 let _ = tx.send(StreamEvent::Done);
                                             }
                                             Err(e) => {
-                                                let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                                let _ = tx.send(StreamEvent::Error(format!(
+                                                    "Follow-up failed: {}",
+                                                    e
+                                                )));
                                                 let _ = tx.send(StreamEvent::Done);
                                             }
                                         }
@@ -3453,7 +3891,10 @@ async fn stream_model_response_task(
                                 )));
                                 let _ = tx.send(StreamEvent::Done);
                             }
-                            crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                            crate::security::SecurityDecision::RequireApproval {
+                                reason: _,
+                                risk_level: _,
+                            } => {
                                 let _ = tx.send(StreamEvent::SystemMessage(format!(
                                     "⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)",
                                     name
@@ -3488,18 +3929,30 @@ async fn stream_model_response_task(
             let embedded_tools = parse_embedded_tools(&full_content);
             if !embedded_tools.is_empty() {
                 let _ = execute_tool_chain(
-                    &tx, &provider, &model, &model_messages, &security_engine, &embedded_tools, &full_content
-                ).await;
+                    &tx,
+                    &provider,
+                    &model,
+                    &model_messages,
+                    &security_engine,
+                    &embedded_tools,
+                    &full_content,
+                )
+                .await;
             } else {
                 let suggestions = crate::tools::detect_tool_suggestions(&full_content);
-                let high_conf: Vec<_> = suggestions.into_iter().filter(|s| s.confidence >= 0.6).collect();
+                let high_conf: Vec<_> = suggestions
+                    .into_iter()
+                    .filter(|s| s.confidence >= 0.6)
+                    .collect();
                 if high_conf.len() > 1 {
                     // Multi-file edit batch — send to UI for approval
                     let _ = tx.send(StreamEvent::SystemMessage(format!(
                         "🔧 Batch of {} tool suggestions detected. Review and approve.",
                         high_conf.len()
                     )));
-                    let _ = tx.send(StreamEvent::SetPendingBatch(crate::tools::ToolBatch::new(high_conf)));
+                    let _ = tx.send(StreamEvent::SetPendingBatch(crate::tools::ToolBatch::new(
+                        high_conf,
+                    )));
                 } else if let Some(suggestion) = high_conf.into_iter().next() {
                     match security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
                         crate::security::SecurityDecision::Allow => {
@@ -3518,7 +3971,8 @@ async fn stream_model_response_task(
                                 .await
                             {
                                 Ok(result) => {
-                                    let sanitized = security_engine.sanitize_output(&suggestion.tool_name, &result);
+                                    let sanitized = security_engine
+                                        .sanitize_output(&suggestion.tool_name, &result);
                                     let _ = tx.send(StreamEvent::ToolResult {
                                         name: suggestion.tool_name.clone(),
                                         args: suggestion.args.clone(),
@@ -3527,21 +3981,18 @@ async fn stream_model_response_task(
                                     });
 
                                     let mut follow_messages = model_messages.clone();
-                                    follow_messages.push(Message {
-                                        role: "assistant".to_string(),
-                                        content: full_content.clone(),
-                                        images: None,
-                                    tool_call_id: None,
-                                    tool_calls: None,
-                                    reasoning_content: None,
-                                    });
+                                    if let Some(last_assistant_idx) =
+                                        follow_messages.iter().rposition(|m| m.role == "assistant")
+                                    {
+                                        follow_messages.remove(last_assistant_idx);
+                                    }
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
                                         images: None,
-                                    tool_call_id: None,
-                                    tool_calls: None,
-                                    reasoning_content: None,
+                                        tool_call_id: None,
+                                        tool_calls: None,
+                                        reasoning_content: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
@@ -3575,24 +4026,33 @@ async fn stream_model_response_task(
                                                 tool_calls: None,
                                                 reasoning_content: None,
                                                 });
-                                                let retry_req = ChatRequest::new(model.clone(), retry, true);
+                                                let retry_req =
+                                                    ChatRequest::new(model.clone(), retry, true);
                                                 match provider.chat_stream(retry_req).await {
                                                     Ok((rc, _)) => {
-                                                        let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
+                                                        let _ = tx.send(StreamEvent::FollowUp(
+                                                            rc.join(""),
+                                                        ));
                                                         let _ = tx.send(StreamEvent::Done);
                                                     }
                                                     Err(e) => {
-                                                        let _ = tx.send(StreamEvent::Error(format!("Retry failed: {}", e)));
+                                                        let _ = tx.send(StreamEvent::Error(
+                                                            format!("Retry failed: {}", e),
+                                                        ));
                                                         let _ = tx.send(StreamEvent::Done);
                                                     }
                                                 }
                                             } else {
-                                                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                                let _ =
+                                                    tx.send(StreamEvent::FollowUp(follow_content));
                                             }
                                             let _ = tx.send(StreamEvent::Done);
                                         }
                                         Err(e) => {
-                                            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                            let _ = tx.send(StreamEvent::Error(format!(
+                                                "Follow-up failed: {}",
+                                                e
+                                            )));
                                             let _ = tx.send(StreamEvent::Done);
                                         }
                                     }
@@ -3615,7 +4075,10 @@ async fn stream_model_response_task(
                             )));
                             let _ = tx.send(StreamEvent::Done);
                         }
-                        crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                        crate::security::SecurityDecision::RequireApproval {
+                            reason: _,
+                            risk_level: _,
+                        } => {
                             let _ = tx.send(StreamEvent::SetPendingSuggestion(suggestion));
                             let _ = tx.send(StreamEvent::Done);
                         }
@@ -3649,31 +4112,40 @@ async fn stream_model_response_task_legacy(
 
     // Create security engine for this task
     let security_engine = match crate::security::SecurityEngine::new(
-        crate::security::SecurityConfig::load().unwrap_or_default()
+        crate::security::SecurityConfig::load().unwrap_or_default(),
     ) {
         Ok(engine) => engine,
         Err(e) => {
-            let _ = tx.send(StreamEvent::Error(format!("Security engine init failed: {}", e)));
+            let _ = tx.send(StreamEvent::Error(format!(
+                "Security engine init failed: {}",
+                e
+            )));
             return Ok(());
         }
     };
 
     let mut request = ChatRequest::new(model.clone(), model_messages.clone(), true);
     if let Some(ref model_config) = model_config {
-        request.max_tokens = Some(model_config.context_length as u32);
+        let sensible_max = (model_config.context_length as u32 / 4).clamp(256, 4096);
+        request.max_tokens = Some(sensible_max);
     }
 
     let secondary_providers: Vec<(String, Provider)> = if is_multi_model {
-        config.providers.iter()
+        config
+            .providers
+            .iter()
             .filter(|(name, _)| **name != "kimi")
             .map(|(name, provider_cfg)| {
-                (name.clone(), Provider::new(
+                (
                     name.clone(),
-                    provider_cfg.base_url.clone(),
-                    provider_cfg.api_key.clone(),
-                    provider_cfg.kind.clone(),
-                    provider_cfg.headers.clone(),
-                ))
+                    Provider::new(
+                        name.clone(),
+                        provider_cfg.base_url.clone(),
+                        provider_cfg.api_key.clone(),
+                        provider_cfg.kind.clone(),
+                        provider_cfg.headers.clone(),
+                    ),
+                )
             })
             .collect()
     } else {
@@ -3690,7 +4162,7 @@ async fn stream_model_response_task_legacy(
                 // Check if this chunk is reasoning content (wrapped in think tags)
                 if chunk.starts_with("<think>") && chunk.ends_with("</think>") {
                     // Extract the inner reasoning text and send as ReasoningChunk
-                    let inner = &chunk[7..chunk.len()-8]; // strip <think> and </think>
+                    let inner = &chunk[7..chunk.len() - 8]; // strip <think> and </think>
                     let _ = tx.send(StreamEvent::ReasoningChunk(inner.to_string()));
                 } else {
                     let _ = tx.send(StreamEvent::Chunk(chunk.clone()));
@@ -3707,8 +4179,15 @@ async fn stream_model_response_task_legacy(
             let embedded_tools = parse_embedded_tools(&full_content);
             if !embedded_tools.is_empty() {
                 let _ = execute_tool_chain(
-                    &tx, &provider, &model, &model_messages, &security_engine, &embedded_tools, &full_content
-                ).await;
+                    &tx,
+                    &provider,
+                    &model,
+                    &model_messages,
+                    &security_engine,
+                    &embedded_tools,
+                    &full_content,
+                )
+                .await;
             } else {
                 // ── Handle natural-language tool suggestions ─────────────────────
                 // If the model didn't output TOOL:... but its response contains a
@@ -3733,7 +4212,8 @@ async fn stream_model_response_task_legacy(
                                 .await
                             {
                                 Ok(result) => {
-                                    let sanitized = security_engine.sanitize_output(&suggestion.tool_name, &result);
+                                    let sanitized = security_engine
+                                        .sanitize_output(&suggestion.tool_name, &result);
                                     let _ = tx.send(StreamEvent::ToolResult {
                                         name: suggestion.tool_name.clone(),
                                         args: suggestion.args.clone(),
@@ -3743,21 +4223,18 @@ async fn stream_model_response_task_legacy(
 
                                     // Follow-up request with tool result
                                     let mut follow_messages = model_messages.clone();
-                                    follow_messages.push(Message {
-                                        role: "assistant".to_string(),
-                                        content: full_content.clone(),
-                                        images: None,
-                                    tool_call_id: None,
-                                    tool_calls: None,
-                                    reasoning_content: None,
-                                    });
+                                    if let Some(last_assistant_idx) =
+                                        follow_messages.iter().rposition(|m| m.role == "assistant")
+                                    {
+                                        follow_messages.remove(last_assistant_idx);
+                                    }
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
                                         images: None,
-                                    tool_call_id: None,
-                                    tool_calls: None,
-                                    reasoning_content: None,
+                                        tool_call_id: None,
+                                        tool_calls: None,
+                                        reasoning_content: None,
                                     });
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
@@ -3791,24 +4268,33 @@ async fn stream_model_response_task_legacy(
                                                 tool_calls: None,
                                                 reasoning_content: None,
                                                 });
-                                                let retry_req = ChatRequest::new(model.clone(), retry, true);
+                                                let retry_req =
+                                                    ChatRequest::new(model.clone(), retry, true);
                                                 match provider.chat_stream(retry_req).await {
                                                     Ok((rc, _)) => {
-                                                        let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
+                                                        let _ = tx.send(StreamEvent::FollowUp(
+                                                            rc.join(""),
+                                                        ));
                                                         let _ = tx.send(StreamEvent::Done);
                                                     }
                                                     Err(e) => {
-                                                        let _ = tx.send(StreamEvent::Error(format!("Retry failed: {}", e)));
+                                                        let _ = tx.send(StreamEvent::Error(
+                                                            format!("Retry failed: {}", e),
+                                                        ));
                                                         let _ = tx.send(StreamEvent::Done);
                                                     }
                                                 }
                                             } else {
-                                                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                                let _ =
+                                                    tx.send(StreamEvent::FollowUp(follow_content));
                                             }
                                             let _ = tx.send(StreamEvent::Done);
                                         }
                                         Err(e) => {
-                                            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                                            let _ = tx.send(StreamEvent::Error(format!(
+                                                "Follow-up failed: {}",
+                                                e
+                                            )));
                                             let _ = tx.send(StreamEvent::Done);
                                         }
                                     }
@@ -3824,7 +4310,10 @@ async fn stream_model_response_task_legacy(
                                 }
                             }
                         }
-                        crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
+                        crate::security::SecurityDecision::RequireApproval {
+                            reason,
+                            risk_level,
+                        } => {
                             let _ = tx.send(StreamEvent::Error(format!(
                                 "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
                                 suggestion.tool_name, reason, risk_level
@@ -3845,7 +4334,9 @@ async fn stream_model_response_task_legacy(
         Err(e) => {
             let error_msg = format!("{}", e);
             let display_msg = if let Some(json_start) = error_msg.find('{') {
-                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&error_msg[json_start..]) {
+                if let Ok(json_val) =
+                    serde_json::from_str::<serde_json::Value>(&error_msg[json_start..])
+                {
                     if let Some(msg) = json_val
                         .get("error")
                         .and_then(|e| e.get("message"))
@@ -3870,11 +4361,7 @@ async fn stream_model_response_task_legacy(
 
     if is_multi_model {
         for (name, sec_provider) in secondary_providers {
-            let req = ChatRequest::new(
-                model.clone(),
-                model_messages.clone(),
-                true,
-            );
+            let req = ChatRequest::new(model.clone(), model_messages.clone(), true);
             match sec_provider.chat_stream(req).await {
                 Ok((chunks, metrics)) => {
                     let content: String = chunks.join("");
@@ -3916,7 +4403,8 @@ async fn handle_slash_result(
                     match git_tool.execute(&args) {
                         Ok(output) => app.add_system_message(format!(
                             "📦 git {}:\n```\n{}\n```",
-                            args, output.trim()
+                            args,
+                            output.trim()
                         )),
                         Err(e) => app.add_system_message(format!("❌ git {} failed: {}", args, e)),
                     }
@@ -3933,21 +4421,26 @@ async fn handle_slash_result(
                     let subcmd = parts.first().copied().unwrap_or("");
                     let rest = parts.get(1).copied().unwrap_or("");
                     match subcmd {
-                        "save" => {
-                            match crate::tools::save_checkpoint(rest) {
-                                Ok(cp) => {
-                                    app.checkpoint_stack.push(cp.clone());
-                                    app.add_system_message(format!(
-                                        "💾 Checkpoint saved: {} ({})",
-                                        cp.name, cp.git_ref
-                                    ));
-                                }
-                                Err(e) => app.add_system_message(format!("❌ Checkpoint failed: {}", e)),
+                        "save" => match crate::tools::save_checkpoint(rest) {
+                            Ok(cp) => {
+                                app.checkpoint_stack.push(cp.clone());
+                                app.add_system_message(format!(
+                                    "💾 Checkpoint saved: {} ({})",
+                                    cp.name, cp.git_ref
+                                ));
                             }
-                        }
+                            Err(e) => {
+                                app.add_system_message(format!("❌ Checkpoint failed: {}", e))
+                            }
+                        },
                         "restore" => {
                             // Find checkpoint by name in undo stack
-                            if let Some(idx) = app.checkpoint_stack.undo_stack.iter().rposition(|cp| cp.name == rest) {
+                            if let Some(idx) = app
+                                .checkpoint_stack
+                                .undo_stack
+                                .iter()
+                                .rposition(|cp| cp.name == rest)
+                            {
                                 let cp = app.checkpoint_stack.undo_stack.remove(idx);
                                 match crate::tools::restore_checkpoint(&cp) {
                                     Ok(msg) => {
@@ -3960,36 +4453,65 @@ async fn handle_slash_result(
                                     }
                                 }
                             } else {
-                                app.add_system_message(format!("❌ Checkpoint '{}' not found", rest));
+                                app.add_system_message(format!(
+                                    "❌ Checkpoint '{}' not found",
+                                    rest
+                                ));
                             }
                         }
                         _ => {
-                            app.add_system_message(format!("💾 Checkpoint: {} (use 'save <name>' or 'restore <name>')", args));
+                            app.add_system_message(format!(
+                                "💾 Checkpoint: {} (use 'save <name>' or 'restore <name>')",
+                                args
+                            ));
                         }
                     }
                 }
                 "lint" => {
-                    let path = if args.is_empty() { ".".to_string() } else { args.clone() };
+                    let path = if args.is_empty() {
+                        ".".to_string()
+                    } else {
+                        args.clone()
+                    };
                     app.add_system_message(format!("🔍 Running linter on {}...", path));
                     match crate::linting::run_linter(&path).await {
                         Ok(results) => {
                             if results.is_empty() {
                                 app.add_system_message("✅ No linting issues found.".to_string());
                             } else {
-                                let errors = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Error)).count();
-                                let warnings = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Warning)).count();
+                                let errors = results
+                                    .iter()
+                                    .filter(|r| {
+                                        matches!(r.severity, crate::linting::Severity::Error)
+                                    })
+                                    .count();
+                                let warnings = results
+                                    .iter()
+                                    .filter(|r| {
+                                        matches!(r.severity, crate::linting::Severity::Warning)
+                                    })
+                                    .count();
                                 app.add_system_message(format!(
                                     "📊 Lint results: {} errors, {} warnings ({} total)",
-                                    errors, warnings, results.len()
+                                    errors,
+                                    warnings,
+                                    results.len()
                                 ));
                                 for r in results.iter().take(10) {
                                     app.add_system_message(format!(
                                         "{} {}:{} — {}: {}",
-                                        r.severity, r.file, r.line, r.code.as_deref().unwrap_or(""), r.message
+                                        r.severity,
+                                        r.file,
+                                        r.line,
+                                        r.code.as_deref().unwrap_or(""),
+                                        r.message
                                     ));
                                 }
                                 if results.len() > 10 {
-                                    app.add_system_message(format!("... and {} more issues", results.len() - 10));
+                                    app.add_system_message(format!(
+                                        "... and {} more issues",
+                                        results.len() - 10
+                                    ));
                                 }
                             }
                         }
@@ -3998,19 +4520,21 @@ async fn handle_slash_result(
                         }
                     }
                 }
-                "repo_map" => {
-                    match crate::repo_map::build_repo_map(&args) {
-                        Ok(map) => {
-                            let formatted = crate::repo_map::format_repo_map_compact(&map);
-                            app.add_system_message(format!("🗺️ Repo Map:\n{}", formatted));
-                        }
-                        Err(e) => {
-                            app.add_system_message(format!("❌ Repo map failed: {}", e));
-                        }
+                "repo_map" => match crate::repo_map::build_repo_map(&args) {
+                    Ok(map) => {
+                        let formatted = crate::repo_map::format_repo_map_compact(&map);
+                        app.add_system_message(format!("🗺️ Repo Map:\n{}", formatted));
                     }
-                }
+                    Err(e) => {
+                        app.add_system_message(format!("❌ Repo map failed: {}", e));
+                    }
+                },
                 "guardian" => {
-                    let target = if args.is_empty() { "recent".to_string() } else { args.to_string() };
+                    let target = if args.is_empty() {
+                        "recent".to_string()
+                    } else {
+                        args.to_string()
+                    };
                     app.add_system_message(format!("🛡️  Guardian reviewing: {}...", target));
                     let provider = app.provider.clone();
                     let model = app.model.clone();
@@ -4064,10 +4588,15 @@ async fn handle_slash_result(
                         }
                     });
 
-                    app.add_system_message("🤖 Headless task spawned in background (worktree isolated).".to_string());
+                    app.add_system_message(
+                        "🤖 Headless task spawned in background (worktree isolated).".to_string(),
+                    );
                 }
                 _ => {
-                    app.add_system_message(format!("⚠️ Tool '/{}' not yet wired in registry", name));
+                    app.add_system_message(format!(
+                        "⚠️ Tool '/{}' not yet wired in registry",
+                        name
+                    ));
                 }
             }
             Ok(true)
@@ -4090,12 +4619,18 @@ async fn handle_slash_result(
                     app.rebuild_system_prompt();
                     app.add_system_message(format!(
                         "📋 Plan mode: {}",
-                        if value { "ON — analyze only, no edits" } else { "OFF — full execution" }
+                        if value {
+                            "ON — analyze only, no edits"
+                        } else {
+                            "OFF — full execution"
+                        }
                     ));
                 }
                 "compact_context" => {
                     app.compact_context();
-                    app.add_system_message("🗜️ Context compacted — conversation summarized.".to_string());
+                    app.add_system_message(
+                        "🗜️ Context compacted — conversation summarized.".to_string(),
+                    );
                 }
                 "vim_mode" => {
                     app.vim_mode = !app.vim_mode;
@@ -4117,20 +4652,22 @@ async fn handle_slash_result(
                     ));
                 }
                 "architect_mode" => {
-                    let model = app.config.architect_model.clone().unwrap_or_else(|| app.config.default_model.clone());
+                    let model = app
+                        .config
+                        .architect_model
+                        .clone()
+                        .unwrap_or_else(|| app.config.default_model.clone());
                     app.model = model.clone();
-                    app.add_system_message(format!(
-                        "🏗️ Architect mode: using model {}",
-                        model
-                    ));
+                    app.add_system_message(format!("🏗️ Architect mode: using model {}", model));
                 }
                 "editor_mode" => {
-                    let model = app.config.editor_model.clone().unwrap_or_else(|| app.config.default_model.clone());
+                    let model = app
+                        .config
+                        .editor_model
+                        .clone()
+                        .unwrap_or_else(|| app.config.default_model.clone());
                     app.model = model.clone();
-                    app.add_system_message(format!(
-                        "📝 Editor mode: using model {}",
-                        model
-                    ));
+                    app.add_system_message(format!("📝 Editor mode: using model {}", model));
                 }
                 mode_str if mode_str.starts_with("effort:") => {
                     let level = mode_str.strip_prefix("effort:").unwrap_or("medium");
@@ -4155,21 +4692,27 @@ async fn handle_slash_result(
                         app.add_system_message(format!(
                             "📁 Auto-context mode: {} — {}",
                             if value { "ON" } else { "OFF" },
-                            if value { "relevant files will be auto-identified for each query" } else { "relevant files will not be auto-identified" }
+                            if value {
+                                "relevant files will be auto-identified for each query"
+                            } else {
+                                "relevant files will not be auto-identified"
+                            }
                         ));
                     } else {
-                        app.add_system_message("❌ Auto-context mode not available — no project path set.".to_string());
+                        app.add_system_message(
+                            "❌ Auto-context mode not available — no project path set.".to_string(),
+                        );
                     }
                 }
-                "ctx_clear" => {
-                    match app.smart_context.clear() {
-                        Ok(msg) => {
-                            app.rebuild_system_prompt();
-                            app.add_system_message(msg);
-                        }
-                        Err(e) => app.add_system_message(format!("❌ Failed to clear pinned context: {}", e)),
+                "ctx_clear" => match app.smart_context.clear() {
+                    Ok(msg) => {
+                        app.rebuild_system_prompt();
+                        app.add_system_message(msg);
                     }
-                }
+                    Err(e) => {
+                        app.add_system_message(format!("❌ Failed to clear pinned context: {}", e))
+                    }
+                },
                 "yolo" => {
                     app.yolo_mode = value;
                     app.add_system_message(format!(
@@ -4206,32 +4749,29 @@ async fn handle_slash_result(
                     let idx_str = &setting["batch_approve:".len()..];
                     if let Ok(idx) = idx_str.parse::<usize>()
                         && let Some(ref mut batch) = app.pending_batch
-                            && idx < batch.approved.len() {
-                                let name = batch.suggestions[idx].tool_name.clone();
-                                let args = batch.suggestions[idx].args.clone();
-                                batch.approved[idx] = true;
-                                app.add_system_message(format!(
-                                    "✅ Approved suggestion {}: {} {}",
-                                    idx, name, args
-                                ));
-                            }
+                        && idx < batch.approved.len()
+                    {
+                        let name = batch.suggestions[idx].tool_name.clone();
+                        let args = batch.suggestions[idx].args.clone();
+                        batch.approved[idx] = true;
+                        app.add_system_message(format!(
+                            "✅ Approved suggestion {}: {} {}",
+                            idx, name, args
+                        ));
+                    }
                 }
                 _ if setting.starts_with("batch_reject:") => {
                     let idx_str = &setting["batch_reject:".len()..];
                     if let Ok(idx) = idx_str.parse::<usize>()
                         && let Some(ref mut batch) = app.pending_batch
-                            && idx < batch.approved.len() {
-                                batch.approved[idx] = false;
-                                app.add_system_message(format!(
-                                    "❌ Rejected suggestion {}", idx
-                                ));
-                            }
+                        && idx < batch.approved.len()
+                    {
+                        batch.approved[idx] = false;
+                        app.add_system_message(format!("❌ Rejected suggestion {}", idx));
+                    }
                 }
                 _ => {
-                    app.add_system_message(format!(
-                        "🔧 Toggled {} = {}",
-                        setting, value
-                    ));
+                    app.add_system_message(format!("🔧 Toggled {} = {}", setting, value));
                 }
             }
             Ok(true)
@@ -4246,11 +4786,17 @@ async fn handle_slash_result(
                     app.add_system_message(format!("❌ {}", e));
                 } else {
                     // Apply profile to security engine config
-                    let new_config = app.profile_registry.apply_to_config(&app.security_engine.config);
-                    app.security_engine = crate::security::SecurityEngine::new(new_config).unwrap_or_else(|e| {
-                        app.add_system_message(format!("⚠️ Failed to apply security profile: {}", e));
-                        app.security_engine.clone()
-                    });
+                    let new_config = app
+                        .profile_registry
+                        .apply_to_config(&app.security_engine.config);
+                    app.security_engine = crate::security::SecurityEngine::new(new_config)
+                        .unwrap_or_else(|e| {
+                            app.add_system_message(format!(
+                                "⚠️ Failed to apply security profile: {}",
+                                e
+                            ));
+                            app.security_engine.clone()
+                        });
                     app.add_system_message(format!("🔒 {}", app.profile_registry.active_summary()));
                 }
             } else {
@@ -4274,11 +4820,16 @@ async fn handle_slash_result(
                 }
                 if name == "plugins" || name == "hooks" || name == "extensions" {
                     if let Some(ref registry) = app.plugin_registry {
-                        let plugins: Vec<String> = registry.list().iter().map(|p| p.name.clone()).collect();
+                        let plugins: Vec<String> =
+                            registry.list().iter().map(|p| p.name.clone()).collect();
                         if plugins.is_empty() {
                             app.add_system_message("🔌 No plugins loaded.".to_string());
                         } else {
-                            app.add_system_message(format!("🔌 Loaded plugins ({}): {}", plugins.len(), plugins.join(", ")));
+                            app.add_system_message(format!(
+                                "🔌 Loaded plugins ({}): {}",
+                                plugins.len(),
+                                plugins.join(", ")
+                            ));
                         }
                     } else {
                         app.add_system_message("🔌 Plugin registry not initialized.".to_string());
@@ -4322,7 +4873,10 @@ async fn handle_slash_result(
                                 app.add_system_message(format!("📦 Session {} unarchived. It will now appear in the active sessions list.", args));
                             }
                             Err(e) => {
-                                app.add_system_message(format!("❌ Failed to unarchive session: {}", e));
+                                app.add_system_message(format!(
+                                    "❌ Failed to unarchive session: {}",
+                                    e
+                                ));
                             }
                         }
                     }
@@ -4351,7 +4905,10 @@ async fn handle_slash_result(
                             }
                         }
                         Err(e) => {
-                            app.add_system_message(format!("❌ Failed to list archived sessions: {}", e));
+                            app.add_system_message(format!(
+                                "❌ Failed to list archived sessions: {}",
+                                e
+                            ));
                         }
                     }
                     return Ok(true);
@@ -4370,18 +4927,28 @@ async fn handle_slash_result(
                     let args = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim();
                     if args.is_empty() || args == "list" {
                         if let Some(ref registry) = app.plugin_registry {
-                            let plugins: Vec<String> = registry.list().iter().map(|p| format!("{} — {}", p.name, p.description)).collect();
+                            let plugins: Vec<String> = registry
+                                .list()
+                                .iter()
+                                .map(|p| format!("{} — {}", p.name, p.description))
+                                .collect();
                             if plugins.is_empty() {
-                                app.add_system_message("🔌 No plugins loaded. Create one with /plugin create <name>".to_string());
+                                app.add_system_message(
+                                    "🔌 No plugins loaded. Create one with /plugin create <name>"
+                                        .to_string(),
+                                );
                             } else {
-                                let mut lines = vec![format!("🔌 Loaded Plugins ({}):", plugins.len())];
+                                let mut lines =
+                                    vec![format!("🔌 Loaded Plugins ({}):", plugins.len())];
                                 for p in plugins {
                                     lines.push(format!("  • {}", p));
                                 }
                                 app.add_system_message(lines.join("\n"));
                             }
                         } else {
-                            app.add_system_message("🔌 Plugin registry not initialized.".to_string());
+                            app.add_system_message(
+                                "🔌 Plugin registry not initialized.".to_string(),
+                            );
                         }
                         return Ok(true);
                     }
@@ -4396,11 +4963,13 @@ async fn handle_slash_result(
     }
 }
 
-
 #[allow(dead_code)]
 async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> Result<()> {
     // SECURITY GATE: Check before executing suggested tool
-    match app.security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
+    match app
+        .security_engine
+        .check_tool_call(&suggestion.tool_name, &suggestion.args)
+    {
         crate::security::SecurityDecision::Allow => {}
         crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
             app.add_system_message(format!(
@@ -4414,8 +4983,12 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 "🚫 Security: Suggested tool '{}' blocked\n  Reason: {}",
                 suggestion.tool_name, reason
             ));
-            app.security_engine.audit(&suggestion.tool_name, &suggestion.args, false,
-                crate::security::RiskLevel::Critical, &reason
+            app.security_engine.audit(
+                &suggestion.tool_name,
+                &suggestion.args,
+                false,
+                crate::security::RiskLevel::Critical,
+                &reason,
             );
             return Ok(());
         }
@@ -4423,7 +4996,11 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
 
     // Auto-checkpoint before edit operations so user can /undo
     if is_edit_tool(&suggestion.tool_name) && crate::tools::checkpoint::in_git_repo() {
-        let cp_name = format!("pre-{}-{}", suggestion.tool_name, chrono::Local::now().format("%H%M%S"));
+        let cp_name = format!(
+            "pre-{}-{}",
+            suggestion.tool_name,
+            chrono::Local::now().format("%H%M%S")
+        );
         match crate::tools::checkpoint::save_checkpoint(&cp_name) {
             Ok(cp) => {
                 app.checkpoint_stack.push(cp);
@@ -4436,11 +5013,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
 
     let executor = AsyncToolExecutor::new();
     match executor
-        .execute_with_timeout(
-            suggestion.tool_name.clone(),
-            suggestion.args.clone(),
-            30000,
-        )
+        .execute_with_timeout(suggestion.tool_name.clone(), suggestion.args.clone(), 30000)
         .await
     {
         Ok((result, metrics)) => {
@@ -4451,7 +5024,9 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 Some(&format!("success={}", metrics.success)),
             );
 
-            let sanitized = app.security_engine.sanitize_output(&suggestion.tool_name, &result);
+            let sanitized = app
+                .security_engine
+                .sanitize_output(&suggestion.tool_name, &result);
             app.add_system_message(format!(
                 "Result: {} ({}ms)",
                 &sanitized[..sanitized.len().min(200)],
@@ -4470,32 +5045,31 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
             let _ = app.memory.save_tool_call(&tool_call);
             app.tool_calls_count += 1;
             app.security_engine.audit(
-                &suggestion.tool_name, &suggestion.args, true,
-                crate::security::RiskLevel::Low, "approved"
+                &suggestion.tool_name,
+                &suggestion.args,
+                true,
+                crate::security::RiskLevel::Low,
+                "approved",
             );
 
             app.model_messages.push(Message {
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
             app.model_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
 
-            let follow_up = ChatRequest::new(
-                app.model.clone(),
-                app.model_messages.clone(),
-                true,
-            );
+            let follow_up = ChatRequest::new(app.model.clone(), app.model_messages.clone(), true);
 
             match app.provider.chat_stream(follow_up).await {
                 Ok((chunks, _metrics)) => {
@@ -4509,28 +5083,37 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
             }
 
             // Auto-commit if enabled and tool was an edit
-            if app.config.auto_commit && is_edit_tool(&suggestion.tool_name)
-                && let Err(e) = auto_commit_changes(app).await {
-                    app.add_system_message(format!("⚠️ Auto-commit failed: {}", e));
-                }
+            if app.config.auto_commit
+                && is_edit_tool(&suggestion.tool_name)
+                && let Err(e) = auto_commit_changes(app).await
+            {
+                app.add_system_message(format!("⚠️ Auto-commit failed: {}", e));
+            }
 
             // Auto-run tests if enabled and tool was an edit
-            if app.config.auto_run_tests && is_edit_tool(&suggestion.tool_name)
-                && let Err(e) = auto_run_tests(app).await {
-                    app.add_system_message(format!("⚠️ Auto-test failed: {}", e));
-                }
+            if app.config.auto_run_tests
+                && is_edit_tool(&suggestion.tool_name)
+                && let Err(e) = auto_run_tests(app).await
+            {
+                app.add_system_message(format!("⚠️ Auto-test failed: {}", e));
+            }
 
             // Auto-lint if enabled and tool was an edit — feed errors back for auto-fix
-            if app.config.auto_lint && is_edit_tool(&suggestion.tool_name)
-                && let Err(e) = auto_lint_after_edit(app).await {
-                    app.add_system_message(format!("⚠️ Auto-lint failed: {}", e));
-                }
+            if app.config.auto_lint
+                && is_edit_tool(&suggestion.tool_name)
+                && let Err(e) = auto_lint_after_edit(app).await
+            {
+                app.add_system_message(format!("⚠️ Auto-lint failed: {}", e));
+            }
         }
         Err(e) => {
             app.add_system_message(format!("Tool execution failed: {}", e));
             app.security_engine.audit(
-                &suggestion.tool_name, &suggestion.args, false,
-                crate::security::RiskLevel::High, &e.to_string()
+                &suggestion.tool_name,
+                &suggestion.args,
+                false,
+                crate::security::RiskLevel::High,
+                &e.to_string(),
             );
         }
     }
@@ -4551,11 +5134,7 @@ async fn execute_approved_tool_task(
 ) -> Result<()> {
     let executor = AsyncToolExecutor::new();
     match executor
-        .execute_with_timeout_simple(
-            suggestion.tool_name.clone(),
-            suggestion.args.clone(),
-            30000,
-        )
+        .execute_with_timeout_simple(suggestion.tool_name.clone(), suggestion.args.clone(), 30000)
         .await
     {
         Ok(result) => {
@@ -4569,28 +5148,29 @@ async fn execute_approved_tool_task(
 
             // Follow-up request with tool result
             let mut follow_messages = model_messages.clone();
+            if let Some(last_assistant_idx) =
+                follow_messages.iter().rposition(|m| m.role == "assistant")
+            {
+                follow_messages.remove(last_assistant_idx);
+            }
             follow_messages.push(Message {
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
             follow_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
 
-            let follow_up = ChatRequest::new(
-                model.clone(),
-                follow_messages.clone(),
-                true,
-            );
+            let follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
 
             match provider.chat_stream(follow_up).await {
                 Ok((chunks, metrics)) => {
@@ -4601,13 +5181,13 @@ async fn execute_approved_tool_task(
                     });
 
                     // ── Handle chained tool suggestions in follow-up ──────────
-                    if !follow_content.starts_with("TOOL:") && !follow_content.starts_with("TOOL.") {
+                    if !follow_content.starts_with("TOOL:") && !follow_content.starts_with("TOOL.")
+                    {
                         let suggestions = crate::tools::detect_tool_suggestions(&follow_content);
                         if let Some(next) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
                             let next_tool = next.tool_name.clone();
                             let next_args = next.args.clone();
-                            match security_engine.check_tool_call(&next_tool, &next_args
-                            ) {
+                            match security_engine.check_tool_call(&next_tool, &next_args) {
                                 crate::security::SecurityDecision::Allow => {
                                     let _ = tx.send(StreamEvent::SystemMessage(format!(
                                         "🔧 Auto-executing: {} {} (low risk)",
@@ -4633,19 +5213,22 @@ async fn execute_approved_tool_task(
                                             let mut chained_messages = follow_messages.clone();
                                             chained_messages.push(Message {
                                                 role: "assistant".to_string(),
-                                                content: format!("TOOL:{} {}", next_tool, next_args),
+                                                content: format!(
+                                                    "TOOL:{} {}",
+                                                    next_tool, next_args
+                                                ),
                                                 images: None,
-                                            tool_call_id: None,
-                                            tool_calls: None,
-                                            reasoning_content: None,
+                                                tool_call_id: None,
+                                                tool_calls: None,
+                                                reasoning_content: None,
                                             });
                                             chained_messages.push(Message {
                                                 role: "user".to_string(),
                                                 content: format!("Tool result: {}", result),
                                                 images: None,
-                                            tool_call_id: None,
-                                            tool_calls: None,
-                                            reasoning_content: None,
+                                                tool_call_id: None,
+                                                tool_calls: None,
+                                                reasoning_content: None,
                                             });
                                             let chained_req = ChatRequest::new(
                                                 model.clone(),
@@ -4655,10 +5238,15 @@ async fn execute_approved_tool_task(
                                             match provider.chat_stream(chained_req).await {
                                                 Ok((chunks, _metrics)) => {
                                                     let chained_content = chunks.join("");
-                                                    let _ = tx.send(StreamEvent::FollowUp(chained_content));
+                                                    let _ = tx.send(StreamEvent::FollowUp(
+                                                        chained_content,
+                                                    ));
                                                 }
                                                 Err(e) => {
-                                                    let _ = tx.send(StreamEvent::Error(format!("Chained follow-up failed: {}", e)));
+                                                    let _ = tx.send(StreamEvent::Error(format!(
+                                                        "Chained follow-up failed: {}",
+                                                        e
+                                                    )));
                                                 }
                                             }
                                         }
@@ -4672,7 +5260,10 @@ async fn execute_approved_tool_task(
                                         }
                                     }
                                 }
-                                crate::security::SecurityDecision::RequireApproval { reason: _, risk_level } => {
+                                crate::security::SecurityDecision::RequireApproval {
+                                    reason: _,
+                                    risk_level,
+                                } => {
                                     let _ = tx.send(StreamEvent::SetPendingSuggestion(next));
                                     let _ = tx.send(StreamEvent::SystemMessage(format!(
                                         "🔒 Tool '{}' requires approval (risk: {:?}) — press y/n",
@@ -4708,7 +5299,6 @@ async fn execute_approved_tool_task(
     Ok(())
 }
 
-
 // ---------------------------------------------------------------------------
 // UI Drawing
 // ---------------------------------------------------------------------------
@@ -4735,8 +5325,22 @@ async fn generate_commit_message(app: &mut App) -> Result<String> {
     let request = ChatRequest {
         model: app.model.clone(),
         messages: vec![
-            Message { role: "system".to_string(), content: "You generate concise conventional commit messages.".to_string(), images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
-            Message { role: "user".to_string(), content: prompt, images: None, tool_call_id: None, tool_calls: None, reasoning_content: None },
+            Message {
+                role: "system".to_string(),
+                content: "You generate concise conventional commit messages.".to_string(),
+                images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            },
+            Message {
+                role: "user".to_string(),
+                content: prompt,
+                images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            },
         ],
         stream: false,
         temperature: Some(0.3),
@@ -4745,13 +5349,25 @@ async fn generate_commit_message(app: &mut App) -> Result<String> {
     };
 
     let response = match app.provider.chat(request).await {
-        Ok(r) => r.choices.first().map(|c| c.message.content.clone()).unwrap_or_else(|| "chore: update".to_string()),
+        Ok(r) => r
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_else(|| "chore: update".to_string()),
         Err(e) => return Err(anyhow::anyhow!("LLM error: {}", e)),
     };
 
-    let msg = response.lines().next().unwrap_or("chore: update").trim().to_string();
+    let msg = response
+        .lines()
+        .next()
+        .unwrap_or("chore: update")
+        .trim()
+        .to_string();
     let msg = msg.trim_start_matches("Commit message:").trim().to_string();
-    let msg = msg.trim_start_matches('"').trim_end_matches('"').to_string();
+    let msg = msg
+        .trim_start_matches('"')
+        .trim_end_matches('"')
+        .to_string();
 
     if msg.is_empty() {
         Ok("chore: update".to_string())
@@ -4783,14 +5399,21 @@ async fn auto_commit_changes(app: &mut App) -> Result<()> {
     let commit_msg = match generate_commit_message(app).await {
         Ok(msg) => msg,
         Err(_) => {
-            format!("openshark: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+            format!(
+                "openshark: auto-commit at {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+            )
         }
     };
 
     // Commit
     match git_tool.execute(&format!("commit {}", commit_msg)) {
         Ok(output) => {
-            app.add_system_message(format!("🤖 Auto-committed: {}\n```\n{}\n```", commit_msg, output.trim()));
+            app.add_system_message(format!(
+                "🤖 Auto-committed: {}\n```\n{}\n```",
+                commit_msg,
+                output.trim()
+            ));
         }
         Err(e) => {
             return Err(anyhow::anyhow!("Git commit failed: {}", e));
@@ -4814,8 +5437,13 @@ async fn auto_run_tests(app: &mut App) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to run test command: {} — {}", cmd, e))?;
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            format!("Test command: {}\n\nstdout:\n{}\n\nstderr:\n{}\n\nExit code: {:?}",
-                cmd, stdout, stderr, output.status.code())
+            format!(
+                "Test command: {}\n\nstdout:\n{}\n\nstderr:\n{}\n\nExit code: {:?}",
+                cmd,
+                stdout,
+                stderr,
+                output.status.code()
+            )
         }
         None => {
             // Auto-detect and run
@@ -4829,7 +5457,10 @@ async fn auto_run_tests(app: &mut App) -> Result<()> {
         "✅ PASSED"
     };
 
-    app.add_system_message(format!("🧪 Auto-test results: {}\n```\n{}\n```", status, result));
+    app.add_system_message(format!(
+        "🧪 Auto-test results: {}\n```\n{}\n```",
+        status, result
+    ));
     Ok(())
 }
 
@@ -4839,7 +5470,13 @@ async fn create_worktree(project_path: &str, task: &str) -> anyhow::Result<Strin
     // Sanitize task name for directory
     let sanitized: String = task
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(40)
         .collect();
     let branch_name = format!("openshark-headless-{}", sanitized);
@@ -4901,14 +5538,25 @@ async fn remove_worktree(project_path: &str, worktree_path: &str) -> anyhow::Res
 /// If lint errors are found, they're added as a system message so the agent
 /// can see them and auto-fix in the next turn.
 async fn auto_lint_after_edit(app: &mut App) -> Result<()> {
-    let path = app.config.filesystem.working_directory.as_deref().unwrap_or(".");
+    let path = app
+        .config
+        .filesystem
+        .working_directory
+        .as_deref()
+        .unwrap_or(".");
     match crate::linting::run_linter(path).await {
         Ok(results) => {
             if results.is_empty() {
                 app.add_system_message("✅ Lint: no issues found.".to_string());
             } else {
-                let errors = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Error)).count();
-                let warnings = results.iter().filter(|r| matches!(r.severity, crate::linting::Severity::Warning)).count();
+                let errors = results
+                    .iter()
+                    .filter(|r| matches!(r.severity, crate::linting::Severity::Error))
+                    .count();
+                let warnings = results
+                    .iter()
+                    .filter(|r| matches!(r.severity, crate::linting::Severity::Warning))
+                    .count();
 
                 // Build a structured message the agent can parse and fix
                 let mut msg = format!(
@@ -4918,7 +5566,9 @@ async fn auto_lint_after_edit(app: &mut App) -> Result<()> {
                 for r in results.iter().take(15) {
                     msg.push_str(&format!(
                         "  {} {}:{} — {}: {}\n",
-                        r.severity, r.file, r.line,
+                        r.severity,
+                        r.file,
+                        r.line,
                         r.code.as_deref().unwrap_or("-"),
                         r.message
                     ));
@@ -4946,10 +5596,19 @@ fn format_progress(progress: &crate::agent::coding::AgentProgress) -> String {
         AgentProgress::PlanGenerated { description, steps } => {
             format!("📋 Plan generated ({} steps): {}", steps, description)
         }
-        AgentProgress::StepStarted { idx, total, tool, args } => {
+        AgentProgress::StepStarted {
+            idx,
+            total,
+            tool,
+            args,
+        } => {
             format!("🔧 Step {}/{}: {} {}", idx, total, tool, args)
         }
-        AgentProgress::StepCompleted { idx, output, verified } => {
+        AgentProgress::StepCompleted {
+            idx,
+            output,
+            verified,
+        } => {
             let status = if *verified { "✅" } else { "⚠️" };
             format!(
                 "{} Step {} completed | verified={} | output: {}",
@@ -4962,7 +5621,11 @@ fn format_progress(progress: &crate::agent::coding::AgentProgress) -> String {
         AgentProgress::TestsRunning { framework } => {
             format!("🧪 Running {} tests...", framework)
         }
-        AgentProgress::TestsCompleted { passed, failed, output } => {
+        AgentProgress::TestsCompleted {
+            passed,
+            failed,
+            output,
+        } => {
             format!("🧪 Tests: {} passed, {} failed\n{}", passed, failed, output)
         }
         AgentProgress::LintRunning { tool } => {

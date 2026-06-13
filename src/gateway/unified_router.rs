@@ -32,10 +32,7 @@ impl UnifiedRouter {
     /// Handle a Discord event directly.
     #[cfg(feature = "discord")]
     #[allow(dead_code)]
-    pub async fn handle_discord_event(
-        &mut self,
-        event: crate::gateway::discord::DiscordEvent,
-    ) {
+    pub async fn handle_discord_event(&mut self, event: crate::gateway::discord::DiscordEvent) {
         match event {
             crate::gateway::discord::DiscordEvent::UserMessage {
                 channel_id,
@@ -57,7 +54,9 @@ impl UnifiedRouter {
                 interaction,
                 reply_tx,
             } => {
-                self.inner.handle_discord_interaction(interaction, reply_tx).await;
+                self.inner
+                    .handle_discord_interaction(interaction, reply_tx)
+                    .await;
             }
             crate::gateway::discord::DiscordEvent::Ready => {
                 info!("Discord gateway ready");

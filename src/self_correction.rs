@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-use crate::providers::{Provider, ChatRequest, Message};
+use crate::providers::{ChatRequest, Message, Provider};
 use anyhow::Result;
 
 /// Configuration for self-correction behavior.
@@ -56,16 +56,14 @@ where
         });
     }
 
-    let mut history: Vec<Message> = vec![
-        Message {
-            role: "system".to_string(),
-            content: system_prompt.to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        },
-    ];
+    let mut history: Vec<Message> = vec![Message {
+        role: "system".to_string(),
+        content: system_prompt.to_string(),
+        images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
+    }];
 
     for attempt in 1..=config.max_retries {
         match attempt_fn().await {

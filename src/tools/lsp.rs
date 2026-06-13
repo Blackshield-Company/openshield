@@ -118,9 +118,9 @@ fn format_symbols(symbols: &[Symbol]) -> String {
 // Async variant using persistent LspManager connections
 // ---------------------------------------------------------------------------
 
-use async_trait::async_trait;
 use super::AsyncTool;
 use crate::lsp::LspManager;
+use async_trait::async_trait;
 use std::sync::Arc;
 
 pub struct LspAsyncTool {
@@ -135,7 +135,9 @@ impl LspAsyncTool {
 
 #[async_trait]
 impl AsyncTool for LspAsyncTool {
-    fn name(&self) -> &str { "lsp" }
+    fn name(&self) -> &str {
+        "lsp"
+    }
     fn description(&self) -> &str {
         "LSP symbol operations: symbols, definition, hover, diagnostics. Usage: lsp <symbols|def|hover|diagnostics> <file> [line] [col]"
     }
@@ -166,7 +168,10 @@ impl AsyncTool for LspAsyncTool {
             for (uri, diags) in &all {
                 lines.push(format!("--- {} ({} issues) ---", uri, diags.len()));
                 for d in diags {
-                    lines.push(format!("  [{}] {}:{}:{} - {}", d.severity, d.file, d.line, d.character, d.message));
+                    lines.push(format!(
+                        "  [{}] {}:{}:{} - {}",
+                        d.severity, d.file, d.line, d.character, d.message
+                    ));
                 }
             }
             return Ok(lines.join("\n"));
@@ -179,15 +184,24 @@ impl AsyncTool for LspAsyncTool {
             if diags.is_empty() {
                 return Ok(format!("No diagnostics for {}.", file_path));
             }
-            let lines: Vec<String> = diags.iter()
-                .map(|d| format!("[{}] {}:{}:{} - {}", d.severity, d.file, d.line, d.character, d.message))
+            let lines: Vec<String> = diags
+                .iter()
+                .map(|d| {
+                    format!(
+                        "[{}] {}:{}:{} - {}",
+                        d.severity, d.file, d.line, d.character, d.message
+                    )
+                })
                 .collect();
             return Ok(lines.join("\n"));
         }
 
         // For other commands, get/create a server
         let (lsp_cmd, lsp_args, lang_id) = LspManager::detect_server(file_path);
-        let server = self.manager.get_or_create_server(lang_id, lsp_cmd, lsp_args).await?;
+        let server = self
+            .manager
+            .get_or_create_server(lang_id, lsp_cmd, lsp_args)
+            .await?;
 
         let content = std::fs::read_to_string(file_path)
             .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file_path, e))?;
@@ -229,8 +243,15 @@ fn format_symbols_async(symbols: &[crate::lsp::Symbol]) -> String {
     }
     let mut lines = Vec::new();
     for s in symbols {
-        let detail = s.detail.as_ref().map(|d| format!(" ({})", d)).unwrap_or_default();
-        lines.push(format!("{}:{}:{} | {}{} | {}", s.file, s.line, s.character, s.name, detail, s.kind));
+        let detail = s
+            .detail
+            .as_ref()
+            .map(|d| format!(" ({})", d))
+            .unwrap_or_default();
+        lines.push(format!(
+            "{}:{}:{} | {}{} | {}",
+            s.file, s.line, s.character, s.name, detail, s.kind
+        ));
     }
     lines.join("\n")
 }

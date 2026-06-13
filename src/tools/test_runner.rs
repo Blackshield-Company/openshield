@@ -378,11 +378,18 @@ fn parse_cargo_output(raw: &str, result: &mut TestResultSet) {
                 let parts: Vec<&str> = file_line.rsplitn(3, ':').collect();
                 // parts: ["5", "42", "src/file.rs"] (reversed from right)
                 let line_num = parts.get(1).and_then(|l| l.trim().parse::<u32>().ok());
-                let file = parts.get(2).map(|f| f.to_string()).or_else(|| parts.get(1).map(|f| f.to_string()));
+                let file = parts
+                    .get(2)
+                    .map(|f| f.to_string())
+                    .or_else(|| parts.get(1).map(|f| f.to_string()));
                 let msg = rest.split("'").nth(1).unwrap_or("").to_string();
 
                 // Add or update failure
-                if let Some(failure) = result.failures.iter_mut().find(|f| f.test_name == test_name) {
+                if let Some(failure) = result
+                    .failures
+                    .iter_mut()
+                    .find(|f| f.test_name == test_name)
+                {
                     failure.message = msg;
                     failure.file = file;
                     failure.line = line_num;
@@ -416,7 +423,10 @@ fn parse_pytest_output(raw: &str, result: &mut TestResultSet) {
             // Duration
             if let Some(idx) = line.rfind("in ") {
                 let dur_str = &line[idx + 3..];
-                let dur_num: String = dur_str.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+                let dur_num: String = dur_str
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .collect();
                 result.duration_secs = dur_num.parse().ok();
             }
             result.success = result.failed == 0;
@@ -461,13 +471,18 @@ fn parse_jest_output(raw: &str, result: &mut TestResultSet) {
         }
         // Jest time: "Time: 3.456s"
         if let Some(rest) = line.strip_prefix("Time:") {
-            let dur: String = rest.trim().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            let dur: String = rest
+                .trim()
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
             result.duration_secs = dur.parse().ok();
         }
         // Parse FAIL lines
         let name = if let Some(rest) = line.strip_prefix("FAIL ") {
             Some(rest)
-        } else if line.starts_with("  ✕ ") || line.starts_with("  ✗ ") || line.starts_with("  × ") {
+        } else if line.starts_with("  ✕ ") || line.starts_with("  ✗ ") || line.starts_with("  × ")
+        {
             Some(line.trim_start_matches([' ', '✕', '✗', '×']).trim_start())
         } else {
             None
@@ -518,7 +533,9 @@ fn extract_count(text: &str, label: &str) -> Option<usize> {
     let pattern = format!(" {}", label);
     if let Some(idx) = text.find(&pattern) {
         let before = &text[..idx];
-        let num_str: String = before.chars().rev()
+        let num_str: String = before
+            .chars()
+            .rev()
             .take_while(|c| c.is_ascii_digit())
             .collect::<String>()
             .chars()

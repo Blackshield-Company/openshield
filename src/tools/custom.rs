@@ -86,7 +86,10 @@ impl Tool for CustomTool {
             result.push_str(&String::from_utf8_lossy(&output.stdout));
         }
         if !output.stderr.is_empty() {
-            result.push_str(&format!("\n[stderr]: {}", String::from_utf8_lossy(&output.stderr)));
+            result.push_str(&format!(
+                "\n[stderr]: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         if !output.status.success() {
             anyhow::bail!(

@@ -65,16 +65,12 @@ fn parse_duckduckgo_results(query: &str, body: &str) -> Result<String> {
     use regex::Regex;
 
     // Extract title and link from result__a
-    let title_re = Regex::new(
-        r#"class="result__a" href="([^"]+)"[^>]*>([^<]+)"#,
-    )
-    .unwrap();
+    let title_re = Regex::new(r#"class="result__a" href="([^"]+)"[^>]*>([^<]+)"#)
+        .expect("DuckDuckGo title regex compilation failed");
 
     // Extract snippet from result__snippet
-    let snippet_re = Regex::new(
-        r#"class="result__snippet"[^>]*>([^<]+)"#,
-    )
-    .unwrap();
+    let snippet_re = Regex::new(r#"class="result__snippet"[^>]*>([^<]+)"#)
+        .expect("DuckDuckGo snippet regex compilation failed");
 
     let titles: Vec<(String, String)> = title_re
         .captures_iter(body)
@@ -120,9 +116,10 @@ fn parse_duckduckgo_results(query: &str, body: &str) -> Result<String> {
     for (i, title) in titles.iter().enumerate().take(max) {
         lines.push(format!("{}. {}\n   {}", i + 1, title.0, title.1));
         if let Some(snippet) = snippets.get(i)
-            && !snippet.is_empty() {
-                lines.push(format!("   {}", snippet));
-            }
+            && !snippet.is_empty()
+        {
+            lines.push(format!("   {}", snippet));
+        }
     }
 
     Ok(lines.join("\n"))
@@ -180,16 +177,17 @@ impl CdpSession {
                 let v: serde_json::Value =
                     serde_json::from_str(&text).context("CDP parse failed")?;
                 if let Some(msg_id) = v.get("id").and_then(|i| i.as_u64())
-                    && msg_id == id {
-                        return Ok(v);
-                    }
+                    && msg_id == id
+                {
+                    return Ok(v);
+                }
             }
         }
     }
 }
 
 fn get_cdp_session() -> Result<std::sync::MutexGuard<'static, Option<CdpSession>>> {
-    let mut guard = CDP_SESSION.lock().unwrap();
+    let mut guard = CDP_SESSION.lock().expect("CDP session mutex poisoned");
     if guard.is_none() {
         let port = 9222u16 + (std::process::id() % 100) as u16;
         let _child = std::process::Command::new(chromium_path())

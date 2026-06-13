@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+#[cfg(feature = "web-api")]
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tracing::info;
@@ -17,12 +19,12 @@ mod diff;
 mod doctor;
 mod evolution;
 mod gateway;
+mod guardian;
 mod headless;
-mod integrations;
 mod image_utils;
+mod integrations;
 mod json_output;
 mod linting;
-mod guardian;
 mod lsp;
 mod mcp;
 mod mcp_server;
@@ -30,8 +32,8 @@ mod memory;
 mod plugins;
 mod providers;
 mod repo_map;
-mod sandbox;
 mod router;
+mod sandbox;
 mod security;
 mod self_correction;
 mod self_improve;
@@ -303,7 +305,9 @@ async fn main() -> anyhow::Result<()> {
                                     interaction,
                                     reply_tx,
                                 } => {
-                                    router.handle_discord_interaction(interaction, reply_tx).await;
+                                    router
+                                        .handle_discord_interaction(interaction, reply_tx)
+                                        .await;
                                     continue;
                                 }
                                 crate::gateway::discord::DiscordEvent::Ready => {
@@ -791,7 +795,11 @@ async fn main() -> anyhow::Result<()> {
                 println!();
             }
         }
-        Some(Commands::Chat { message, model, file }) => {
+        Some(Commands::Chat {
+            message,
+            model,
+            file,
+        }) => {
             if message.is_empty() && file.is_none() {
                 println!("🦈 One-shot Chat");
                 println!("Usage: openshark chat 'your message here'");
@@ -803,8 +811,15 @@ async fn main() -> anyhow::Result<()> {
                     .find_provider_for_model(model_name)
                     .unwrap_or_else(|| {
                         println!("⚠️  Model '{}' not found, using default", model_name);
-                        let (n, p) = config.providers.iter().next().unwrap();
-                        (n.clone(), p.clone())
+                        match config.providers.iter().next() {
+                            Some((n, p)) => (n.clone(), p.clone()),
+                            None => {
+                                eprintln!(
+                                    "❌ No providers configured. Run `openshark setup` first."
+                                );
+                                std::process::exit(1);
+                            }
+                        }
                     });
 
                 println!("🦈 Chat with {} (via {})", model_name, provider_name);
@@ -846,7 +861,10 @@ async fn main() -> anyhow::Result<()> {
                     match std::fs::read_to_string(path) {
                         Ok(content) => {
                             println!("📎 Attached file: {} ({} bytes)", path, content.len());
-                            user_content.push_str(&format!("\n\n--- File: {} ---\n```\n{}\n```", path, content));
+                            user_content.push_str(&format!(
+                                "\n\n--- File: {} ---\n```\n{}\n```",
+                                path, content
+                            ));
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to read file {}: {}", path, e);
@@ -1273,18 +1291,14 @@ async fn main() -> anyhow::Result<()> {
                     println!("  Install Hermes Agent to enable bridge.");
                 }
             }
-            "sync" => {
-                match integrations::hermes::sync_pull("~/.hermes") {
-                    Ok(result) => println!("✅ {}", result),
-                    Err(e) => println!("❌ Sync failed: {}", e),
-                }
-            }
-            "push" => {
-                match integrations::hermes::sync_push("~/.hermes") {
-                    Ok(result) => println!("✅ {}", result),
-                    Err(e) => println!("❌ Push failed: {}", e),
-                }
-            }
+            "sync" => match integrations::hermes::sync_pull("~/.hermes") {
+                Ok(result) => println!("✅ {}", result),
+                Err(e) => println!("❌ Sync failed: {}", e),
+            },
+            "push" => match integrations::hermes::sync_push("~/.hermes") {
+                Ok(result) => println!("✅ {}", result),
+                Err(e) => println!("❌ Push failed: {}", e),
+            },
             _ => {
                 println!("🦈 Hermes Commands");
                 println!("  openshark hermes status - Show bridge status");
@@ -1292,7 +1306,15 @@ async fn main() -> anyhow::Result<()> {
                 println!("  openshark hermes push   - Push skills to Hermes");
             }
         },
-        Some(Commands::Headless { task, yolo, json, timeout, max_turns, model, output }) => {
+        Some(Commands::Headless {
+            task,
+            yolo,
+            json,
+            timeout,
+            max_turns,
+            model,
+            output,
+        }) => {
             println!("🦈 OpenShark Headless Mode");
             let mut cfg = config.clone();
             if let Some(ref m) = model {
@@ -1314,7 +1336,10 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
-            if let Err(e) = crate::headless::run_headless(headless_config, provider, cfg.default_model, None).await {
+            if let Err(e) =
+                crate::headless::run_headless(headless_config, provider, cfg.default_model, None)
+                    .await
+            {
                 eprintln!("❌ Headless run failed: {}", e);
                 std::process::exit(1);
             }
@@ -1339,9 +1364,15 @@ async fn main() -> anyhow::Result<()> {
                     match crate::linting::run_linter(&path).await {
                         Ok(results) => {
                             for result in &results {
-                                println!("[{}] {}:{} — {}", result.severity, result.file, result.line, result.message);
+                                println!(
+                                    "[{}] {}:{} — {}",
+                                    result.severity, result.file, result.line, result.message
+                                );
                             }
-                            if results.iter().any(|r| r.severity == crate::linting::Severity::Error) {
+                            if results
+                                .iter()
+                                .any(|r| r.severity == crate::linting::Severity::Error)
+                            {
                                 std::process::exit(1);
                             }
                         }
@@ -1382,7 +1413,11 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Some(Commands::Watch { path, cmd, debounce }) => {
+        Some(Commands::Watch {
+            path,
+            cmd,
+            debounce,
+        }) => {
             let command = match cmd.as_str() {
                 "test" => crate::watch::WatchCommand::Test,
                 "lint" => crate::watch::WatchCommand::Lint,
@@ -1405,7 +1440,9 @@ async fn main() -> anyhow::Result<()> {
                 println!("Usage: openshark profile <name>");
                 println!();
                 println!("Profiles are stored in ~/.config/openshark/profiles/");
-                println!("Each profile is a separate config.json with its own model, provider, and settings.");
+                println!(
+                    "Each profile is a separate config.json with its own model, provider, and settings."
+                );
             } else {
                 let profile_dir = dirs::config_dir()
                     .map(|d| d.join("openshark").join("profiles"))
@@ -1413,11 +1450,17 @@ async fn main() -> anyhow::Result<()> {
                 let profile_path = profile_dir.join(format!("{}.json", name));
                 if profile_path.exists() {
                     println!("✅ Profile '{}' found at {}", name, profile_path.display());
-                    println!("   To use: set OPENSHARK_PROFILE={} or use --profile flag (coming soon)", name);
+                    println!(
+                        "   To use: set OPENSHARK_PROFILE={} or use --profile flag (coming soon)",
+                        name
+                    );
                 } else {
                     println!("📭 Profile '{}' not found.", name);
                     println!("   Create one by copying your config:");
-                    println!("   cp ~/.config/openshark/config.json {}", profile_path.display());
+                    println!(
+                        "   cp ~/.config/openshark/config.json {}",
+                        profile_path.display()
+                    );
                 }
             }
         }

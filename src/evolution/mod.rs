@@ -108,7 +108,7 @@ impl EvolutionEngine {
 
         // Load adaptive state from memory or use defaults
         let adaptive_state = Arc::new(Mutex::new(
-            Self::load_adaptive_state(&memory.lock().unwrap()).unwrap_or_default(),
+            Self::load_adaptive_state(&memory.lock().expect("Evolution memory mutex poisoned")).unwrap_or_default(),
         ));
 
         Ok(Self {
@@ -191,9 +191,10 @@ impl EvolutionEngine {
             _ => {
                 // Fallback: try natural language query
                 if let Ok(answer) = injector.answer_natural_query(query)
-                    && !answer.contains("couldn't find") {
-                        return format!("From past conversations:\n{}", answer);
-                    }
+                    && !answer.contains("couldn't find")
+                {
+                    return format!("From past conversations:\n{}", answer);
+                }
                 String::new()
             }
         }

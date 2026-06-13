@@ -94,7 +94,9 @@ impl CheckpointStack {
 
     /// Undo: pop from undo, restore via git, push to redo.
     pub fn undo(&mut self) -> Result<String> {
-        let cp = self.undo_stack.pop()
+        let cp = self
+            .undo_stack
+            .pop()
             .ok_or_else(|| anyhow::anyhow!("No checkpoints to undo"))?;
         restore_checkpoint(&cp)?;
         self.redo_stack.push(cp.clone());
@@ -103,7 +105,9 @@ impl CheckpointStack {
 
     /// Redo: pop from redo, restore via git, push back to undo.
     pub fn redo(&mut self) -> Result<String> {
-        let cp = self.redo_stack.pop()
+        let cp = self
+            .redo_stack
+            .pop()
             .ok_or_else(|| anyhow::anyhow!("No checkpoints to redo"))?;
         restore_checkpoint(&cp)?;
         self.undo_stack.push(cp.clone());
@@ -154,9 +158,10 @@ pub fn stash_checkpoint(name: &str) -> Result<String> {
     // Find the first stash with our message
     for line in list_str.lines() {
         if line.contains(&msg)
-            && let Some(ref_part) = line.split(':').next() {
-                return Ok(ref_part.trim().to_string());
-            }
+            && let Some(ref_part) = line.split(':').next()
+        {
+            return Ok(ref_part.trim().to_string());
+        }
     }
 
     // Fallback

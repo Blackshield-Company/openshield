@@ -37,18 +37,12 @@ impl MouseState {
 
     pub fn enable(&mut self) {
         self.enabled = true;
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::event::EnableMouseCapture
-        );
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
     }
 
     pub fn disable(&mut self) {
         self.enabled = false;
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::event::DisableMouseCapture
-        );
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     }
 }
 
@@ -91,8 +85,14 @@ pub fn translate_mouse_event(event: MouseEvent, _app: &crate::tui::App) -> Mouse
         }
         MouseEventKind::ScrollUp => MouseAction::ScrollUp,
         MouseEventKind::ScrollDown => MouseAction::ScrollDown,
-        MouseEventKind::Drag(_) => MouseAction::DragStart { x: event.column, y: event.row },
-        MouseEventKind::Up(MouseButton::Left) => MouseAction::DragEnd { x: event.column, y: event.row },
+        MouseEventKind::Drag(_) => MouseAction::DragStart {
+            x: event.column,
+            y: event.row,
+        },
+        MouseEventKind::Up(MouseButton::Left) => MouseAction::DragEnd {
+            x: event.column,
+            y: event.row,
+        },
         _ => MouseAction::None,
     }
 }
@@ -100,8 +100,11 @@ pub fn translate_mouse_event(event: MouseEvent, _app: &crate::tui::App) -> Mouse
 /// Copy the given text to the system clipboard using arboard.
 pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     use arboard::Clipboard;
-    let mut clipboard = Clipboard::new().map_err(|e| anyhow::anyhow!("Clipboard access failed: {}", e))?;
-    clipboard.set_text(text).map_err(|e| anyhow::anyhow!("Clipboard write failed: {}", e))?;
+    let mut clipboard =
+        Clipboard::new().map_err(|e| anyhow::anyhow!("Clipboard access failed: {}", e))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| anyhow::anyhow!("Clipboard write failed: {}", e))?;
     Ok(())
 }
 
@@ -238,20 +241,23 @@ pub fn extract_selection_text_wrapped(
 /// Estimate how many terminal rows a message will occupy with word wrapping.
 fn estimate_wrapped_lines(content: &str, term_width: usize) -> usize {
     let width = term_width.max(1);
-    content.lines().map(|line| {
-        let mut cols = 0usize;
-        let mut rows = 1usize;
-        for ch in line.chars() {
-            let ch_width = ch.width().unwrap_or(1);
-            if cols + ch_width > width {
-                rows += 1;
-                cols = ch_width;
-            } else {
-                cols += ch_width;
+    content
+        .lines()
+        .map(|line| {
+            let mut cols = 0usize;
+            let mut rows = 1usize;
+            for ch in line.chars() {
+                let ch_width = ch.width().unwrap_or(1);
+                if cols + ch_width > width {
+                    rows += 1;
+                    cols = ch_width;
+                } else {
+                    cols += ch_width;
+                }
             }
-        }
-        rows
-    }).sum()
+            rows
+        })
+        .sum()
 }
 
 pub fn handle_mouse_event(
@@ -267,12 +273,16 @@ pub fn handle_mouse_event(
         MouseEventKind::Down(MouseButton::Left) => {
             if chat_area.contains(ratatui::layout::Position::new(col, row)) {
                 let relative_row = row - chat_area.y;
-                MouseAction::ChatClick { y: relative_row as usize }
+                MouseAction::ChatClick {
+                    y: relative_row as usize,
+                }
             } else if input_area.contains(ratatui::layout::Position::new(col, row)) {
                 MouseAction::InputClick
             } else if sidebar_area.contains(ratatui::layout::Position::new(col, row)) {
                 let relative_row = row - sidebar_area.y;
-                MouseAction::SidebarClick { y: relative_row as usize }
+                MouseAction::SidebarClick {
+                    y: relative_row as usize,
+                }
             } else {
                 MouseAction::None
             }

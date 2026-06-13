@@ -94,25 +94,27 @@ pub fn run_watch(config: WatchConfig) -> Result<()> {
     }
 }
 
-fn scan_dir(
-    dir: &Path,
-    out: &mut HashMap<std::path::PathBuf, SystemTime>,
-) -> Result<()> {
+fn scan_dir(dir: &Path, out: &mut HashMap<std::path::PathBuf, SystemTime>) -> Result<()> {
     if !dir.is_dir() {
         return Ok(());
     }
     for entry in std::fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            if path.file_name().map(|n| n == "target" || n == ".git").unwrap_or(false) {
+            if path
+                .file_name()
+                .map(|n| n == "target" || n == ".git")
+                .unwrap_or(false)
+            {
                 continue;
             }
             scan_dir(&path, out)?;
         } else {
             if let Ok(meta) = entry.metadata()
-                && let Ok(modified) = meta.modified() {
-                    out.insert(path, modified);
-                }
+                && let Ok(modified) = meta.modified()
+            {
+                out.insert(path, modified);
+            }
         }
     }
     Ok(())

@@ -467,12 +467,13 @@ fn generate_recommendations(
         });
 
         if let (Some(best), Some(worst)) = (best, worst)
-            && best.success_rate - worst.success_rate > 20.0 {
-                recommendations.push(format!(
+            && best.success_rate - worst.success_rate > 20.0
+        {
+            recommendations.push(format!(
                     "Model '{}' outperforms '{}' by {:.1} percentage points in tool success rate. Consider routing more tasks to '{}'.",
                     best.model, worst.model, best.success_rate - worst.success_rate, best.model
                 ));
-            }
+        }
     }
 
     for trend in model_trends {
@@ -602,12 +603,14 @@ fn generate_config_optimizations(
         });
 
         if let Some(best) = best_prompt
-            && best.success_rate > 70.0 && best.total_calls >= 5 {
-                optimizations.push(format!(
-                    "Most effective system prompt achieves {:.1}% success rate over {} calls",
-                    best.success_rate, best.total_calls
-                ));
-            }
+            && best.success_rate > 70.0
+            && best.total_calls >= 5
+        {
+            optimizations.push(format!(
+                "Most effective system prompt achieves {:.1}% success rate over {} calls",
+                best.success_rate, best.total_calls
+            ));
+        }
     }
 
     optimizations

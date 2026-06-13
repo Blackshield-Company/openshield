@@ -37,9 +37,10 @@ impl SmartContext {
     pub fn load(session_id: &str) -> Self {
         let path = Self::storage_path(session_id);
         if let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(ctx) = serde_json::from_str::<SmartContext>(&data) {
-                return ctx;
-            }
+            && let Ok(ctx) = serde_json::from_str::<SmartContext>(&data)
+        {
+            return ctx;
+        }
         Self::new(session_id)
     }
 
@@ -77,7 +78,8 @@ impl SmartContext {
     /// Unpin a specific file.
     pub fn unpin(&mut self, path: &str) -> Result<String> {
         let before = self.pinned.len();
-        self.pinned.retain(|f| !f.path.ends_with(path) && f.path != path);
+        self.pinned
+            .retain(|f| !f.path.ends_with(path) && f.path != path);
         let removed = before - self.pinned.len();
         self.save()?;
         if removed > 0 {
@@ -102,7 +104,11 @@ impl SmartContext {
         }
         let mut lines = vec![format!("📍 Pinned Files ({}):", self.pinned.len())];
         for (i, file) in self.pinned.iter().enumerate() {
-            let note_str = file.note.as_ref().map(|n| format!(" — {}", n)).unwrap_or_default();
+            let note_str = file
+                .note
+                .as_ref()
+                .map(|n| format!(" — {}", n))
+                .unwrap_or_default();
             lines.push(format!("  {}. {}{}", i + 1, file.path, note_str));
         }
         lines
@@ -114,16 +120,16 @@ impl SmartContext {
             return String::new();
         }
 
-        let mut lines = vec![
-            "\n📌 PINNED CONTEXT FILES:\n".to_string(),
-            "─".repeat(50),
-        ];
+        let mut lines = vec!["\n📌 PINNED CONTEXT FILES:\n".to_string(), "─".repeat(50)];
 
         for file in &self.pinned {
             if let Ok(content) = std::fs::read_to_string(&file.path) {
                 let lang = detect_lang(&file.path);
                 let snippet: String = content.lines().take(30).collect::<Vec<_>>().join("\n");
-                lines.push(format!("\n  📄 {}\n  ```{}\n{}\n  ```", file.path, lang, snippet));
+                lines.push(format!(
+                    "\n  📄 {}\n  ```{}\n{}\n  ```",
+                    file.path, lang, snippet
+                ));
             } else {
                 lines.push(format!("\n  📄 {} (unreadable)", file.path));
             }
@@ -143,7 +149,10 @@ impl SmartContext {
 }
 
 fn detect_lang(path: &str) -> &'static str {
-    match std::path::Path::new(path).extension().and_then(|e| e.to_str()) {
+    match std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+    {
         Some("rs") => "rust",
         Some("py") => "python",
         Some("js") => "javascript",
@@ -174,7 +183,9 @@ mod tests {
         let mut ctx = SmartContext::new("test-session");
         assert!(ctx.pinned.is_empty());
 
-        let result = ctx.pin("/tmp/test_file.rs", Some("main entry".to_string())).unwrap();
+        let result = ctx
+            .pin("/tmp/test_file.rs", Some("main entry".to_string()))
+            .unwrap();
         assert!(result.contains("Pinned"));
         assert_eq!(ctx.pinned.len(), 1);
 

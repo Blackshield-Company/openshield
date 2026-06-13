@@ -1,8 +1,8 @@
-use anyhow::Result;
-use crate::tui::App;
 use crate::memory::ToolCall;
 use crate::providers::Message;
-use crate::tools::{find_tool, detect_tool_suggestions, ToolSuggestion};
+use crate::tools::{ToolSuggestion, detect_tool_suggestions, find_tool};
+use crate::tui::App;
+use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -34,20 +34,29 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
                 "🚫 Security: Tool '{}' blocked\n  Reason: {}",
                 tool_name, reason
             ));
-            app.security_engine.audit(tool_name, args, false, crate::security::RiskLevel::Critical, &reason);
+            app.security_engine.audit(
+                tool_name,
+                args,
+                false,
+                crate::security::RiskLevel::Critical,
+                &reason,
+            );
             return Ok(());
         }
     }
 
-    let found_tool = find_tool(tool_name)
-        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
+    let found_tool =
+        find_tool(tool_name).ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
 
     app.add_system_message(format!("🔧 Using tool: {}", tool_name));
 
     match found_tool.execute(args) {
         Ok(result) => {
             let sanitized = app.security_engine.sanitize_output(tool_name, &result);
-            app.add_system_message(format!("Result: {}", &sanitized[..sanitized.len().min(500)]));
+            app.add_system_message(format!(
+                "Result: {}",
+                &sanitized[..sanitized.len().min(500)]
+            ));
 
             let tool_call = ToolCall {
                 id: Uuid::new_v4().to_string(),
@@ -60,15 +69,21 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
             };
             let _ = app.memory.save_tool_call(&tool_call);
             app.tool_calls_count += 1;
-            app.security_engine.audit(tool_name, args, true, crate::security::RiskLevel::Low, "approved");
+            app.security_engine.audit(
+                tool_name,
+                args,
+                true,
+                crate::security::RiskLevel::Low,
+                "approved",
+            );
 
             app.model_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool {} returned: {}", tool_name, sanitized),
                 images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
             });
         }
         Err(e) => {
@@ -83,7 +98,13 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
                 created_at: Utc::now(),
             };
             let _ = app.memory.save_tool_call(&tool_call);
-            app.security_engine.audit(tool_name, args, false, crate::security::RiskLevel::High, &e.to_string());
+            app.security_engine.audit(
+                tool_name,
+                args,
+                false,
+                crate::security::RiskLevel::High,
+                &e.to_string(),
+            );
         }
     }
 
