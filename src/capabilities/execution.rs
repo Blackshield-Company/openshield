@@ -34,19 +34,17 @@ impl Tool for CodeExecutionTool {
             let before = &code[..pos];
             let after = &code[pos + 9..];
             if let Some(secs) = after.split_whitespace().next()
-                && let Ok(s) = secs.parse::<u64>() {
-                    _timeout_secs = s;
-                }
+                && let Ok(s) = secs.parse::<u64>()
+            {
+                _timeout_secs = s;
+            }
             code = before.trim();
         }
 
         if let Some(pos) = code.rfind("--venv") {
             let before = &code[..pos];
             let after = &code[pos + 6..];
-            _venv = after
-                .split_whitespace()
-                .next()
-                .map(|s| s.to_string());
+            _venv = after.split_whitespace().next().map(|s| s.to_string());
             code = before.trim();
         }
 

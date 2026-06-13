@@ -884,18 +884,19 @@ pub fn format_swarm_consensus(results: &[SwarmQueryResult]) -> String {
             r.provider,
             r.model,
             r.latency_ms,
-            r.tokens_used.map(|t| t.to_string()).unwrap_or_else(|| "?".to_string())
+            r.tokens_used
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "?".to_string())
         ));
         if !r.response.starts_with("❌") {
             // Truncate long responses for the summary view
-            let preview: String = r
-                .response
-                .lines()
-                .take(8)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let preview: String = r.response.lines().take(8).collect::<Vec<_>>().join("\n");
             let truncated = if r.response.lines().count() > 8 {
-                format!("{}\n... ({} more lines)", preview, r.response.lines().count() - 8)
+                format!(
+                    "{}\n... ({} more lines)",
+                    preview,
+                    r.response.lines().count() - 8
+                )
             } else {
                 preview
             };
@@ -928,16 +929,15 @@ pub fn format_swarm_consensus(results: &[SwarmQueryResult]) -> String {
                 providers.len(),
                 providers.join(", ")
             ));
-            let preview: String = response
-                .lines()
-                .take(3)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let preview: String = response.lines().take(3).collect::<Vec<_>>().join("\n");
             for line in preview.lines() {
                 lines.push(format!("    {}", line));
             }
             if response.lines().count() > 3 {
-                lines.push(format!("    ... ({} more lines)", response.lines().count() - 3));
+                lines.push(format!(
+                    "    ... ({} more lines)",
+                    response.lines().count() - 3
+                ));
             }
         }
     }

@@ -1,6 +1,6 @@
+pub mod r#async;
 pub mod checkpoint;
 pub mod custom;
-pub mod r#async;
 pub mod detection;
 pub mod edit;
 pub mod fs;
@@ -13,8 +13,8 @@ pub mod terminal;
 pub mod test_runner;
 
 pub use r#async::AsyncToolExecutor;
-pub use checkpoint::{CheckpointStack, save_checkpoint, restore_checkpoint};
-pub use detection::{ToolSuggestion, ToolBatch, detect_tool_suggestions};
+pub use checkpoint::{CheckpointStack, restore_checkpoint, save_checkpoint};
+pub use detection::{ToolBatch, ToolSuggestion, detect_tool_suggestions};
 pub use git::GitTool;
 
 use anyhow::Result;
@@ -117,7 +117,7 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
         .map(|tool| {
             let name = tool.name().to_string();
             let description = tool.description().to_string();
-            
+
             // Build a simple parameter schema based on the tool name
             let parameters = match name.as_str() {
                 "terminal" => json!({
@@ -331,4 +331,152 @@ pub fn find_async_tool(name: &str) -> Option<std::sync::Arc<dyn AsyncTool>> {
 
 pub fn find_tool(name: &str) -> Option<Arc<dyn Tool>> {
     get_tools().into_iter().find(|tool| tool.name() == name)
+}
+
+/// Normalize JSON-formatted tool arguments to the CLI-style strings that tools expect.
+/// When the model uses native function calling, arguments come as JSON objects like
+/// `{"query": "fn main", "path": "src"}`. This converts them to the space-separated
+/// format each tool's `execute()` method expects.
+pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
+    let trimmed = args.trim();
+    if !trimmed.starts_with('{') {
+        return args.to_string();
+    }
+
+    let parsed: Value = match serde_json::from_str(trimmed) {
+        Ok(v) => v,
+        Err(_) => return args.to_string(),
+    };
+
+    let obj = match parsed.as_object() {
+        Some(o) => o,
+        None => return args.to_string(),
+    };
+
+    let get_str = |key: &str| -> Option<String> {
+        obj.get(key).and_then(|v| {
+            if let Some(s) = v.as_str() {
+                Some(s.to_string())
+            } else {
+                v.as_i64().map(|n| n.to_string())
+            }
+        })
+    };
+
+    let result = match tool_name {
+        "terminal" => get_str("command"),
+        "fs" => {
+            if let (Some(operation), Some(path)) = (get_str("operation"), get_str("path")) {
+                let mut result = format!("{} {}", operation, path);
+                if let Some(content) = get_str("content") {
+                    result.push(' ');
+                    result.push_str(&content);
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "search" => {
+            if let Some(query) = get_str("query") {
+                let mut result = query;
+                if let Some(path) = get_str("path") {
+                    result.push(' ');
+                    result.push_str(&path);
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "grep" => {
+            if let (Some(pattern), Some(path)) = (get_str("pattern"), get_str("path")) {
+                Some(format!("{} {}", pattern, path))
+            } else {
+                None
+            }
+        }
+        "git" => {
+            if let Some(command) = get_str("command") {
+                let mut result = command;
+                if let Some(args_str) = get_str("args") {
+                    result.push(' ');
+                    result.push_str(&args_str);
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "test" => {
+            if let Some(path) = get_str("path") {
+                let mut result = path;
+                if let Some(framework) = get_str("framework") {
+                    result.push(' ');
+                    result.push_str(&framework);
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "edit" => {
+            if let (Some(file), Some(old_string), Some(new_string)) = (
+                get_str("file"),
+                get_str("old_string"),
+                get_str("new_string"),
+            ) {
+                Some(format!("{} {} {}", file, old_string, new_string))
+            } else {
+                None
+            }
+        }
+        "refactor" => {
+            if let (Some(file), Some(operation)) = (get_str("file"), get_str("operation")) {
+                Some(format!("{} {}", file, operation))
+            } else {
+                None
+            }
+        }
+        "lsp" => {
+            if let (Some(command), Some(file), Some(line), Some(column)) = (
+                get_str("command"),
+                get_str("file"),
+                get_str("line"),
+                get_str("column"),
+            ) {
+                Some(format!("{} {} {} {}", command, file, line, column))
+            } else {
+                None
+            }
+        }
+        "memory" | "session_search" | "context_engine" => {
+            if let Some(args_str) = get_str("args") {
+                Some(args_str)
+            } else if let Some(content) = get_str("content") {
+                let target = get_str("target").unwrap_or_else(|| "memory".to_string());
+                Some(format!("--add {} --target {}", content, target))
+            } else {
+                None
+            }
+        }
+        "todo" | "cronjob" | "skills" => {
+            if let Some(args_str) = get_str("args") {
+                Some(args_str)
+            } else {
+                get_str("task").map(|task| format!("--add {}", task))
+            }
+        }
+        _ => get_str("args"),
+    };
+
+    result.unwrap_or_else(|| args.to_string())
+}
+
+/// Find a tool by name and execute it with the given arguments,
+/// automatically normalizing JSON-formatted args to CLI format.
+pub fn execute_tool(name: &str, args: &str) -> Option<Result<String>> {
+    let tool = find_tool(name)?;
+    let normalized = normalize_tool_args(name, args);
+    Some(tool.execute(&normalized))
 }

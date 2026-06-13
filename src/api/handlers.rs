@@ -1,12 +1,15 @@
 //! HTTP request handlers for the OpenShark API.
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
 use serde_json::json;
 
-use super::{AgentTask, AgentTaskStatus, ApiError, AppState, ChatRequest as ApiChatRequest, ChatResponse, ToolRequest, ToolResponse};
+use super::{
+    AgentTask, AgentTaskStatus, ApiError, AppState, ChatRequest as ApiChatRequest, ChatResponse,
+    ToolRequest, ToolResponse,
+};
 
 /// GET /api/v1/health
 pub async fn health() -> Json<serde_json::Value> {
@@ -27,10 +30,7 @@ pub async fn list_tools() -> Json<serde_json::Value> {
 }
 
 /// POST /api/v1/tools/:name
-pub async fn execute_tool(
-    Path(name): Path<String>,
-    body: Json<ToolRequest>,
-) -> impl IntoResponse {
+pub async fn execute_tool(Path(name): Path<String>, body: Json<ToolRequest>) -> impl IntoResponse {
     let result = if let Some(async_tool) = crate::tools::find_async_tool(&name) {
         async_tool.execute_async(&body.args).await
     } else if let Some(tool) = crate::tools::find_tool(&name) {
@@ -142,8 +142,14 @@ pub async fn chat(body: Json<ApiChatRequest>) -> impl IntoResponse {
                 .into_response();
         }
     };
-    let model = body.model.clone().unwrap_or_else(|| config.default_model.clone());
-    let session_id = body.session_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let model = body
+        .model
+        .clone()
+        .unwrap_or_else(|| config.default_model.clone());
+    let session_id = body
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // Get first configured provider
     let (provider_name, provider_config) = match config.providers.iter().next() {
@@ -182,7 +188,8 @@ pub async fn chat(body: Json<ApiChatRequest>) -> impl IntoResponse {
 
     match provider.chat(request).await {
         Ok(response) => {
-            let content = response.choices
+            let content = response
+                .choices
                 .first()
                 .map(|c| c.message.content.clone())
                 .unwrap_or_default();

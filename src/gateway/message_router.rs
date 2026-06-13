@@ -357,7 +357,10 @@ impl MessageRouter {
             "list" => {
                 let branches = self.branches.list(channel_id);
                 if branches.is_empty() {
-                    let _ = reply_tx.send("🌿 No branches saved for this channel.\n\nUsage: `!branch save <name>`".to_string());
+                    let _ = reply_tx.send(
+                        "🌿 No branches saved for this channel.\n\nUsage: `!branch save <name>`"
+                            .to_string(),
+                    );
                 } else {
                     let mut lines = vec!["🌿 **Branches**\n".to_string()];
                     for b in branches {
@@ -391,10 +394,7 @@ impl MessageRouter {
                 let current = self.channel_states.get_or_create(channel_id);
                 if let Some(branch) = self.branches.load(channel_id, subarg) {
                     let diff = diff_states(&current, &branch);
-                    let _ = reply_tx.send(format!(
-                        "🌿 **Diff vs `{}`**\n{}",
-                        subarg, diff
-                    ));
+                    let _ = reply_tx.send(format!("🌿 **Diff vs `{}`**\n{}", subarg, diff));
                 } else {
                     let _ = reply_tx.send(format!("❌ Branch `{}` not found.", subarg));
                 }
@@ -559,9 +559,7 @@ Use `/help` for the full slash command list.
                     for tool in custom_tools {
                         lines.push(format!("• `{}`: {}", tool.name(), tool.description()));
                     }
-                    lines.push(
-                        "\nUse `!tool <name> <args>` or `/tool` to execute.".to_string(),
-                    );
+                    lines.push("\nUse `!tool <name> <args>` or `/tool` to execute.".to_string());
                     let _ = reply_tx.send(lines.join("\n"));
                 }
             }
@@ -788,7 +786,10 @@ Use `/help` for the full slash command list.
                         match tool.execute(args) {
                             Ok(result) => {
                                 let display = if result.len() > 1800 {
-                                    format!("{}\n\n... (truncated)", crate::utils::truncate_str(&result, 1800))
+                                    format!(
+                                        "{}\n\n... (truncated)",
+                                        crate::utils::truncate_str(&result, 1800)
+                                    )
                                 } else {
                                     result
                                 };
@@ -823,7 +824,10 @@ Use `/help` for the full slash command list.
                                     )];
                                     for msg in messages {
                                         let preview = if msg.content.len() > 200 {
-                                            format!("{}...", crate::utils::truncate_str(&msg.content, 200))
+                                            format!(
+                                                "{}...",
+                                                crate::utils::truncate_str(&msg.content, 200)
+                                            )
                                         } else {
                                             msg.content.clone()
                                         };

@@ -77,8 +77,11 @@ fn execute_rust(code: &str, tmp_dir: &Path) -> Result<(String, String, bool)> {
         ));
     }
 
+    let sandbox_path = tmp_dir.join("sandbox");
+    let sandbox_path_str = sandbox_path.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Sandbox path contains invalid UTF-8 characters"))?;
     let run_output = Command::new("timeout")
-        .args(["5", tmp_dir.join("sandbox").to_str().unwrap()])
+        .args(["5", sandbox_path_str])
         .output()?;
 
     Ok((
@@ -171,7 +174,12 @@ pub fn run_code_blocks(content: &str) -> Vec<(String, String, String, bool)> {
                 results.push((lang, stdout, stderr, success));
             }
             Err(e) => {
-                results.push((lang, String::new(), format!("Execution error: {}", e), false));
+                results.push((
+                    lang,
+                    String::new(),
+                    format!("Execution error: {}", e),
+                    false,
+                ));
             }
         }
     }

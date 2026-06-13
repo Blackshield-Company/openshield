@@ -231,11 +231,8 @@ mod tests {
         let dir = temp_git_repo();
         let tool = GitTool;
         let result = tool.execute(&format!("status {}", dir));
-        match result {
-            Ok(output) => {
-                assert!(!output.is_empty() || output.is_empty());
-            }
-            Err(_) => {}
+        if let Ok(output) = result {
+            assert!(!output.is_empty() || output.is_empty());
         }
         cleanup(&dir);
     }
@@ -257,11 +254,8 @@ mod tests {
 
         let tool = GitTool;
         let result = tool.execute(&format!("log 5 {}", dir));
-        match result {
-            Ok(output) => {
-                assert!(!output.is_empty() || output.is_empty());
-            }
-            Err(_) => {}
+        if let Ok(output) = result {
+            assert!(!output.is_empty() || output.is_empty());
         }
         cleanup(&dir);
     }

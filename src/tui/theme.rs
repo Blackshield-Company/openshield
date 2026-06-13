@@ -782,9 +782,7 @@ pub fn highlight_style() -> Style {
 
 pub fn accent_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.accent)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
 }
 
 pub fn secondary_accent_style() -> Style {
@@ -794,16 +792,12 @@ pub fn secondary_accent_style() -> Style {
 
 pub fn error_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.error)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(t.error).add_modifier(Modifier::BOLD)
 }
 
 pub fn success_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.success)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(t.success).add_modifier(Modifier::BOLD)
 }
 
 pub fn focused_border_style() -> Style {
@@ -818,16 +812,12 @@ pub fn border_style() -> Style {
 
 pub fn title_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.title)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(t.title).add_modifier(Modifier::BOLD)
 }
 
 pub fn shark_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.accent)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
 }
 
 pub fn prompt_style() -> Style {
@@ -839,9 +829,7 @@ pub fn prompt_style() -> Style {
 
 pub fn tool_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.tool)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(t.tool).add_modifier(Modifier::BOLD)
 }
 
 pub fn selected_style() -> Style {
@@ -855,9 +843,7 @@ pub fn selected_style() -> Style {
 /// Style for mouse-drag text selection in the chat area.
 pub fn selection_style() -> Style {
     let t = current_theme();
-    Style::default()
-        .fg(t.foreground)
-        .bg(t.border_unfocused)
+    Style::default().fg(t.foreground).bg(t.border_unfocused)
 }
 
 pub fn header_style() -> Style {

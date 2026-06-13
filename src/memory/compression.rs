@@ -411,7 +411,7 @@ mod tests {
         let tokens = estimate_tokens(&messages);
         assert!(tokens > 0);
         // 15 words / 0.75 ≈ 20 tokens
-        assert!(tokens >= 15 && tokens <= 30);
+        assert!((15..=30).contains(&tokens));
     }
 
     #[test]

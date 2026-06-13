@@ -7,8 +7,8 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, broadcast, oneshot};
@@ -163,10 +163,7 @@ impl AsyncTransport {
             .write_all(body.as_bytes())
             .await
             .context("Failed to write body to LSP stdin")?;
-        stdin
-            .flush()
-            .await
-            .context("Failed to flush LSP stdin")?;
+        stdin.flush().await.context("Failed to flush LSP stdin")?;
 
         debug!("Sent LSP message: {} bytes", body.len());
         Ok(())
@@ -278,9 +275,10 @@ async fn read_one_message<R: tokio::io::AsyncBufRead + Unpin>(
         }
 
         if let Some(len_str) = trimmed.strip_prefix("Content-Length:")
-            && let Ok(len) = len_str.trim().parse::<usize>() {
-                content_length = Some(len);
-            }
+            && let Ok(len) = len_str.trim().parse::<usize>()
+        {
+            content_length = Some(len);
+        }
         // Silently ignore other headers (e.g. Content-Type)
     }
 
@@ -293,8 +291,7 @@ async fn read_one_message<R: tokio::io::AsyncBufRead + Unpin>(
         .await
         .context("Failed to read LSP message body")?;
 
-    let body = String::from_utf8(buf)
-        .context("LSP message body is not valid UTF-8")?;
+    let body = String::from_utf8(buf).context("LSP message body is not valid UTF-8")?;
 
     debug!("Received LSP message: {len} bytes");
 
@@ -352,7 +349,8 @@ mod tests {
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let (notify_tx, mut rx) = broadcast::channel(16);
 
-        let notification = json!({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"message": "hi"}});
+        let notification =
+            json!({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"message": "hi"}});
         route_message(notification.clone(), &pending, &notify_tx).await;
 
         let received = rx.try_recv().unwrap();

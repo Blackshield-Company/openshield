@@ -19,8 +19,12 @@ impl Default for ClawConfig {
     }
 }
 
-fn default_false() -> bool { false }
-fn default_timeout() -> u64 { 300 }
+fn default_false() -> bool {
+    false
+}
+fn default_timeout() -> u64 {
+    300
+}
 
 pub fn detect() -> bool {
     std::process::Command::new("claw")
@@ -34,14 +38,16 @@ pub fn delegate(task: &str, _timeout: u64) -> anyhow::Result<String> {
     if !detect() {
         anyhow::bail!("Claw Code not installed. Install: cargo install claw-code");
     }
-    
+
     let output = std::process::Command::new("claw")
         .args(["code", task])
-        
         .output()?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
-    Ok(format!("Claw Code output:\n{}\n[stderr]: {}", stdout, stderr))
+
+    Ok(format!(
+        "Claw Code output:\n{}\n[stderr]: {}",
+        stdout, stderr
+    ))
 }

@@ -30,24 +30,28 @@ impl crate::tools::Tool for PluginTool {
     }
 
     fn execute(&self, args: &str) -> Result<String> {
-        let interpreter = self.interpreter.as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' has no recognized interpreter", self.name))?;
+        let interpreter = self.interpreter.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("Plugin '{}' has no recognized interpreter", self.name)
+        })?;
         let mut cmd = std::process::Command::new(interpreter);
         cmd.arg(&self.path);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("Failed to spawn plugin '{}'", self.name))?;
 
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
-            stdin.write_all(args.as_bytes())
+            stdin
+                .write_all(args.as_bytes())
                 .with_context(|| format!("Failed to write to plugin '{}'", self.name))?;
         }
 
-        let output = child.wait_with_output()
+        let output = child
+            .wait_with_output()
             .with_context(|| format!("Plugin '{}' failed", self.name))?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -116,9 +120,8 @@ impl PluginRegistry {
                     }
                 };
 
-                let description = Self::extract_description(&path).unwrap_or_else(|| {
-                    format!("User-defined plugin: {}", name)
-                });
+                let description = Self::extract_description(&path)
+                    .unwrap_or_else(|| format!("User-defined plugin: {}", name));
 
                 self.plugins.insert(
                     name.clone(),
@@ -205,7 +208,9 @@ impl PluginRegistry {
             .get(name)
             .with_context(|| format!("Plugin '{}' not found", name))?;
 
-        let interpreter = plugin.interpreter.as_deref()
+        let interpreter = plugin
+            .interpreter
+            .as_deref()
             .ok_or_else(|| anyhow::anyhow!("Plugin '{}' has no recognized interpreter", name))?;
         let mut cmd = tokio::process::Command::new(interpreter);
         cmd.arg(&plugin.path);

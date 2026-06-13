@@ -44,14 +44,14 @@ fn with_todo_state<F, R>(f: F) -> R
 where
     F: FnOnce(&mut TodoState) -> R,
 {
-    let mut guard = TODO_STATE.lock().unwrap();
+    let mut guard = TODO_STATE.lock().expect("TODO state mutex poisoned");
     if guard.is_none() {
         *guard = Some(TodoState {
             items: Vec::new(),
             next_id: 1,
         });
     }
-    f(guard.as_mut().unwrap())
+    f(guard.as_mut().expect("TODO state should be initialized"))
 }
 
 pub struct TodoTool;

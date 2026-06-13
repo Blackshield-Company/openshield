@@ -5,11 +5,11 @@
 //! original thread. Branches are per-channel and expire when the process restarts.
 //!
 //! Usage:
-//!   !branch save <name>     — Save current state as a named branch
-//!   !branch load <name>     — Restore a branch to the current channel
+//!   !branch save `<name>`     — Save current state as a named branch
+//!   !branch load `<name>`     — Restore a branch to the current channel
 //!   !branch list            — Show all branches for this channel
-//!   !branch delete <name>   — Delete a branch
-//!   !branch diff <name>     — Show diff between current and branch
+//!   !branch delete `<name>`   — Delete a branch
+//!   !branch diff `<name>`     — Show diff between current and branch
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -40,7 +40,7 @@ impl BranchRegistry {
 
     /// Save the current channel state as a named branch.
     pub fn save(&self, channel_id: u64, name: &str, state: ChannelState) {
-        let mut branches = self.branches.lock().unwrap();
+        let mut branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
         branches.insert(
             (channel_id, name.to_string()),
             Branch {
@@ -53,13 +53,15 @@ impl BranchRegistry {
 
     /// Load a branch back into a channel state.
     pub fn load(&self, channel_id: u64, name: &str) -> Option<ChannelState> {
-        let branches = self.branches.lock().unwrap();
-        branches.get(&(channel_id, name.to_string())).map(|b| b.state.clone())
+        let branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
+        branches
+            .get(&(channel_id, name.to_string()))
+            .map(|b| b.state.clone())
     }
 
     /// List all branch names for a channel.
     pub fn list(&self, channel_id: u64) -> Vec<BranchInfo> {
-        let branches = self.branches.lock().unwrap();
+        let branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
         branches
             .iter()
             .filter(|((cid, _), _)| *cid == channel_id)
@@ -74,14 +76,14 @@ impl BranchRegistry {
 
     /// Delete a branch.
     pub fn delete(&self, channel_id: u64, name: &str) -> bool {
-        let mut branches = self.branches.lock().unwrap();
+        let mut branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
         branches.remove(&(channel_id, name.to_string())).is_some()
     }
 
     /// Check if a branch exists.
     #[allow(dead_code)]
     pub fn exists(&self, channel_id: u64, name: &str) -> bool {
-        let branches = self.branches.lock().unwrap();
+        let branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
         branches.contains_key(&(channel_id, name.to_string()))
     }
 }
@@ -101,10 +103,7 @@ pub fn diff_states(current: &ChannelState, branch: &ChannelState) -> String {
 
     // Model diff
     if current.model != branch.model {
-        lines.push(format!(
-            "Model: `{}` → `{}`",
-            branch.model, current.model
-        ));
+        lines.push(format!("Model: `{}` → `{}`", branch.model, current.model));
     }
 
     // History length diff

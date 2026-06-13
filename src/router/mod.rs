@@ -130,9 +130,10 @@ fn compute_success_rate(
             continue;
         }
         if let Some(tt) = task_type
-            && session.task_type != tt {
-                continue;
-            }
+            && session.task_type != tt
+        {
+            continue;
+        }
 
         if let Some(calls) = tool_calls.get(&session.id) {
             let success_count = calls.iter().filter(|tc| tc.success).count();
@@ -596,10 +597,7 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
 
 fn show_capability_routing(config: &Config) {
     println!("Capability-Based Routing Rules:");
-    println!(
-        "{:<15} | {:<20} | Logic",
-        "Task Type", "Preferred Model"
-    );
+    println!("{:<15} | {:<20} | Logic", "Task Type", "Preferred Model");
     println!("{}", "-".repeat(70));
 
     let rules = vec![
@@ -628,12 +626,23 @@ fn find_provider_for_model(config: &Config, model_name: &str) -> String {
 fn classify_task(description: &str) -> String {
     let desc = description.to_lowercase();
 
-    if desc.contains("refactor") || desc.contains("rewrite") || desc.contains("restructure")
-        || desc.contains("debug") || desc.contains("fix") || desc.contains("error")
-        || desc.contains("test") || desc.contains("testing") {
+    if desc.contains("refactor")
+        || desc.contains("rewrite")
+        || desc.contains("restructure")
+        || desc.contains("debug")
+        || desc.contains("fix")
+        || desc.contains("error")
+        || desc.contains("test")
+        || desc.contains("testing")
+    {
         "code".to_string()
-    } else if desc.contains("architect") || desc.contains("design") || desc.contains("structure")
-        || desc.contains("explain") || desc.contains("document") || desc.contains("analyze") {
+    } else if desc.contains("architect")
+        || desc.contains("design")
+        || desc.contains("structure")
+        || desc.contains("explain")
+        || desc.contains("document")
+        || desc.contains("analyze")
+    {
         "analysis".to_string()
     } else {
         "chat".to_string()
@@ -1084,7 +1093,7 @@ mod tests {
 
     #[test]
     fn test_score_breakdown_sorting() {
-        let mut scores = vec![
+        let mut scores = [
             ScoreBreakdown {
                 model: "a".to_string(),
                 provider: "p".to_string(),

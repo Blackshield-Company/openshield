@@ -121,36 +121,104 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
 
     let patterns: Vec<(SymbolKind, regex::Regex)> = match language {
         "rust" => vec![
-            (SymbolKind::Function, regex::Regex::new(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)").unwrap()),
-            (SymbolKind::Struct, regex::Regex::new(r"^\s*(?:pub\s+)?struct\s+(\w+)").unwrap()),
-            (SymbolKind::Enum, regex::Regex::new(r"^\s*(?:pub\s+)?enum\s+(\w+)").unwrap()),
-            (SymbolKind::Trait, regex::Regex::new(r"^\s*(?:pub\s+)?trait\s+(\w+)").unwrap()),
-            (SymbolKind::Impl, regex::Regex::new(r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)").unwrap()),
-            (SymbolKind::Module, regex::Regex::new(r"^\s*(?:pub\s+)?mod\s+(\w+)").unwrap()),
-            (SymbolKind::Const, regex::Regex::new(r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+").unwrap()),
-            (SymbolKind::Macro, regex::Regex::new(r"^\s*macro_rules!\s+(\w+)").unwrap()),
-            (SymbolKind::Type, regex::Regex::new(r"^\s*(?:pub\s+)?type\s+(\w+)").unwrap()),
+            (
+                SymbolKind::Function,
+                regex::Regex::new(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)").expect("Rust function regex compilation failed"),
+            ),
+            (
+                SymbolKind::Struct,
+                regex::Regex::new(r"^\s*(?:pub\s+)?struct\s+(\w+)").expect("Rust struct regex compilation failed"),
+            ),
+            (
+                SymbolKind::Enum,
+                regex::Regex::new(r"^\s*(?:pub\s+)?enum\s+(\w+)").expect("Rust enum regex compilation failed"),
+            ),
+            (
+                SymbolKind::Trait,
+                regex::Regex::new(r"^\s*(?:pub\s+)?trait\s+(\w+)").expect("Rust trait regex compilation failed"),
+            ),
+            (
+                SymbolKind::Impl,
+                regex::Regex::new(r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)").expect("Rust impl regex compilation failed"),
+            ),
+            (
+                SymbolKind::Module,
+                regex::Regex::new(r"^\s*(?:pub\s+)?mod\s+(\w+)").expect("Rust mod regex compilation failed"),
+            ),
+            (
+                SymbolKind::Const,
+                regex::Regex::new(r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+").expect("Rust const regex compilation failed"),
+            ),
+            (
+                SymbolKind::Macro,
+                regex::Regex::new(r"^\s*macro_rules!\s+(\w+)").expect("Rust macro regex compilation failed"),
+            ),
+            (
+                SymbolKind::Type,
+                regex::Regex::new(r"^\s*(?:pub\s+)?type\s+(\w+)").expect("Rust type regex compilation failed"),
+            ),
         ],
         "python" => vec![
-            (SymbolKind::Function, regex::Regex::new(r"^\s*def\s+(\w+)").unwrap()),
-            (SymbolKind::Struct, regex::Regex::new(r"^\s*class\s+(\w+)").unwrap()),
-            (SymbolKind::Const, regex::Regex::new(r"^([A-Z_][A-Z0-9_]*)\s*=").unwrap()),
+            (
+                SymbolKind::Function,
+                regex::Regex::new(r"^\s*def\s+(\w+)").expect("Python def regex compilation failed"),
+            ),
+            (
+                SymbolKind::Struct,
+                regex::Regex::new(r"^\s*class\s+(\w+)").expect("Python class regex compilation failed"),
+            ),
+            (
+                SymbolKind::Const,
+                regex::Regex::new(r"^([A-Z_][A-Z0-9_]*)\s*=").expect("Python const regex compilation failed"),
+            ),
         ],
         "javascript" | "typescript" => vec![
-            (SymbolKind::Function, regex::Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)").unwrap()),
-            (SymbolKind::Function, regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\(").unwrap()),
-            (SymbolKind::Struct, regex::Regex::new(r"^\s*(?:export\s+)?(?:class|interface)\s+(\w+)").unwrap()),
-            (SymbolKind::Const, regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=").unwrap()),
+            (
+                SymbolKind::Function,
+                regex::Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)").expect("JS function regex compilation failed"),
+            ),
+            (
+                SymbolKind::Function,
+                regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\(")
+                    .expect("JS const regex compilation failed"),
+            ),
+            (
+                SymbolKind::Struct,
+                regex::Regex::new(r"^\s*(?:export\s+)?(?:class|interface)\s+(\w+)").expect("JS class regex compilation failed"),
+            ),
+            (
+                SymbolKind::Const,
+                regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=").expect("JS const regex compilation failed"),
+            ),
         ],
         "go" => vec![
-            (SymbolKind::Trait, regex::Regex::new(r"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)").unwrap()),
-            (SymbolKind::Struct, regex::Regex::new(r"^\s*type\s+(\w+)\s+struct").unwrap()),
-            (SymbolKind::Trait, regex::Regex::new(r"^\s*type\s+(\w+)\s+interface").unwrap()),
+            (
+                SymbolKind::Trait,
+                regex::Regex::new(r"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)").expect("Go func regex compilation failed"),
+            ),
+            (
+                SymbolKind::Struct,
+                regex::Regex::new(r"^\s*type\s+(\w+)\s+struct").expect("Go struct regex compilation failed"),
+            ),
+            (
+                SymbolKind::Trait,
+                regex::Regex::new(r"^\s*type\s+(\w+)\s+interface").expect("Go interface regex compilation failed"),
+            ),
         ],
         "c" | "cpp" => vec![
-            (SymbolKind::Function, regex::Regex::new(r"^\s*(?:[\w:*&<>]+\s+)+(\w+)\s*\([^)]*\)\s*(?:const\s*)?\{").unwrap()),
-            (SymbolKind::Struct, regex::Regex::new(r"^\s*(?:typedef\s+)?struct\s+(\w+)").unwrap()),
-            (SymbolKind::Enum, regex::Regex::new(r"^\s*(?:typedef\s+)?enum\s+(\w+)").unwrap()),
+            (
+                SymbolKind::Function,
+                regex::Regex::new(r"^\s*(?:[\w:*&<>]+\s+)+(\w+)\s*\([^)]*\)\s*(?:const\s*)?\{")
+                    .expect("C/C++ function regex compilation failed"),
+            ),
+            (
+                SymbolKind::Struct,
+                regex::Regex::new(r"^\s*(?:typedef\s+)?struct\s+(\w+)").expect("C/C++ struct regex compilation failed"),
+            ),
+            (
+                SymbolKind::Enum,
+                regex::Regex::new(r"^\s*(?:typedef\s+)?enum\s+(\w+)").expect("C/C++ enum regex compilation failed"),
+            ),
         ],
         _ => vec![],
     };
@@ -158,15 +226,16 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
     for (line_num, line) in content.lines().enumerate() {
         for (kind, re) in &patterns {
             if let Some(cap) = re.captures(line)
-                && let Some(name_match) = cap.get(1) {
-                    symbols.push(SymbolNode {
-                        name: name_match.as_str().to_string(),
-                        kind: kind.clone(),
-                        file: file_path.to_string(),
-                        line: line_num + 1,
-                        context: line.trim().to_string(),
-                    });
-                }
+                && let Some(name_match) = cap.get(1)
+            {
+                symbols.push(SymbolNode {
+                    name: name_match.as_str().to_string(),
+                    kind: kind.clone(),
+                    file: file_path.to_string(),
+                    line: line_num + 1,
+                    context: line.trim().to_string(),
+                });
+            }
         }
     }
 
@@ -180,9 +249,21 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
     };
 
     let ignore_dirs: std::collections::HashSet<&str> = [
-        "target", "node_modules", ".git", "dist", "build", "out",
-        ".venv", "venv", "__pycache__", ".pytest_cache", ".cargo",
-    ].iter().copied().collect();
+        "target",
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        "out",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".cargo",
+    ]
+    .iter()
+    .copied()
+    .collect();
 
     for entry in walkdir::WalkDir::new(root)
         .into_iter()
@@ -208,7 +289,11 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
             continue;
         }
 
-        let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
+        let rel_path = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
         let language = detect_language(path).to_string();
 
         let content = std::fs::read_to_string(path).unwrap_or_default();
@@ -229,7 +314,12 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
 
 pub fn format_repo_map(map: &RepoMap) -> String {
     let mut lines = vec![
-        format!("📁 Repo Map: {} ({} files, {} symbols)", map.root, map.files.len(), map.symbols.len()),
+        format!(
+            "📁 Repo Map: {} ({} files, {} symbols)",
+            map.root,
+            map.files.len(),
+            map.symbols.len()
+        ),
         "═".repeat(60),
     ];
 
@@ -258,17 +348,28 @@ pub fn format_repo_map(map: &RepoMap) -> String {
         ));
     }
     if map.symbols.len() > 100 {
-        lines.push(format!("  ... and {} more symbols", map.symbols.len() - 100));
+        lines.push(format!(
+            "  ... and {} more symbols",
+            map.symbols.len() - 100
+        ));
     }
 
     lines.join("\n")
 }
 
 pub fn format_repo_map_compact(map: &RepoMap) -> String {
-    let mut lines = vec![format!("Repo: {} | Files: {} | Symbols: {}", map.root, map.files.len(), map.symbols.len())];
+    let mut lines = vec![format!(
+        "Repo: {} | Files: {} | Symbols: {}",
+        map.root,
+        map.files.len(),
+        map.symbols.len()
+    )];
 
     for sym in map.symbols.iter().take(50) {
-        lines.push(format!("{} {} ({}:{})", sym.kind, sym.name, sym.file, sym.line));
+        lines.push(format!(
+            "{} {} ({}:{})",
+            sym.kind, sym.name, sym.file, sym.line
+        ));
     }
     if map.symbols.len() > 50 {
         lines.push(format!("... {} more", map.symbols.len() - 50));
@@ -281,8 +382,8 @@ pub fn format_repo_map_compact(map: &RepoMap) -> String {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     static CLEANUP_LOCK: Mutex<()> = Mutex::new(());
@@ -291,8 +392,10 @@ mod tests {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = format!("/tmp/openshark_repo_test_{}_{n}", std::process::id());
         let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(format!("{}/src", dir)).unwrap();
-        fs::write(format!("{}/src/main.rs", dir), r#"
+        fs::create_dir_all(format!("{}/src", dir)).expect("Failed to create test project src directory");
+        fs::write(
+            format!("{}/src/main.rs", dir),
+            r#"
 fn main() {
     println!("hello");
 }
@@ -311,17 +414,23 @@ enum Status {
     Ok,
     Err,
 }
-"#).unwrap();
-        fs::write(format!("{}/Cargo.toml", dir), r#"
+"#,
+        )
+        .expect("Failed to write test project main.rs");
+        fs::write(
+            format!("{}/Cargo.toml", dir),
+            r#"
 [package]
 name = "test"
 version = "0.1.0"
-"#).unwrap();
+"#,
+        )
+        .expect("Failed to write test project main.rs");
         dir
     }
 
     fn cleanup(dir: &str) {
-        let _guard = CLEANUP_LOCK.lock().unwrap();
+        let _guard = CLEANUP_LOCK.lock().expect("Cleanup lock poisoned");
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -338,7 +447,7 @@ version = "0.1.0"
     #[test]
     fn test_build_repo_map() {
         let dir = temp_rust_project();
-        let map = build_repo_map(&dir).unwrap();
+        let map = build_repo_map(&dir).expect("Failed to build repo map for test");
 
         assert!(!map.files.is_empty());
         assert!(map.find_symbol("main").is_some());
@@ -354,7 +463,7 @@ version = "0.1.0"
     #[test]
     fn test_format_repo_map() {
         let dir = temp_rust_project();
-        let map = build_repo_map(&dir).unwrap();
+        let map = build_repo_map(&dir).expect("Failed to build repo map for test");
         let formatted = format_repo_map(&map);
         assert!(formatted.contains("main"));
         assert!(formatted.contains("MyStruct"));

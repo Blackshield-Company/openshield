@@ -71,7 +71,7 @@ pub fn detect_tool_suggestions(text: &str) -> Vec<ToolSuggestion> {
     detect_markdown_tool_blocks(text, &mut suggestions);
     detect_natural_language(text, &mut suggestions);
 
-    suggestions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    suggestions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
 
     suggestions
 }
@@ -234,9 +234,7 @@ fn extract_args_after(text: &str, matched: &str) -> String {
         let after = &text[pos + matched.len()..];
         let trimmed = after.trim_start();
         // Stop at sentence end or newline
-        let end = trimmed
-            .find(['.', '!', '?', '\n'])
-            .unwrap_or(trimmed.len());
+        let end = trimmed.find(['.', '!', '?', '\n']).unwrap_or(trimmed.len());
         trimmed[..end].trim().to_string()
     } else {
         String::new()

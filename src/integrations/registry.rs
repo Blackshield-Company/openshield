@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use super::{claw, claude, opencode};
+use super::{claude, claw, opencode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
@@ -38,9 +38,15 @@ impl std::str::FromStr for Agent {
 /// List all available (detected) agents.
 pub fn available() -> Vec<Agent> {
     let mut agents = Vec::new();
-    if claw::detect() { agents.push(Agent::Claw); }
-    if opencode::detect() { agents.push(Agent::OpenCode); }
-    if claude::detect() { agents.push(Agent::Claude); }
+    if claw::detect() {
+        agents.push(Agent::Claw);
+    }
+    if opencode::detect() {
+        agents.push(Agent::OpenCode);
+    }
+    if claude::detect() {
+        agents.push(Agent::Claude);
+    }
     agents
 }
 

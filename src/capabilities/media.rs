@@ -153,15 +153,14 @@ impl Tool for ImageGenTool {
                 if status.is_success() {
                     // Parse the response to extract image URL
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(images) = json.get("images").and_then(|i| i.as_array()) {
-                            if let Some(first) = images.first() {
-                                if let Some(url) = first.get("url").and_then(|u| u.as_str()) {
-                                    return Ok(format!(
-                                        "Image generated!\nPrompt: {}\nAspect: {} ({}x{})\nURL: {}\n\nMEDIA:{}",
-                                        prompt, aspect, width, height, url, url
-                                    ));
-                                }
-                            }
+                        if let Some(images) = json.get("images").and_then(|i| i.as_array())
+                            && let Some(first) = images.first()
+                            && let Some(url) = first.get("url").and_then(|u| u.as_str())
+                        {
+                            return Ok(format!(
+                                "Image generated!\nPrompt: {}\nAspect: {} ({}x{})\nURL: {}\n\nMEDIA:{}",
+                                prompt, aspect, width, height, url, url
+                            ));
                         }
                         // Fallback: return raw JSON if we can't parse
                         Ok(format!(
@@ -177,13 +176,13 @@ impl Tool for ImageGenTool {
                 } else {
                     Ok(format!(
                         "FAL API error ({}): {}\n\nBody: {}",
-                        status, status.canonical_reason().unwrap_or("Unknown"), text
+                        status,
+                        status.canonical_reason().unwrap_or("Unknown"),
+                        text
                     ))
                 }
             }
-            Err(e) => {
-                Ok(format!("Failed to call FAL API: {}", e))
-            }
+            Err(e) => Ok(format!("Failed to call FAL API: {}", e)),
         }
     }
 }

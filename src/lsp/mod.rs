@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 
 /// Lightweight LSP client for symbol understanding
 pub struct LspClient {
@@ -53,8 +53,10 @@ impl LspClient {
             .spawn()
             .with_context(|| format!("Failed to start LSP server: {}", command))?;
 
-        let stdin = server.stdin.take().unwrap();
-        let stdout = server.stdout.take().unwrap();
+        let stdin = server.stdin.take()
+            .ok_or_else(|| anyhow::anyhow!("LSP server stdin not available"))?;
+        let stdout = server.stdout.take()
+            .ok_or_else(|| anyhow::anyhow!("LSP server stdout not available"))?;
 
         let client = LspClient {
             server,
@@ -71,7 +73,7 @@ impl LspClient {
     }
 
     fn next_id(&self) -> i64 {
-        let mut id = self.request_id.lock().unwrap();
+        let mut id = self.request_id.lock().expect("LSP request_id mutex poisoned");
         *id += 1;
         *id
     }
@@ -107,7 +109,7 @@ impl LspClient {
         let body = message.to_string();
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
 
-        let mut stdin = self.stdin.lock().unwrap();
+        let mut stdin = self.stdin.lock().expect("LSP stdin mutex poisoned");
         stdin.write_all(header.as_bytes())?;
         stdin.write_all(body.as_bytes())?;
         stdin.flush()?;
@@ -116,7 +118,7 @@ impl LspClient {
     }
 
     fn read_response(&self, _expected_id: i64) -> Result<Value> {
-        let mut stdout = self.stdout.lock().unwrap();
+        let mut stdout = self.stdout.lock().expect("LSP stdout mutex poisoned");
 
         let mut content_length: Option<usize> = None;
         let mut header = String::new();
@@ -127,9 +129,10 @@ impl LspClient {
                 break;
             }
             if let Some(len_str) = header.strip_prefix("Content-Length: ")
-                && let Ok(len) = len_str.trim().parse::<usize>() {
-                    content_length = Some(len);
-                }
+                && let Ok(len) = len_str.trim().parse::<usize>()
+            {
+                content_length = Some(len);
+            }
         }
 
         let len = content_length.context("Missing Content-Length header in LSP response")?;

@@ -32,16 +32,44 @@ pub struct CodingAgent {
 /// Progress update sent during agent execution.
 #[derive(Debug, Clone)]
 pub enum AgentProgress {
-    PlanGenerated { description: String, steps: usize },
-    StepStarted { idx: usize, total: usize, tool: String, args: String },
-    StepCompleted { idx: usize, output: String, verified: bool },
-    TestsRunning { framework: String },
-    TestsCompleted { passed: usize, failed: usize, output: String },
-    LintRunning { tool: String },
-    LintCompleted { issues: usize, output: String },
-    Committed { output: String },
+    PlanGenerated {
+        description: String,
+        steps: usize,
+    },
+    StepStarted {
+        idx: usize,
+        total: usize,
+        tool: String,
+        args: String,
+    },
+    StepCompleted {
+        idx: usize,
+        output: String,
+        verified: bool,
+    },
+    TestsRunning {
+        framework: String,
+    },
+    TestsCompleted {
+        passed: usize,
+        failed: usize,
+        output: String,
+    },
+    LintRunning {
+        tool: String,
+    },
+    LintCompleted {
+        issues: usize,
+        output: String,
+    },
+    Committed {
+        output: String,
+    },
     Error(String),
-    Done { success: bool, message: String },
+    Done {
+        success: bool,
+        message: String,
+    },
 }
 
 impl CodingAgent {
@@ -86,11 +114,7 @@ impl CodingAgent {
     }
 
     /// Run the full coding loop with progress callbacks.
-    pub async fn run_coding_task<F>(
-        &self,
-        task: &str,
-        mut progress: F,
-    ) -> Result<TaskResult>
+    pub async fn run_coding_task<F>(&self, task: &str, mut progress: F) -> Result<TaskResult>
     where
         F: FnMut(AgentProgress),
     {
@@ -163,38 +187,40 @@ impl CodingAgent {
             )?;
 
             // ── Phase 3: Run tests after edit tools ─────────────────────────
-            if is_edit_tool(&step.tool_name) && !tests_run
-                && let Some(test_result) = self.run_tests().await {
-                    progress(AgentProgress::TestsRunning {
-                        framework: test_result.framework.clone(),
-                    });
-                    progress(AgentProgress::TestsCompleted {
-                        passed: test_result.passed,
-                        failed: test_result.failed,
-                        output: format_test_result(&test_result),
-                    });
-                    tests_run = true;
+            if is_edit_tool(&step.tool_name)
+                && !tests_run
+                && let Some(test_result) = self.run_tests().await
+            {
+                progress(AgentProgress::TestsRunning {
+                    framework: test_result.framework.clone(),
+                });
+                progress(AgentProgress::TestsCompleted {
+                    passed: test_result.passed,
+                    failed: test_result.failed,
+                    output: format_test_result(&test_result),
+                });
+                tests_run = true;
 
-                    // If tests failed, try to fix
-                    if test_result.failed > 0 && total_iterations < self.config.max_iterations {
-                        let fix_plan = self.generate_fix_plan(&test_result).await?;
-                        if !fix_plan.steps.is_empty() {
-                            progress(AgentProgress::PlanGenerated {
-                                description: format!("Auto-fix: {}", fix_plan.description),
-                                steps: fix_plan.steps.len(),
-                            });
-                            for fix_step in &fix_plan.steps {
-                                if total_iterations >= self.config.max_iterations {
-                                    break;
-                                }
-                                let fix_result = self
-                                    .execute_step_with_retry(fix_step, &mut total_iterations)
-                                    .await?;
-                                step_results.push(fix_result);
+                // If tests failed, try to fix
+                if test_result.failed > 0 && total_iterations < self.config.max_iterations {
+                    let fix_plan = self.generate_fix_plan(&test_result).await?;
+                    if !fix_plan.steps.is_empty() {
+                        progress(AgentProgress::PlanGenerated {
+                            description: format!("Auto-fix: {}", fix_plan.description),
+                            steps: fix_plan.steps.len(),
+                        });
+                        for fix_step in &fix_plan.steps {
+                            if total_iterations >= self.config.max_iterations {
+                                break;
                             }
+                            let fix_result = self
+                                .execute_step_with_retry(fix_step, &mut total_iterations)
+                                .await?;
+                            step_results.push(fix_result);
                         }
                     }
                 }
+            }
 
             // ── Phase 4: Run linter after edits ─────────────────────────────
             if is_edit_tool(&step.tool_name) && !lint_run && self.app_config.auto_lint {
@@ -355,7 +381,11 @@ impl CodingAgent {
         let prompt = format!(
             "Tests failed. Create a fix plan.\n\nFailed tests:\n{}\n\nTest output:\n{}\n\nRespond with JSON plan.",
             failures,
-            test_result.raw_output.chars().take(2000).collect::<String>()
+            test_result
+                .raw_output
+                .chars()
+                .take(2000)
+                .collect::<String>()
         );
 
         self.generate_plan_from_prompt(&prompt, "test-fix").await
@@ -456,7 +486,10 @@ impl CodingAgent {
 
     /// Execute a single tool step.
     async fn execute_single_step(&self, step: &PlanStep) -> Result<String> {
-        match self.security_engine.check_tool_call(&step.tool_name, &step.args) {
+        match self
+            .security_engine
+            .check_tool_call(&step.tool_name, &step.args)
+        {
             crate::security::SecurityDecision::Allow => {}
             crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
                 return Err(anyhow::anyhow!(
@@ -489,7 +522,9 @@ impl CodingAgent {
                 .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", step.tool_name))?;
             tool.execute(&step.args)?
         };
-        let sanitized = self.security_engine.sanitize_output(&step.tool_name, &result);
+        let sanitized = self
+            .security_engine
+            .sanitize_output(&step.tool_name, &result);
 
         let tool_call = ToolCall {
             id: Uuid::new_v4().to_string(),
@@ -521,8 +556,16 @@ impl CodingAgent {
         let expected_lower = step.expected_result.to_lowercase();
         let result_lower = result.to_lowercase();
 
-        let negation_words = ["error", "failed", "failure", "not found", "permission denied"];
-        let has_negation = negation_words.iter().any(|word| result_lower.contains(word));
+        let negation_words = [
+            "error",
+            "failed",
+            "failure",
+            "not found",
+            "permission denied",
+        ];
+        let has_negation = negation_words
+            .iter()
+            .any(|word| result_lower.contains(word));
         let has_expected = expected_lower
             .split_whitespace()
             .any(|kw| result_lower.contains(kw));
@@ -537,11 +580,13 @@ impl CodingAgent {
             .filesystem
             .working_directory
             .clone()
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()))?;
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })?;
 
-        match crate::tools::test_runner::run_tests_structured(
-            &project_path,
-        ) {
+        match crate::tools::test_runner::run_tests_structured(&project_path) {
             Ok(result) => Some(result),
             Err(e) => {
                 let _ = self.save_message("system", &format!("Test run failed: {}", e));
@@ -571,7 +616,10 @@ impl CodingAgent {
             "chore: auto-commit".to_string()
         } else {
             self.generate_commit_msg(&diff).await.unwrap_or_else(|_| {
-                format!("chore: auto-commit at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
+                format!(
+                    "chore: auto-commit at {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+                )
             })
         };
 
@@ -618,9 +666,17 @@ impl CodingAgent {
             .map(|c| c.message.content.clone())
             .unwrap_or_else(|| "chore: update".to_string());
 
-        let msg = msg.lines().next().unwrap_or("chore: update").trim().to_string();
+        let msg = msg
+            .lines()
+            .next()
+            .unwrap_or("chore: update")
+            .trim()
+            .to_string();
         let msg = msg.trim_start_matches("Commit message:").trim().to_string();
-        let msg = msg.trim_start_matches('"').trim_end_matches('"').to_string();
+        let msg = msg
+            .trim_start_matches('"')
+            .trim_end_matches('"')
+            .to_string();
 
         if msg.is_empty() {
             Ok("chore: update".to_string())
@@ -654,7 +710,11 @@ fn is_edit_tool(name: &str) -> bool {
 
 /// Format test results for display.
 fn format_test_result(result: &crate::tools::test_runner::TestResultSet) -> String {
-    let status = if result.success { "✅ PASSED" } else { "❌ FAILED" };
+    let status = if result.success {
+        "✅ PASSED"
+    } else {
+        "❌ FAILED"
+    };
     format!(
         "{} | {} passed, {} failed, {} ignored ({} total)",
         status, result.passed, result.failed, result.ignored, result.total

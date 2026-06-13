@@ -46,19 +46,17 @@ pub struct SessionMetadata {
 impl SessionExport {
     /// Export current session state to a JSON file.
     pub fn save_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .context("Failed to serialize session export")?;
-        std::fs::write(path, json)
-            .context("Failed to write session export file")?;
+        let json =
+            serde_json::to_string_pretty(self).context("Failed to serialize session export")?;
+        std::fs::write(path, json).context("Failed to write session export file")?;
         Ok(())
     }
 
     /// Load a session export from a JSON file.
     pub fn load_from_file(path: impl AsRef<Path>) -> Result<Self> {
-        let json = std::fs::read_to_string(path)
-            .context("Failed to read session export file")?;
-        let export: SessionExport = serde_json::from_str(&json)
-            .context("Failed to parse session export JSON")?;
+        let json = std::fs::read_to_string(path).context("Failed to read session export file")?;
+        let export: SessionExport =
+            serde_json::from_str(&json).context("Failed to parse session export JSON")?;
         Ok(export)
     }
 
@@ -108,8 +106,7 @@ pub fn export_to_default(export: &SessionExport) -> Result<std::path::PathBuf> {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("openshark")
         .join("sessions");
-    std::fs::create_dir_all(&dir)
-        .context("Failed to create sessions directory")?;
+    std::fs::create_dir_all(&dir).context("Failed to create sessions directory")?;
 
     let filename = format!(
         "openshark_session_{}_{}.json",

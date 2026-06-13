@@ -293,7 +293,10 @@ impl SlashRegistry {
                     if trimmed.is_empty() || trimmed == "list" {
                         SlashResult::Handled
                     } else if trimmed == "clear" {
-                        SlashResult::Toggle { setting: "ctx_clear".to_string(), value: true }
+                        SlashResult::Toggle {
+                            setting: "ctx_clear".to_string(),
+                            value: true,
+                        }
                     } else if let Some(rest) = trimmed.strip_prefix("unpin ") {
                         SlashResult::Prompt(format!("__ctx_unpin__ {}", rest))
                     } else {
@@ -460,7 +463,10 @@ impl SlashRegistry {
                 requires_args: false,
                 handler: |args| {
                     let _filename = if args.is_empty() {
-                        format!("openshark-session-{}.json", chrono::Utc::now().format("%Y%m%d-%H%M%S"))
+                        format!(
+                            "openshark-session-{}.json",
+                            chrono::Utc::now().format("%Y%m%d-%H%M%S")
+                        )
                     } else {
                         args.to_string()
                     };
@@ -745,8 +751,12 @@ impl SlashRegistry {
                 handler: |args| {
                     let level = args.trim().to_lowercase();
                     match level.as_str() {
-                        "low" | "medium" | "high" | "xhigh" => SlashResult::SwitchMode(format!("effort:{}", level)),
-                        _ => SlashResult::Error("Usage: /effort <low|medium|high|xhigh>".to_string()),
+                        "low" | "medium" | "high" | "xhigh" => {
+                            SlashResult::SwitchMode(format!("effort:{}", level))
+                        }
+                        _ => {
+                            SlashResult::Error("Usage: /effort <low|medium|high|xhigh>".to_string())
+                        }
                     }
                 },
             },
@@ -838,8 +848,12 @@ impl SlashRegistry {
                 handler: |args| {
                     let name = if args.is_empty() { "coding" } else { args };
                     match name {
-                        "coding" | "review" | "safe" | "yolo" | "readonly" => SlashResult::SwitchMode(format!("profile:{}", name)),
-                        _ => SlashResult::Error("Usage: /profile <coding|review|safe|yolo|readonly>".to_string()),
+                        "coding" | "review" | "safe" | "yolo" | "readonly" => {
+                            SlashResult::SwitchMode(format!("profile:{}", name))
+                        }
+                        _ => SlashResult::Error(
+                            "Usage: /profile <coding|review|safe|yolo|readonly>".to_string(),
+                        ),
                     }
                 },
             },
@@ -936,15 +950,8 @@ impl SlashRegistry {
             lines.push(format!("📁 {}", cat));
             lines.push("─".repeat(50));
             for cmd in self.by_category(*cat) {
-                lines.push(format!(
-                    "  /{:<12} {}",
-                    cmd.name,
-                    cmd.description
-                ));
-                lines.push(format!(
-                    "               Usage: {}",
-                    cmd.usage
-                ));
+                lines.push(format!("  /{:<12} {}", cmd.name, cmd.description));
+                lines.push(format!("               Usage: {}", cmd.usage));
             }
             lines.push(String::new());
         }
@@ -968,14 +975,18 @@ mod tests {
     fn test_slash_test_command() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/test");
-        assert!(matches!(result, Some(SlashResult::Tool { name, args }) if name == "test" && args == "run ."));
+        assert!(
+            matches!(result, Some(SlashResult::Tool { name, args }) if name == "test" && args == "run .")
+        );
     }
 
     #[test]
     fn test_slash_test_with_path() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/test src/");
-        assert!(matches!(result, Some(SlashResult::Tool { name, args }) if name == "test" && args == "run src/"));
+        assert!(
+            matches!(result, Some(SlashResult::Tool { name, args }) if name == "test" && args == "run src/")
+        );
     }
 
     #[test]
@@ -989,7 +1000,9 @@ mod tests {
     fn test_slash_commit_with_message() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/commit fix bug");
-        assert!(matches!(result, Some(SlashResult::Tool { name, args }) if name == "git" && args.contains("fix bug")));
+        assert!(
+            matches!(result, Some(SlashResult::Tool { name, args }) if name == "git" && args.contains("fix bug"))
+        );
     }
 
     #[test]
@@ -1003,14 +1016,18 @@ mod tests {
     fn test_slash_mode_toggle() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/mode");
-        assert!(matches!(result, Some(SlashResult::Toggle { setting, value: true }) if setting == "autonomous"));
+        assert!(
+            matches!(result, Some(SlashResult::Toggle { setting, value: true }) if setting == "autonomous")
+        );
     }
 
     #[test]
     fn test_slash_mode_safe() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/mode safe");
-        assert!(matches!(result, Some(SlashResult::Toggle { setting, value: false }) if setting == "autonomous"));
+        assert!(
+            matches!(result, Some(SlashResult::Toggle { setting, value: false }) if setting == "autonomous")
+        );
     }
 
     #[test]
@@ -1043,20 +1060,26 @@ mod tests {
     fn test_slash_diff() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/diff");
-        assert!(matches!(result, Some(SlashResult::Tool { name, args }) if name == "git" && args == "diff"));
+        assert!(
+            matches!(result, Some(SlashResult::Tool { name, args }) if name == "git" && args == "diff")
+        );
     }
 
     #[test]
     fn test_slash_branch_create() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/branch feature-x");
-        assert!(matches!(result, Some(SlashResult::Tool { name, args }) if name == "git" && args.contains("feature-x")));
+        assert!(
+            matches!(result, Some(SlashResult::Tool { name, args }) if name == "git" && args.contains("feature-x"))
+        );
     }
 
     #[test]
     fn test_slash_yolo() {
         let registry = SlashRegistry::new();
         let result = registry.execute("/yolo");
-        assert!(matches!(result, Some(SlashResult::Toggle { setting, value: true }) if setting == "yolo"));
+        assert!(
+            matches!(result, Some(SlashResult::Toggle { setting, value: true }) if setting == "yolo")
+        );
     }
 }

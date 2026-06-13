@@ -221,17 +221,20 @@ fn cmd_stat(path_str: &str) -> Result<String> {
     ));
 
     if let Ok(modified) = meta.modified()
-        && let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
-            result.push_str(&format!("Modified: {}\n", format_time(dur.as_secs())));
-        }
+        && let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH)
+    {
+        result.push_str(&format!("Modified: {}\n", format_time(dur.as_secs())));
+    }
     if let Ok(created) = meta.created()
-        && let Ok(dur) = created.duration_since(std::time::UNIX_EPOCH) {
-            result.push_str(&format!("Created:  {}\n", format_time(dur.as_secs())));
-        }
+        && let Ok(dur) = created.duration_since(std::time::UNIX_EPOCH)
+    {
+        result.push_str(&format!("Created:  {}\n", format_time(dur.as_secs())));
+    }
     if let Ok(accessed) = meta.accessed()
-        && let Ok(dur) = accessed.duration_since(std::time::UNIX_EPOCH) {
-            result.push_str(&format!("Accessed: {}\n", format_time(dur.as_secs())));
-        }
+        && let Ok(dur) = accessed.duration_since(std::time::UNIX_EPOCH)
+    {
+        result.push_str(&format!("Accessed: {}\n", format_time(dur.as_secs())));
+    }
 
     #[cfg(unix)]
     {
@@ -248,8 +251,7 @@ fn cmd_glob(pattern: &str) -> Result<String> {
     let mut results = Vec::new();
 
     // Simple glob: split into base dir and pattern
-    let (base, pat) = if expanded.contains('/') {
-        let last_slash = expanded.rfind('/').unwrap();
+    let (base, pat) = if let Some(last_slash) = expanded.rfind('/') {
         let base = &expanded[..last_slash + 1];
         let pat = &expanded[last_slash + 1..];
         (base.to_string(), pat.to_string())

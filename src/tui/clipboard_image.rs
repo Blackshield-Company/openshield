@@ -41,10 +41,7 @@ fn detect_image_mime_type(bytes: &[u8]) -> &'static str {
         "image/jpeg"
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         "image/gif"
-    } else if bytes.starts_with(b"RIFF")
-        && bytes.len() > 8
-        && &bytes[8..12] == b"WEBP"
-    {
+    } else if bytes.starts_with(b"RIFF") && bytes.len() > 8 && &bytes[8..12] == b"WEBP" {
         "image/webp"
     } else if bytes.starts_with(b"BM") {
         "image/bmp"

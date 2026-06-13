@@ -20,33 +20,43 @@ impl Tool for SearchTool {
             return Ok("Usage: search <pattern> [path] [--ext <ext>]".to_string());
         }
 
-        // First arg is the pattern
-        let pattern = parts[0];
+        let mut pattern_parts: Vec<&str> = Vec::new();
         let mut path = ".";
         let mut ext: Option<&str> = None;
         let mut ignore_case = false;
+        let mut skip_next = false;
 
-        let mut i = 1;
-        while i < parts.len() {
-            match parts[i] {
+        for (i, part) in parts.iter().enumerate() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            match *part {
                 "--ext" | "-e" => {
-                    i += 1;
-                    if i < parts.len() {
-                        ext = Some(parts[i]);
+                    if i + 1 < parts.len() {
+                        ext = Some(parts[i + 1]);
                     }
+                    skip_next = true;
                 }
                 "--ignore-case" | "-i" => {
                     ignore_case = true;
                 }
                 _ => {
-                    // If it doesn't start with --, treat as path
-                    if !parts[i].starts_with('-') {
-                        path = parts[i];
+                    if !part.starts_with('-') {
+                        pattern_parts.push(part);
                     }
                 }
             }
-            i += 1;
         }
+
+        if pattern_parts.is_empty() {
+            return Ok("Usage: search <pattern> [path] [--ext <ext>]".to_string());
+        }
+
+        if pattern_parts.len() >= 2 {
+            path = pattern_parts.pop().expect("pattern_parts has at least 2 elements");
+        }
+        let pattern = pattern_parts.join(" ");
 
         let mut cmd = Command::new("rg");
         cmd.arg("--line-number")
@@ -62,11 +72,20 @@ impl Tool for SearchTool {
             cmd.arg("--type").arg(e);
         }
 
-        cmd.arg(pattern).arg(path);
+        cmd.arg(&pattern).arg(path);
 
-        let output = cmd
-            .output()
-            .with_context(|| "Failed to run ripgrep. Is it installed?")?;
+        let output = match cmd.output() {
+            Ok(o) => o,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return self.fallback_to_grep(&pattern, path);
+                }
+                return Err(anyhow::anyhow!(
+                    "Failed to run ripgrep: {}. Try using grep instead.",
+                    e
+                ));
+            }
+        };
 
         let mut result = String::new();
         if !output.stdout.is_empty() {
@@ -84,6 +103,17 @@ impl Tool for SearchTool {
         }
 
         Ok(result)
+    }
+}
+
+impl SearchTool {
+    fn fallback_to_grep(&self, pattern: &str, path: &str) -> Result<String> {
+        let grep = GrepTool;
+        let result = grep.execute(&format!("{} {}", pattern, path))?;
+        Ok(format!(
+            "[Note: ripgrep (rg) not found, using internal grep fallback]\n{}",
+            result
+        ))
     }
 }
 

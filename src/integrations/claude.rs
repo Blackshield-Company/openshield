@@ -19,8 +19,12 @@ impl Default for ClaudeConfig {
     }
 }
 
-fn default_false() -> bool { false }
-fn default_timeout() -> u64 { 300 }
+fn default_false() -> bool {
+    false
+}
+fn default_timeout() -> u64 {
+    300
+}
 
 pub fn detect() -> bool {
     std::process::Command::new("claude")
@@ -32,16 +36,20 @@ pub fn detect() -> bool {
 
 pub fn delegate(task: &str, _timeout: u64) -> anyhow::Result<String> {
     if !detect() {
-        anyhow::bail!("Claude Code not installed. Install: npm install -g @anthropic-ai/claude-code");
+        anyhow::bail!(
+            "Claude Code not installed. Install: npm install -g @anthropic-ai/claude-code"
+        );
     }
-    
+
     let output = std::process::Command::new("claude")
         .args(["-p", task])
-        
         .output()?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
-    Ok(format!("Claude Code output:\n{}\n[stderr]: {}", stdout, stderr))
+
+    Ok(format!(
+        "Claude Code output:\n{}\n[stderr]: {}",
+        stdout, stderr
+    ))
 }

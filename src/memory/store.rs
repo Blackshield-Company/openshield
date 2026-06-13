@@ -63,9 +63,10 @@ impl MemoryStore {
             .conn
             .execute("ALTER TABLE sessions ADD COLUMN project_path TEXT", []);
         // Migration: add archived column if it doesn't exist
-        let _ = self
-            .conn
-            .execute("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0", []);
+        let _ = self.conn.execute(
+            "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
 
         self.conn
             .execute_batch(
@@ -431,18 +432,22 @@ impl MemoryStore {
     }
 
     pub fn archive_session(&self, session_id: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET archived = 1 WHERE id = ?1",
-            params![session_id],
-        ).context("Failed to archive session")?;
+        self.conn
+            .execute(
+                "UPDATE sessions SET archived = 1 WHERE id = ?1",
+                params![session_id],
+            )
+            .context("Failed to archive session")?;
         Ok(())
     }
 
     pub fn unarchive_session(&self, session_id: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET archived = 0 WHERE id = ?1",
-            params![session_id],
-        ).context("Failed to unarchive session")?;
+        self.conn
+            .execute(
+                "UPDATE sessions SET archived = 0 WHERE id = ?1",
+                params![session_id],
+            )
+            .context("Failed to unarchive session")?;
         Ok(())
     }
 

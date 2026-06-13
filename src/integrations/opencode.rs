@@ -19,8 +19,12 @@ impl Default for OpencodeConfig {
     }
 }
 
-fn default_false() -> bool { false }
-fn default_timeout() -> u64 { 300 }
+fn default_false() -> bool {
+    false
+}
+fn default_timeout() -> u64 {
+    300
+}
 
 pub fn detect() -> bool {
     std::process::Command::new("opencode")
@@ -34,14 +38,16 @@ pub fn delegate(task: &str, _timeout: u64) -> anyhow::Result<String> {
     if !detect() {
         anyhow::bail!("OpenCode not installed. Install: npm install -g opencode");
     }
-    
+
     let output = std::process::Command::new("opencode")
         .args(["task", task])
-        
         .output()?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
-    Ok(format!("OpenCode output:\n{}\n[stderr]: {}", stdout, stderr))
+
+    Ok(format!(
+        "OpenCode output:\n{}\n[stderr]: {}",
+        stdout, stderr
+    ))
 }

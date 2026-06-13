@@ -1,8 +1,8 @@
 //! LSP server manager — maintains a pool of persistent LSP server connections
 //! keyed by language ID, avoiding per-call server spawns.
 
-use super::diagnostics::{parse_diagnostics_notification, DiagnosticStore};
 use super::Symbol;
+use super::diagnostics::{DiagnosticStore, parse_diagnostics_notification};
 use crate::lsp::AsyncTransport;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -186,11 +186,10 @@ impl LspServer {
 
                         if method == "textDocument/publishDiagnostics"
                             && let Some(params) = notification.get("params")
-                                && let Some((uri, diags)) =
-                                    parse_diagnostics_notification(params)
-                                {
-                                    diagnostics.update(&uri, diags).await;
-                                }
+                            && let Some((uri, diags)) = parse_diagnostics_notification(params)
+                        {
+                            diagnostics.update(&uri, diags).await;
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!("Diagnostics listener lagged, skipped {n} notifications");
@@ -398,10 +397,7 @@ impl LspServer {
                     };
                     let start = range.get("start").unwrap_or(&Value::Null);
 
-                    let file_uri = location
-                        .get("uri")
-                        .and_then(|u| u.as_str())
-                        .unwrap_or(&uri);
+                    let file_uri = location.get("uri").and_then(|u| u.as_str()).unwrap_or(&uri);
 
                     symbols.push(Symbol {
                         name: name.to_string(),
@@ -410,14 +406,9 @@ impl LspServer {
                             .strip_prefix("file://")
                             .unwrap_or(file_uri)
                             .to_string(),
-                        line: start
-                            .get("line")
-                            .and_then(|l| l.as_u64())
-                            .unwrap_or(0) as u32,
-                        character: start
-                            .get("character")
-                            .and_then(|c| c.as_u64())
-                            .unwrap_or(0) as u32,
+                        line: start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as u32,
+                        character: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0)
+                            as u32,
                         detail: item
                             .get("detail")
                             .and_then(|d| d.as_str())
@@ -471,11 +462,7 @@ impl LspServer {
         if let Err(e) = self.transport.send_request("shutdown", json!({})).await {
             warn!("LSP shutdown request failed: {e:#}");
         }
-        if let Err(e) = self
-            .transport
-            .send_notification("exit", json!({}))
-            .await
-        {
+        if let Err(e) = self.transport.send_notification("exit", json!({})).await {
             warn!("LSP exit notification failed: {e:#}");
         }
 
@@ -495,8 +482,7 @@ impl LspServer {
 
 /// Convert a filesystem path to a `file://` URI, canonicalizing if possible.
 fn file_path_to_uri(path: &str) -> Result<String> {
-    let canonical = std::fs::canonicalize(path)
-        .unwrap_or_else(|_| path.into());
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.into());
     Ok(format!("file://{}", canonical.display()))
 }
 
@@ -520,10 +506,7 @@ fn parse_location_or_link(item: &Value) -> Option<Symbol> {
         kind: "definition".to_string(),
         file: uri.strip_prefix("file://").unwrap_or(uri).to_string(),
         line: start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as u32,
-        character: start
-            .get("character")
-            .and_then(|c| c.as_u64())
-            .unwrap_or(0) as u32,
+        character: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as u32,
         detail: None,
     })
 }
@@ -648,6 +631,12 @@ mod tests {
     #[tokio::test]
     async fn test_manager_new() {
         let manager = LspManager::new("/tmp");
-        assert!(manager.diagnostics_store().get("/tmp/nonexistent.rs").await.is_empty());
+        assert!(
+            manager
+                .diagnostics_store()
+                .get("/tmp/nonexistent.rs")
+                .await
+                .is_empty()
+        );
     }
 }

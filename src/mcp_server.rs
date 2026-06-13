@@ -189,15 +189,15 @@ impl McpServer {
 
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-        
-
         match tool_name {
             "terminal" => {
                 let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
                 let tool = crate::tools::terminal::TerminalTool;
                 match crate::tools::Tool::execute(&tool, cmd) {
                     Ok(output) => json!({ "content": [{ "type": "text", "text": output }] }),
-                    Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] }),
+                    Err(e) => {
+                        json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] })
+                    }
                 }
             }
             "read_file" => {
@@ -205,7 +205,9 @@ impl McpServer {
                 let tool = crate::tools::fs::FsTool;
                 match crate::tools::Tool::execute(&tool, &format!("read {}", path)) {
                     Ok(content) => json!({ "content": [{ "type": "text", "text": content }] }),
-                    Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] }),
+                    Err(e) => {
+                        json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] })
+                    }
                 }
             }
             "write_file" => {
@@ -213,8 +215,12 @@ impl McpServer {
                 let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let tool = crate::tools::fs::FsTool;
                 match crate::tools::Tool::execute(&tool, &format!("write {} {}", path, content)) {
-                    Ok(_) => json!({ "content": [{ "type": "text", "text": "File written successfully" }] }),
-                    Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] }),
+                    Ok(_) => {
+                        json!({ "content": [{ "type": "text", "text": "File written successfully" }] })
+                    }
+                    Err(e) => {
+                        json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] })
+                    }
                 }
             }
             "search_files" => {
@@ -223,7 +229,9 @@ impl McpServer {
                 let tool = crate::tools::search::SearchTool;
                 match crate::tools::Tool::execute(&tool, &format!("{} {}", pattern, path)) {
                     Ok(results) => json!({ "content": [{ "type": "text", "text": results }] }),
-                    Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] }),
+                    Err(e) => {
+                        json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] })
+                    }
                 }
             }
             "git" => {
@@ -231,7 +239,9 @@ impl McpServer {
                 let tool = crate::tools::git::GitTool;
                 match crate::tools::Tool::execute(&tool, cmd) {
                     Ok(output) => json!({ "content": [{ "type": "text", "text": output }] }),
-                    Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] }),
+                    Err(e) => {
+                        json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] })
+                    }
                 }
             }
             "repo_map" => {
@@ -241,7 +251,9 @@ impl McpServer {
                         let formatted = crate::repo_map::format_repo_map_compact(&map);
                         json!({ "content": [{ "type": "text", "text": formatted }] })
                     }
-                    Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] }),
+                    Err(e) => {
+                        json!({ "isError": true, "content": [{ "type": "text", "text": e.to_string() }] })
+                    }
                 }
             }
             _ => json!({
@@ -285,7 +297,10 @@ mod tests {
     fn test_handle_tools_list() {
         let server = McpServer::new();
         let result = server.handle_tools_list();
-        let tools = result.get("tools").unwrap().as_array().unwrap();
+        let tools = result.get("tools")
+            .expect("tools list should contain tools key")
+            .as_array()
+            .expect("tools should be an array");
         assert!(!tools.is_empty());
     }
 }

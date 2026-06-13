@@ -8,10 +8,13 @@ use std::sync::{Arc, Mutex};
 type BackupPair = (PathBuf, PathBuf);
 
 /// Global undo stack — stores (original_path, backup_path) for last edit
-static LAST_BACKUP: std::sync::OnceLock<Arc<Mutex<Option<BackupPair>>>> = std::sync::OnceLock::new();
+static LAST_BACKUP: std::sync::OnceLock<Arc<Mutex<Option<BackupPair>>>> =
+    std::sync::OnceLock::new();
 
 fn get_backup_store() -> Arc<Mutex<Option<BackupPair>>> {
-    LAST_BACKUP.get_or_init(|| Arc::new(Mutex::new(None))).clone()
+    LAST_BACKUP
+        .get_or_init(|| Arc::new(Mutex::new(None)))
+        .clone()
 }
 
 /// Perform a backup before editing and store it for potential undo.
@@ -192,8 +195,8 @@ impl EditTool {
 
     /// Apply a unified diff (git diff format) to a file.
     ///
-    /// Format: edit diff <path>
-    /// --- <content with unified diff markers>
+    /// Format: edit diff `<path>`
+    /// --- `<content with unified diff markers>`
     ///
     /// The diff must be a unified diff with @@ -start,count +start,count @@ headers.
     fn apply_unified_diff(&self, args: &str) -> Result<String> {
@@ -333,7 +336,7 @@ impl EditTool {
 
     /// Replace a range of lines by line numbers.
     ///
-    /// Format: edit lines <path> <start>-<end> ||| <new_lines>
+    /// Format: edit lines `<path>` `<start>-<end>` ||| `<new_lines>`
     /// Replaces lines start through end (1-based, inclusive) with new_lines.
     fn replace_lines(&self, args: &str) -> Result<String> {
         let delimiter = " ||| ";
@@ -585,7 +588,9 @@ mod tests {
         let path = format!("{}/new_file.txt", dir);
 
         let tool = EditTool;
-        let result = tool.execute(&format!("rewrite {}\nbrand new content", path)).unwrap();
+        let result = tool
+            .execute(&format!("rewrite {}\nbrand new content", path))
+            .unwrap();
 
         assert!(result.contains("Rewrote"));
         let content = fs::read_to_string(&path).unwrap();

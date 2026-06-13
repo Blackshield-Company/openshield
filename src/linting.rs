@@ -251,7 +251,10 @@ fn parse_short_format(line: &str, tool: &str) -> Option<LintResult> {
 
 fn parse_eslint_compact(line: &str) -> Option<LintResult> {
     // "file.js: line 1, col 2, Error - message"
-    let re = regex::Regex::new(r"^(.*?):\s*line\s*(\d+),\s*col\s*(\d+),\s*(Error|Warning|Info)\s*-\s*(.*)$").ok()?;
+    let re = regex::Regex::new(
+        r"^(.*?):\s*line\s*(\d+),\s*col\s*(\d+),\s*(Error|Warning|Info)\s*-\s*(.*)$",
+    )
+    .ok()?;
     let caps = re.captures(line)?;
 
     Some(LintResult {

@@ -71,8 +71,6 @@ pub async fn review(
     provider: crate::providers::Provider,
     model: String,
 ) -> Result<ReviewReport> {
-    let _findings: Vec<ReviewFinding> = Vec::new();
-
     // Gather context based on target
     let context = match target {
         "recent" => gather_recent_changes(project_path).await?,
@@ -132,9 +130,18 @@ pub async fn review(
             format!(
                 "Found {} issue(s): {} critical, {} warnings, {} info",
                 parsed_findings.len(),
-                parsed_findings.iter().filter(|f| f.severity == Severity::Critical).count(),
-                parsed_findings.iter().filter(|f| f.severity == Severity::Warning).count(),
-                parsed_findings.iter().filter(|f| f.severity == Severity::Info).count(),
+                parsed_findings
+                    .iter()
+                    .filter(|f| f.severity == Severity::Critical)
+                    .count(),
+                parsed_findings
+                    .iter()
+                    .filter(|f| f.severity == Severity::Warning)
+                    .count(),
+                parsed_findings
+                    .iter()
+                    .filter(|f| f.severity == Severity::Info)
+                    .count(),
             )
         },
     })
@@ -187,16 +194,17 @@ fn parse_findings(content: &str) -> Vec<ReviewFinding> {
         }
 
         if let (Some(sev), Some(cat)) = (severity, category)
-            && !message.is_empty() {
-                findings.push(ReviewFinding {
-                    severity: sev,
-                    category: cat,
-                    file,
-                    line,
-                    message,
-                    suggestion,
-                });
-            }
+            && !message.is_empty()
+        {
+            findings.push(ReviewFinding {
+                severity: sev,
+                category: cat,
+                file,
+                line,
+                message,
+                suggestion,
+            });
+        }
     }
 
     findings
@@ -242,9 +250,13 @@ async fn gather_codebase_overview(project_path: &str) -> Result<String> {
     let file_list: Vec<&str> = files.lines().collect();
 
     // Limit to first 50 source files to avoid overwhelming the LLM
-    let limited: Vec<&str> = file_list.into_iter().filter(|f| {
-        f.ends_with(".rs") || f.ends_with(".py") || f.ends_with(".js") || f.ends_with(".ts")
-    }).take(50).collect();
+    let limited: Vec<&str> = file_list
+        .into_iter()
+        .filter(|f| {
+            f.ends_with(".rs") || f.ends_with(".py") || f.ends_with(".js") || f.ends_with(".ts")
+        })
+        .take(50)
+        .collect();
 
     Ok(format!(
         "Codebase files ({} shown):\n{}\n\nRun `/review <file>` for detailed review of a specific file.",

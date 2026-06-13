@@ -10,3 +10,8 @@ secrets/
 .cache/
 .openshark/
 .claw/
+
+# AI session artifacts
+.sandbox-home/
+.omo/
+.clawd-todos.json

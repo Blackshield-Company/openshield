@@ -387,7 +387,7 @@ fn highlight_json(lines: &[&str]) -> Vec<Line<'static>> {
                                 || next == '-'
                                 || next == '+'
                             {
-                                num.push(chars.next().unwrap());
+                                num.push(chars.next().expect("peek confirmed element exists"));
                             } else {
                                 break;
                             }
@@ -596,11 +596,11 @@ fn tokenize_and_highlight(
                 let mut raw = String::from('r');
                 let mut hash_count = 0;
                 while let Some(&'#') = chars.peek() {
-                    raw.push(chars.next().unwrap());
+                    raw.push(chars.next().expect("peek confirmed element exists"));
                     hash_count += 1;
                 }
                 if chars.peek() == Some(&'"') {
-                    raw.push(chars.next().unwrap());
+                    raw.push(chars.next().expect("peek confirmed element exists"));
                     // Read until closing "#
                     while let Some(c) = chars.next() {
                         raw.push(c);
@@ -608,7 +608,7 @@ fn tokenize_and_highlight(
                             let mut close_hashes = 0;
                             while close_hashes < hash_count {
                                 if chars.peek() == Some(&'#') {
-                                    raw.push(chars.next().unwrap());
+                                    raw.push(chars.next().expect("peek confirmed element exists"));
                                     close_hashes += 1;
                                 } else {
                                     break;
@@ -635,7 +635,7 @@ fn tokenize_and_highlight(
                         || next == 'e'
                         || next == 'E'
                     {
-                        num.push(chars.next().unwrap());
+                        num.push(chars.next().expect("peek confirmed element exists"));
                     } else if next == 'u'
                         || next == 'i'
                         || next == 'f'
@@ -643,10 +643,10 @@ fn tokenize_and_highlight(
                         || next == 'I'
                         || next == 'F'
                     {
-                        num.push(chars.next().unwrap());
+                        num.push(chars.next().expect("peek confirmed element exists"));
                         while let Some(&n) = chars.peek() {
                             if n.is_numeric() {
-                                num.push(chars.next().unwrap());
+                                num.push(chars.next().expect("peek confirmed element exists"));
                             } else {
                                 break;
                             }
@@ -663,7 +663,7 @@ fn tokenize_and_highlight(
                 let mut ident = String::from(c);
                 while let Some(&next) = chars.peek() {
                     if next.is_alphanumeric() || next == '_' || next == '!' {
-                        ident.push(chars.next().unwrap());
+                        ident.push(chars.next().expect("peek confirmed element exists"));
                     } else {
                         break;
                     }
@@ -946,7 +946,7 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
                     if next == '*' || next == '_' || next == '`' || next == '~' || next == '[' {
                         break;
                     }
-                    plain.push(chars.next().unwrap());
+                    plain.push(chars.next().expect("peek confirmed element exists"));
                 }
                 spans.push(Span::styled(plain, Style::default().fg(Color::White)));
             }

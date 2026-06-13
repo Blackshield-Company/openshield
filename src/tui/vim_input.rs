@@ -11,6 +11,14 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+fn prev_char_boundary(s: &str, pos: usize) -> usize {
+    s.floor_char_boundary(pos.saturating_sub(1))
+}
+
+fn next_char_boundary(s: &str, pos: usize) -> usize {
+    s.ceil_char_boundary(pos + 1)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VimMode {
     #[default]
@@ -111,7 +119,7 @@ fn handle_insert_mode(
                 *cursor = input.len();
             }
             if !input.is_empty() && *cursor > 0 {
-                *cursor -= 1; // Move back one char like vim
+                *cursor = prev_char_boundary(input, *cursor);
             }
             (true, false)
         }
@@ -121,15 +129,17 @@ fn handle_insert_mode(
         }
         KeyCode::Char(c) => {
             if *cursor <= input.len() {
+                let char_len = c.len_utf8();
                 input.insert(*cursor, c);
-                *cursor += 1;
+                *cursor += char_len;
             }
             (true, false)
         }
         KeyCode::Backspace => {
             if *cursor > 0 {
-                input.remove(*cursor - 1);
-                *cursor -= 1;
+                let prev = prev_char_boundary(input, *cursor);
+                input.remove(prev);
+                *cursor = prev;
             }
             (true, false)
         }
@@ -141,13 +151,13 @@ fn handle_insert_mode(
         }
         KeyCode::Left => {
             if *cursor > 0 {
-                *cursor -= 1;
+                *cursor = prev_char_boundary(input, *cursor);
             }
             (true, false)
         }
         KeyCode::Right => {
             if *cursor < input.len() {
-                *cursor += 1;
+                *cursor = next_char_boundary(input, *cursor);
             }
             (true, false)
         }
@@ -171,11 +181,13 @@ fn handle_normal_mode(
 ) -> (bool, bool) {
     // Number keys build count prefix
     if let KeyCode::Char(c) = key.code
-        && c.is_ascii_digit() && c != '0' {
-            let digit = c.to_digit(10).unwrap() as usize;
-            vim.count = Some(vim.count.unwrap_or(0) * 10 + digit);
-            return (true, false);
-        }
+        && c.is_ascii_digit()
+        && c != '0'
+    {
+        let digit = c.to_digit(10).expect("is_ascii_digit guarantees valid digit") as usize;
+        vim.count = Some(vim.count.unwrap_or(0) * 10 + digit);
+        return (true, false);
+    }
 
     let count = vim.count.take().unwrap_or(1);
 
@@ -219,7 +231,7 @@ fn handle_normal_mode(
         KeyCode::Char('h') | KeyCode::Left => {
             for _ in 0..count {
                 if *cursor > 0 {
-                    *cursor -= 1;
+                    *cursor = prev_char_boundary(input, *cursor);
                 }
             }
             (true, false)
@@ -246,7 +258,7 @@ fn handle_normal_mode(
         KeyCode::Char('l') | KeyCode::Right => {
             for _ in 0..count {
                 if *cursor < input.len().saturating_sub(1) {
-                    *cursor += 1;
+                    *cursor = next_char_boundary(input, *cursor);
                 }
             }
             (true, false)
@@ -317,10 +329,10 @@ fn handle_normal_mode(
             for _ in 0..count {
                 for ch in vim.yank_register.chars() {
                     if *cursor < input.len() {
-                        *cursor += 1;
+                        *cursor = next_char_boundary(input, *cursor);
                     }
                     input.insert(*cursor, ch);
-                    *cursor += 1;
+                    *cursor += ch.len_utf8();
                 }
             }
             (true, false)
@@ -397,13 +409,13 @@ fn handle_visual_mode(
         }
         KeyCode::Char('h') | KeyCode::Left => {
             if *cursor > 0 {
-                *cursor -= 1;
+                *cursor = prev_char_boundary(input, *cursor);
             }
             (true, false)
         }
         KeyCode::Char('l') | KeyCode::Right => {
             if *cursor < input.len().saturating_sub(1) {
-                *cursor += 1;
+                *cursor = next_char_boundary(input, *cursor);
             }
             (true, false)
         }
@@ -531,34 +543,46 @@ fn execute_vim_command(cmd: &str, input: &mut String, cursor: &mut usize) -> (bo
 }
 
 fn skip_word_forward(input: &str, cursor: &mut usize) {
-    let bytes = input.as_bytes();
+    let mut chars = input[*cursor..].char_indices();
     // Skip current word
-    while *cursor < bytes.len() && bytes[*cursor].is_ascii_alphanumeric() {
-        *cursor += 1;
+    for (_, ch) in chars.by_ref() {
+        if !ch.is_alphanumeric() {
+            break;
+        }
+        *cursor = next_char_boundary(input, *cursor);
     }
     // Skip non-word chars
-    while *cursor < bytes.len() && !bytes[*cursor].is_ascii_alphanumeric() {
-        *cursor += 1;
+    for (_, ch) in chars {
+        if ch.is_alphanumeric() {
+            break;
+        }
+        *cursor = next_char_boundary(input, *cursor);
     }
 }
 
 fn skip_word_backward(input: &str, cursor: &mut usize) {
-    let bytes = input.as_bytes();
     if *cursor == 0 {
         return;
     }
-    *cursor -= 1;
+    *cursor = prev_char_boundary(input, *cursor);
+    let mut pos = *cursor;
     // Skip non-word chars
-    while *cursor > 0 && !bytes[*cursor].is_ascii_alphanumeric() {
-        *cursor -= 1;
+    while pos > 0 {
+        let ch = input[pos..].chars().next().unwrap_or('\0');
+        if ch.is_alphanumeric() {
+            break;
+        }
+        pos = prev_char_boundary(input, pos);
     }
     // Skip word chars
-    while *cursor > 0 && bytes[*cursor].is_ascii_alphanumeric() {
-        *cursor -= 1;
+    while pos > 0 {
+        let ch = input[pos..].chars().next().unwrap_or('\0');
+        if !ch.is_alphanumeric() {
+            break;
+        }
+        pos = prev_char_boundary(input, pos);
     }
-    if !bytes[*cursor].is_ascii_alphanumeric() {
-        *cursor += 1;
-    }
+    *cursor = pos;
 }
 
 fn delete_line(input: &mut String, cursor: &mut usize, register: &mut String) {

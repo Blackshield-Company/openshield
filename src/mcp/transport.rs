@@ -174,7 +174,11 @@ impl SseTransport {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        Self { client, url, headers }
+        Self {
+            client,
+            url,
+            headers,
+        }
     }
 }
 

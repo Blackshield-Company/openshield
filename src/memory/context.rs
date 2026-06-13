@@ -1,8 +1,14 @@
 use anyhow::{Context, Result};
 use regex::Regex;
+use std::sync::OnceLock;
 
 use crate::memory::hierarchy::{ContextLayer, MemoryHierarchy};
 use crate::memory::store::{MemoryStore, Message};
+
+static WHAT_DID_WE_DO_RE: OnceLock<Regex> = OnceLock::new();
+static HOW_DID_WE_SOLVE_RE: OnceLock<Regex> = OnceLock::new();
+static TELL_ME_ABOUT_RE: OnceLock<Regex> = OnceLock::new();
+static WHAT_WAS_ISSUE_RE: OnceLock<Regex> = OnceLock::new();
 
 /// Injects relevant context from the memory hierarchy into conversations.
 pub struct ContextInjector<'a> {
@@ -142,8 +148,10 @@ impl<'a> ContextInjector<'a> {
         let query_lower = query.to_lowercase();
 
         // Pattern: "What did we do about X?"
-        let what_did_we_do =
-            Regex::new(r"what did we do (about|regarding|with|for)\s+(.+?)\??$").expect("valid regex");
+        let what_did_we_do = WHAT_DID_WE_DO_RE.get_or_init(|| {
+            Regex::new(r"what did we do (about|regarding|with|for)\s+(.+?)\??$")
+                .expect("what did we do regex compilation failed")
+        });
         if let Some(caps) = what_did_we_do.captures(&query_lower) {
             return QueryIntent::WhatDidWeDo {
                 topic: caps
@@ -154,8 +162,10 @@ impl<'a> ContextInjector<'a> {
         }
 
         // Pattern: "How did we solve X?"
-        let how_did_we_solve =
-            Regex::new(r"how did we (solve|fix|handle|address|implement)\s+(.+?)\??$").expect("valid regex");
+        let how_did_we_solve = HOW_DID_WE_SOLVE_RE.get_or_init(|| {
+            Regex::new(r"how did we (solve|fix|handle|address|implement)\s+(.+?)\??$")
+                .expect("how did we solve regex compilation failed")
+        });
         if let Some(caps) = how_did_we_solve.captures(&query_lower) {
             return QueryIntent::HowDidWeSolve {
                 topic: caps
@@ -166,7 +176,9 @@ impl<'a> ContextInjector<'a> {
         }
 
         // Pattern: "Tell me about X"
-        let tell_me_about = Regex::new(r"tell me (about|regarding)\s+(.+?)\??$").expect("valid regex");
+        let tell_me_about = TELL_ME_ABOUT_RE.get_or_init(|| {
+            Regex::new(r"tell me (about|regarding)\s+(.+?)\??$").expect("tell me about regex compilation failed")
+        });
         if let Some(caps) = tell_me_about.captures(&query_lower) {
             return QueryIntent::TellMeAbout {
                 topic: caps
@@ -177,9 +189,10 @@ impl<'a> ContextInjector<'a> {
         }
 
         // Pattern: "What was the issue with X?"
-        let what_was_issue =
+        let what_was_issue = WHAT_WAS_ISSUE_RE.get_or_init(|| {
             Regex::new(r"what (was|is) the (issue|problem|error|bug) (with|in)\s+(.+?)\??$")
-                .expect("valid regex");
+                .expect("what was issue regex compilation failed")
+        });
         if let Some(caps) = what_was_issue.captures(&query_lower) {
             return QueryIntent::WhatWasTheIssue {
                 topic: caps

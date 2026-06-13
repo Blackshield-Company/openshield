@@ -1,7 +1,7 @@
 use super::Diagnostic;
 use serde_json::Value;
 use std::collections::HashMap;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 /// Event emitted when diagnostics are updated for a file.
 #[derive(Debug, Clone)]
@@ -89,12 +89,7 @@ impl DiagnosticStore {
 
     // -- internal helpers ---------------------------------------------------
 
-    async fn notify_subscribers(
-        &self,
-        uri: &str,
-        diagnostics: &[Diagnostic],
-        source: &str,
-    ) {
+    async fn notify_subscribers(&self, uri: &str, diagnostics: &[Diagnostic], source: &str) {
         let mut subs = self.subscribers.lock().await;
         // Remove dead subscribers (receiver dropped).
         subs.retain(|tx| {
@@ -155,20 +150,11 @@ pub fn parse_diagnostics_notification(params: &Value) -> Option<(String, Vec<Dia
         let range = raw.get("range").unwrap_or(&Value::Null);
         let start = range.get("start").unwrap_or(&Value::Null);
 
-        let line = start
-            .get("line")
-            .and_then(|l| l.as_u64())
-            .unwrap_or(0) as u32;
+        let line = start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as u32;
 
-        let character = start
-            .get("character")
-            .and_then(|c| c.as_u64())
-            .unwrap_or(0) as u32;
+        let character = start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as u32;
 
-        let file = uri
-            .strip_prefix("file://")
-            .unwrap_or(&uri)
-            .to_string();
+        let file = uri.strip_prefix("file://").unwrap_or(&uri).to_string();
 
         diagnostics.push(Diagnostic {
             message,
@@ -192,15 +178,13 @@ mod tests {
         use std::sync::Arc;
         let store = Arc::new(DiagnosticStore::new());
 
-        let diags = vec![
-            Diagnostic {
-                message: "unused variable".into(),
-                severity: "Warning".into(),
-                file: "/tmp/a.rs".into(),
-                line: 10,
-                character: 4,
-            },
-        ];
+        let diags = vec![Diagnostic {
+            message: "unused variable".into(),
+            severity: "Warning".into(),
+            file: "/tmp/a.rs".into(),
+            line: 10,
+            character: 4,
+        }];
 
         store.update("file:///tmp/a.rs", diags.clone()).await;
 

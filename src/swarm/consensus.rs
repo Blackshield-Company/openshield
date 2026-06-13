@@ -88,7 +88,6 @@ impl ConsensusMemory {
         }
     }
 
-
     /// Get all entries.
     pub fn entries(&self) -> Vec<ConsensusEntry> {
         self.entries.values().cloned().collect()
