@@ -5180,105 +5180,10 @@ async fn execute_approved_tool_task(
                         metrics,
                     });
 
-                    // ── Handle chained tool suggestions in follow-up ──────────
-                    if !follow_content.starts_with("TOOL:") && !follow_content.starts_with("TOOL.")
-                    {
-                        let suggestions = crate::tools::detect_tool_suggestions(&follow_content);
-                        if let Some(next) = suggestions.into_iter().find(|s| s.confidence >= 0.6) {
-                            let next_tool = next.tool_name.clone();
-                            let next_args = next.args.clone();
-                            match security_engine.check_tool_call(&next_tool, &next_args) {
-                                crate::security::SecurityDecision::Allow => {
-                                    let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                        "🔧 Auto-executing: {} {} (low risk)",
-                                        next_tool, next_args
-                                    )));
-                                    // Execute chained tool and stream result back through event channel
-                                    match executor
-                                        .execute_with_timeout_simple(
-                                            next_tool.clone(),
-                                            next_args.clone(),
-                                            30000,
-                                        )
-                                        .await
-                                    {
-                                        Ok(result) => {
-                                            let _ = tx.send(StreamEvent::ToolResult {
-                                                name: next_tool.clone(),
-                                                args: next_args.clone(),
-                                                result: result.clone(),
-                                                success: true,
-                                            });
-                                            // Build follow-up messages for synthesis
-                                            let mut chained_messages = follow_messages.clone();
-                                            chained_messages.push(Message {
-                                                role: "assistant".to_string(),
-                                                content: format!(
-                                                    "TOOL:{} {}",
-                                                    next_tool, next_args
-                                                ),
-                                                images: None,
-                                                tool_call_id: None,
-                                                tool_calls: None,
-                                                reasoning_content: None,
-                                            });
-                                            chained_messages.push(Message {
-                                                role: "user".to_string(),
-                                                content: format!("Tool result: {}", result),
-                                                images: None,
-                                                tool_call_id: None,
-                                                tool_calls: None,
-                                                reasoning_content: None,
-                                            });
-                                            let chained_req = ChatRequest::new(
-                                                model.clone(),
-                                                chained_messages,
-                                                true,
-                                            );
-                                            match provider.chat_stream(chained_req).await {
-                                                Ok((chunks, _metrics)) => {
-                                                    let chained_content = chunks.join("");
-                                                    let _ = tx.send(StreamEvent::FollowUp(
-                                                        chained_content,
-                                                    ));
-                                                }
-                                                Err(e) => {
-                                                    let _ = tx.send(StreamEvent::Error(format!(
-                                                        "Chained follow-up failed: {}",
-                                                        e
-                                                    )));
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.send(StreamEvent::ToolResult {
-                                                name: next_tool,
-                                                args: next_args,
-                                                result: e.to_string(),
-                                                success: false,
-                                            });
-                                        }
-                                    }
-                                }
-                                crate::security::SecurityDecision::RequireApproval {
-                                    reason: _,
-                                    risk_level,
-                                } => {
-                                    let _ = tx.send(StreamEvent::SetPendingSuggestion(next));
-                                    let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                        "🔒 Tool '{}' requires approval (risk: {:?}) — press y/n",
-                                        next_tool, risk_level
-                                    )));
-                                }
-                                crate::security::SecurityDecision::Deny { reason } => {
-                                    let _ = tx.send(StreamEvent::Error(format!(
-                                        "🚫 Security: Tool '{}' blocked\n  Reason: {}",
-                                        next_tool, reason
-                                    )));
-                                }
-                            }
-                        }
-                    }
+                    // ── Chained tool detection DISABLED in follow-up synthesis ──────────
+                    // The follow-up is the SYNTHESIS phase. The model should NOT output tools.
+                    // If it does, we strip them in the FollowUp handler rather than re-executing.
+                    // This prevents infinite loops where the model keeps suggesting the same tools.
                 }
                 Err(e) => {
                     let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
