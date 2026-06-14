@@ -932,7 +932,7 @@ impl SlashRegistry {
     #[allow(dead_code)]
     pub fn format_help(&self) -> String {
         let mut lines = vec![
-            "🦈 Slash Commands".to_string(),
+            "🦞 Slash Commands".to_string(),
             "═══════════════════════════════════════════════════════════".to_string(),
             String::new(),
         ];

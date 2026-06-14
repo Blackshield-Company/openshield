@@ -88,7 +88,7 @@ fn parse_embedded_tools_cli(text: &str) -> Vec<(String, String)> {
 
 #[derive(Parser)]
 #[command(name = "openshark")]
-#[command(about = "🦈 The harness that learns. The agent that decides.")]
+#[command(about = "🦞 The harness that learns. The agent that decides.")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
@@ -185,6 +185,9 @@ enum Commands {
         /// Auto-approve all tool calls
         #[arg(short, long, default_value_t = false)]
         yolo: bool,
+        /// Full autonomy mode — bypass all approvals, auto-commit, auto-test
+        #[arg(long, default_value_t = false)]
+        autonomous: bool,
         /// Output NDJSON for structured consumption
         #[arg(short, long, default_value_t = false)]
         json: bool,
@@ -455,12 +458,12 @@ async fn main() -> anyhow::Result<()> {
             tui::run(config).await?;
         }
         Some(Commands::Setup) => {
-            println!("🦈 OpenShark Setup");
+            println!("🦞 OpenShark Setup");
             println!("Run `openshark` to start the TUI.");
             config::setup::run().await?;
         }
         Some(Commands::Config) => {
-            println!("🦈 OpenShark Config");
+            println!("🦞 OpenShark Config");
             let config_path = dirs::config_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("openshark")
@@ -476,7 +479,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Stats) => {
-            println!("🦈 OpenShark Stats");
+            println!("🦞 OpenShark Stats");
             println!();
 
             let memory = match memory::MemoryStore::new(&config.memory_db_path) {
@@ -656,7 +659,7 @@ async fn main() -> anyhow::Result<()> {
             limit,
         }) => {
             if query.is_empty() && !recent {
-                println!("🦈 Memory Query");
+                println!("🦞 Memory Query");
                 println!("Usage: openshark memory <query>");
                 println!("       openshark memory --recent [--limit 5]");
                 println!("       openshark memory <query> --semantic [--limit 10]");
@@ -664,7 +667,7 @@ async fn main() -> anyhow::Result<()> {
                 let memory = memory::MemoryStore::new(&config.memory_db_path)?;
                 match memory.get_recent_sessions(limit) {
                     Ok(sessions) => {
-                        println!("🦈 Recent Sessions (last {}):", limit);
+                        println!("🦞 Recent Sessions (last {}):", limit);
                         for s in sessions {
                             println!(
                                 "  {} | {} | {} | {}",
@@ -682,7 +685,7 @@ async fn main() -> anyhow::Result<()> {
                 match memory.semantic_search(&query, limit) {
                     Ok(results) => {
                         println!(
-                            "🦈 Semantic Search: '{}' ({} results)",
+                            "🦞 Semantic Search: '{}' ({} results)",
                             query,
                             results.len()
                         );
@@ -703,7 +706,7 @@ async fn main() -> anyhow::Result<()> {
                 let memory = memory::MemoryStore::new(&config.memory_db_path)?;
                 match memory.search_messages(&query, limit) {
                     Ok(messages) => {
-                        println!("🦈 Memory Search: '{}' ({} results)", query, messages.len());
+                        println!("🦞 Memory Search: '{}' ({} results)", query, messages.len());
                         for msg in messages {
                             let preview = &msg.content[..msg.content.len().min(100)];
                             println!(
@@ -726,7 +729,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Agent { task }) => {
             if task.is_empty() {
-                println!("🦈 Agent Mode");
+                println!("🦞 Agent Mode");
                 println!("Usage: openshark agent <task>");
                 println!("       openshark agent 'fix the bug in src/main.rs'");
             } else {
@@ -735,7 +738,7 @@ async fn main() -> anyhow::Result<()> {
                 match agent.run_task(&task).await {
                     Ok(result) => {
                         println!(
-                            "\n🦈 Agent Result: {}",
+                            "\n🦞 Agent Result: {}",
                             if result.success {
                                 "✅ Success"
                             } else {
@@ -767,7 +770,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Models) => {
-            println!("🦈 Available Models");
+            println!("🦞 Available Models");
             println!();
             for (provider_name, provider) in &config.providers {
                 println!("Provider: {} ({})", provider_name, provider.base_url);
@@ -801,7 +804,7 @@ async fn main() -> anyhow::Result<()> {
             file,
         }) => {
             if message.is_empty() && file.is_none() {
-                println!("🦈 One-shot Chat");
+                println!("🦞 One-shot Chat");
                 println!("Usage: openshark chat 'your message here'");
                 println!("       openshark chat 'hello' --model kimi-k2.6");
                 println!("       openshark chat 'review this' --file src/main.rs");
@@ -822,7 +825,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     });
 
-                println!("🦈 Chat with {} (via {})", model_name, provider_name);
+                println!("🦞 Chat with {} (via {})", model_name, provider_name);
                 println!();
 
                 let provider = providers::Provider::new(
@@ -1187,7 +1190,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Tools { cmd }) => match cmd.as_str() {
             "list" | "" => {
                 println!(
-                    "🦈 OpenShark Tools — {} total\n",
+                    "🦞 OpenShark Tools — {} total\n",
                     crate::tools::get_tools().len()
                 );
 
@@ -1208,7 +1211,7 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
             _ => {
-                println!("🦈 Tools Commands");
+                println!("🦞 Tools Commands");
                 println!("  openshark tools list  - Show all available tools");
             }
         },
@@ -1242,7 +1245,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             _ => {
-                println!("🦈 Plugin Commands");
+                println!("🦞 Plugin Commands");
                 println!("  openshark plugins list           - List all plugins");
                 println!("  openshark plugins create <name>  - Create plugin scaffold");
                 println!("  openshark plugins enable <name>  - Enable a plugin");
@@ -1251,7 +1254,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(Commands::Delegate { agent, task }) => {
             if agent.is_empty() || task.is_empty() {
-                println!("🦈 Delegate — Route tasks to external agents");
+                println!("🦞 Delegate — Route tasks to external agents");
                 println!();
                 println!("Usage: openshark delegate <agent> <task>");
                 println!("       openshark delegate claw 'refactor auth module'");
@@ -1268,7 +1271,7 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 match agent.parse::<integrations::registry::Agent>() {
                     Ok(a) => {
-                        println!("🦈 Delegating to {}: {}", a, task);
+                        println!("🦞 Delegating to {}: {}", a, task);
                         match integrations::registry::delegate(a, &task, 300) {
                             Ok(result) => println!("{}", result),
                             Err(e) => println!("❌ Delegation failed: {}", e),
@@ -1280,7 +1283,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Hermes { cmd }) => match cmd.as_str() {
             "status" => {
-                println!("🦈 Hermes Bridge");
+                println!("🦞 Hermes Bridge");
                 println!("{}", "─".repeat(50));
                 let detected = integrations::hermes::detect();
                 println!("  Hermes detected: {}", if detected { "✅" } else { "❌" });
@@ -1300,7 +1303,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => println!("❌ Push failed: {}", e),
             },
             _ => {
-                println!("🦈 Hermes Commands");
+                println!("🦞 Hermes Commands");
                 println!("  openshark hermes status - Show bridge status");
                 println!("  openshark hermes sync   - Pull memories from Hermes");
                 println!("  openshark hermes push   - Push skills to Hermes");
@@ -1309,13 +1312,14 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Headless {
             task,
             yolo,
+            autonomous,
             json,
             timeout,
             max_turns,
             model,
             output,
         }) => {
-            println!("🦈 OpenShark Headless Mode");
+            println!("🦞 OpenShark Headless Mode");
             let mut cfg = config.clone();
             if let Some(ref m) = model {
                 cfg.default_model = m.clone();
@@ -1323,10 +1327,11 @@ async fn main() -> anyhow::Result<()> {
             let headless_config = crate::headless::HeadlessConfig {
                 task,
                 yolo,
+                autonomous,
                 json,
                 max_turns,
                 timeout_secs: timeout,
-                model,
+                model: model.clone(),
                 output_file: output,
             };
             let provider = match crate::swarm::agent_runner::build_agent_provider(&cfg) {
@@ -1336,8 +1341,17 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
+            let security = match crate::security::SecurityEngine::new(
+                crate::security::SecurityConfig::default()
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ Failed to initialize security engine: {}", e);
+                    std::process::exit(1);
+                }
+            };
             if let Err(e) =
-                crate::headless::run_headless(headless_config, provider, cfg.default_model, None)
+                crate::headless::run_headless(headless_config, provider, cfg.default_model, security, None)
                     .await
             {
                 eprintln!("❌ Headless run failed: {}", e);
@@ -1345,7 +1359,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::RepoMap { path }) => {
-            println!("🦈 Repo Map");
+            println!("🦞 Repo Map");
             match crate::repo_map::build_repo_map(&path) {
                 Ok(map) => {
                     println!("{}", crate::repo_map::format_repo_map(&map));
@@ -1357,7 +1371,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Lint { path }) => {
-            println!("🦈 Lint");
+            println!("🦞 Lint");
             match crate::linting::detect_linter(&path) {
                 Some(linter) => {
                     println!("Detected linter: {}", linter);
@@ -1389,7 +1403,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::McpServer) => {
-            println!("🦈 OpenShark MCP Server");
+            println!("🦞 OpenShark MCP Server");
             let server = crate::mcp_server::McpServer::new();
             if let Err(e) = server.run_stdio().await {
                 eprintln!("❌ MCP server error: {}", e);
@@ -1397,7 +1411,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Diff) => {
-            println!("🦈 Diff — AI-made changes");
+            println!("🦞 Diff — AI-made changes");
             let git_tool = crate::tools::GitTool;
             match git_tool.execute("diff") {
                 Ok(diff) => {
@@ -1436,7 +1450,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Profile { name }) => {
             if name.is_empty() {
-                println!("🦈 Config Profiles");
+                println!("🦞 Config Profiles");
                 println!("Usage: openshark profile <name>");
                 println!();
                 println!("Profiles are stored in ~/.config/openshark/profiles/");
@@ -1465,7 +1479,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Export { name }) => {
-            println!("🦈 Export session to markdown");
+            println!("🦞 Export session to markdown");
             let memory = match memory::MemoryStore::new(&config.memory_db_path) {
                 Ok(m) => m,
                 Err(e) => {
