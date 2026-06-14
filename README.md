@@ -5,7 +5,7 @@
  \___/| .__/ \___|_| |_|____/|_| |_|\__,_|_|  |_|\_\
       |_|
 
-> 🦈 *Fast. Precise. Hungry.*
+> 🦞 *Fast. Precise. Hungry.*
 
 ![OpenShark Title Screen](openshark.png)
 
@@ -392,7 +392,7 @@ See [STATUS.md](STATUS.md) for current development status and session handoff no
 
 ---
 
-Made by synth with synthshark 🎹🦈
+Made by synth with synthclaw 🎹🦞
 
 ## License
 

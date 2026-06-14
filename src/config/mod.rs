@@ -56,7 +56,7 @@ impl Default for AgentIdentity {
             style: "Direct. No fluff. Gets to the point. But with soul.".to_string(),
             greeting: "".to_string(),
             farewell: "Code shipped. On to the next. The tape never stops rolling.".to_string(),
-            emoji: "🦈".to_string(),
+            emoji: "🦞".to_string(),
             catchphrases: vec![
                 "This is the wave.".to_string(),
                 "The grid is endless.".to_string(),
@@ -447,7 +447,7 @@ impl Default for Config {
                 api_key: "llama-swap-local".to_string(),
                 models: vec![
                     ModelConfig {
-                        name: "synthshark-35b-128k".to_string(),
+                        name: "synthclaw-35b-128k".to_string(),
                         context_length: 128000,
                         cost_per_1k_input: 0.0,
                         cost_per_1k_output: 0.0,
@@ -458,14 +458,14 @@ impl Default for Config {
                         ],
                     },
                     ModelConfig {
-                        name: "synthshark-14b-128k".to_string(),
+                        name: "synthclaw-14b-128k".to_string(),
                         context_length: 128000,
                         cost_per_1k_input: 0.0,
                         cost_per_1k_output: 0.0,
                         capabilities: vec!["code".to_string(), "chat".to_string()],
                     },
                     ModelConfig {
-                        name: "synthshark-9b-128k".to_string(),
+                        name: "synthclaw-9b-128k".to_string(),
                         context_length: 128000,
                         cost_per_1k_input: 0.0,
                         cost_per_1k_output: 0.0,

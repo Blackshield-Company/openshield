@@ -288,26 +288,18 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             });
         }
         StreamEvent::FollowUp(content) => {
-            // FollowUp is the SYNTHESIS phase — the model should NOT output more tools.
-            // If it does, strip them and display as text instead of re-executing.
+            // FollowUp is the final response after autonomous tool execution.
+            // The background task should have already handled all tool loops.
+            // If tools somehow appear here, display them as part of the message.
             let embedded_tools = parse_embedded_tools(&content);
             if !embedded_tools.is_empty() {
-                // Model incorrectly output tools during synthesis phase.
-                // Strip tool lines and display the remaining text as the assistant's response.
-                let display_content = strip_think_tags(&strip_tool_lines(&content));
-                if !display_content.trim().is_empty() {
-                    app.add_system_message(
-                        "⚠️ Model tried to call more tools during synthesis. Stripped tool calls."
-                            .to_string(),
-                    );
-                    app.add_assistant_message(display_content, None);
-                } else {
-                    app.add_system_message(
-                        "⚠️ Model output only tool calls during synthesis phase (ignored)."
-                            .to_string(),
-                    );
-                }
-                // Do NOT re-execute tools — that causes infinite loops
+                // Model output tools in what should be the final response.
+                // Display with a warning — the background task may have missed these.
+                let display_content = strip_think_tags(&content);
+                app.add_system_message(
+                    "⚠️ Model output tools in final response. These were not re-executed.".to_string(),
+                );
+                app.add_assistant_message(display_content, None);
                 return;
             }
 

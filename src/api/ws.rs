@@ -265,6 +265,7 @@ async fn handle_agent_ws(mut socket: WebSocket) {
                 let headless_config = crate::headless::HeadlessConfig {
                     task: task.clone(),
                     yolo,
+                    autonomous: false,
                     json: false,
                     timeout_secs: 300,
                     max_turns,
@@ -273,6 +274,21 @@ async fn handle_agent_ws(mut socket: WebSocket) {
                 };
 
                 let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+                let security = match crate::security::SecurityEngine::new(
+                    crate::security::SecurityConfig::default()
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = send_json(
+                            &mut socket,
+                            &ServerMessage::Error {
+                                message: format!("Security engine failed: {}", e),
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
+                };
 
                 // Spawn headless agent in background
                 tokio::spawn(async move {
@@ -280,6 +296,7 @@ async fn handle_agent_ws(mut socket: WebSocket) {
                         headless_config,
                         provider,
                         model,
+                        security,
                         Some(event_tx),
                     )
                     .await;

@@ -1,11 +1,12 @@
 # OpenShark Status — Session Handoff
 
-## What's Built (v1.0.0)
+## What's Built (v1.1.0 — Autonomous Harness)
 
 | Feature | Status | Details |
 |---------|--------|---------|
 | CLI scaffold | ✅ | `setup`, `stats`, `memory`, `route`, `learn`, `test`, `agent` commands |
 | Provider abstraction | ✅ | OpenAI-compatible API, local llama-swap support, reusable reqwest::Client |
+| **Native tool calling** | ✅ | Model receives `tool_calls` schema, executes native function calls |
 | Chat with models | ✅ | **Streaming** chat, system prompts, context window |
 | SQLite memory | ✅ | Sessions, messages, tool calls persisted |
 | Memory search CLI | ✅ | `openshark memory <query>` + `--recent [n]` |
@@ -32,7 +33,12 @@
 | **Evolution engine** | ✅ | Self-adaptive behavior based on tool/model/session performance |
 | **Matrix gateway** | ✅ | Sync loop scaffold with reply sender and unified router |
 | **Slack gateway** | ✅ | Socket Mode scaffold with reply sender |
-| **Comprehensive tests** | ✅ | **337 tests** across all modules |
+| **Headless / CI-CD mode** | ✅ | Non-interactive task execution with native tool calling |
+| **Autonomous mode** | ✅ | `--autonomous` flag: bypass approvals, auto-test, auto-commit, self-improve |
+| **Repo context auto-loading** | ✅ | Headless mode injects repo map + relevant files into system prompt |
+| **Checkpoint before edits** | ✅ | Auto-creates git checkpoint before autonomous execution |
+| **Post-run verification** | ✅ | Auto-runs tests after changes, auto-commits on success |
+| **Comprehensive tests** | ✅ | **466 tests** across all modules |
 
 ## Architecture
 
@@ -120,31 +126,54 @@ Type these directly in the TUI for instant answers from memory:
 - ✅ **Slack Gateway** — Socket Mode scaffold with `SlackReplySender`, ready event emission, and full Socket Mode structure.
 - ✅ **Swarm CLI** — `openshark swarm init/start/stop/status` commands for multi-agent orchestration from terminal.
 
+- **Headless Autonomous Mode** — `openshark headless --autonomous "task"`
+  - Native `tool_calls` function calling (no regex parsing)
+  - Auto-repo-context: loads repo map + relevant files into prompt
+  - Auto-checkpoint: creates git stash before edits
+  - Auto-test: runs tests after changes
+  - Auto-commit: commits changes on success
+  - Auto-self-improve: triggers analysis in background
+  - `--output` flag writes results to file
+  - `--yolo` flag still works for approval bypass
+  - Fallback text-based tool detection for non-function-calling models
+  - Loop detection with 3-turn stall breaker
+  - Structured NDJSON output with `--json`
+
 ### Code Quality
-- ✅ **337 tests** across all modules (up from 246)
-- ✅ Zero compiler errors, 28 warnings (down from 128+)
+- ✅ **466 tests** across all modules (up from 337)
+- ✅ Zero compiler errors, minimal warnings
 - ✅ All test compilation errors fixed
+- ✅ Provider layer correctly parses `tool_calls` from API responses
+- ✅ Headless mode passes tool definitions to model and handles returned `tool_calls`
 
 ## Next Session Targets
 
-### Priority 1: TUI Polish (Phase 5 completion)
+### Priority 1: Fully Autonomous Coding Agent (COMPLETE)
+- [x] Native tool calling in headless mode
+- [x] `--autonomous` CLI flag with auto-commit, auto-test, auto-checkpoint
+- [x] Repo context auto-loading for headless tasks
+- [x] Provider `tool_calls` parsing from API responses
+- [x] Self-improvement feedback loop after autonomous runs
+- [x] Output file writing (`--output` flag)
+
+### Priority 2: TUI Polish (Phase 5 completion)
 - [ ] **Full Ratatui interface** — Replace simple terminal output with proper panes, scrollable history, sidebar
 - [ ] **Interactive tool approval** — Inline y/n approval for detected tool suggestions (not just text prompt)
 - [ ] **Keybindings** — Ctrl+C copy, arrow keys navigate history, Tab autocomplete
 - [ ] **Session sidebar** — Show active model, token usage, session info in a persistent panel
 
-### Priority 2: Stats & Observability
+### Priority 3: Stats & Observability
 - [ ] **Real stats command** — `openshark stats` currently a stub. Show token usage, cost tracking, session count, model performance
 - [ ] **Performance metrics** — Track first-token latency, tool execution time, cache hit rate
 - [ ] **Export session data** — JSON/CSV export for analysis
 
-### Priority 3: Advanced Features
+### Priority 4: Advanced Features
 - [ ] **Multi-model chat** — Compare responses from multiple models side-by-side
 - [ ] **Custom tool creation** — Let users define new tools via config
 - [ ] **Session branching** — Fork a session at any point to explore alternatives
 - [ ] **Git integration depth** — PR creation, code review, merge conflict resolution
 
-### Priority 4: Distribution
+### Priority 5: Distribution
 - [ ] **Cargo publish** — Prepare for crates.io publication
 - [ ] **Installation scripts** — One-liner install via curl
 - [ ] **Homebrew formula** — macOS package
@@ -164,7 +193,9 @@ Type these directly in the TUI for instant answers from memory:
 
 ```bash
 cd /home/synth/projects/openshark
-cargo run --              # Start TUI with streaming
+cargo run -- headless --autonomous "implement feature X" --output results.txt
+cargo run -- headless --autonomous "fix the bug in src/main.rs" --model gpt-4
+cargo run -- headless --yolo "refactor auth module" --json
 cargo run -- setup       # Reconfigure
 cargo run -- route       # See routing decisions with real scoring
 cargo run -- learn       # See self-improvement analysis

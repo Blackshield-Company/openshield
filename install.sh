@@ -8,7 +8,7 @@ REPO="https://github.com/synthalorian/openshark.git"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/openshark}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
-echo "🦈 OpenShark Installer"
+echo "🦞 OpenShark Installer"
 echo "======================"
 
 # Check for Rust
@@ -109,7 +109,7 @@ main() {
     echo "  ANTHROPIC_API_KEY   Your Anthropic API key"
     echo "  KIMI_API_KEY        Your Kimi API key"
     echo "  XAI_API_KEY         Your xAI API key"
-    echo "  SOUL_NAME           Set to 'blank' for blank slate, or 'synthshark' (default)"
+    echo "  SOUL_NAME           Set to 'blank' for blank slate, or 'synthclaw' (default)"
     echo ""
     echo "Run 'openshark' to start!"
 }

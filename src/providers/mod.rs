@@ -492,7 +492,24 @@ impl Provider {
                     .unwrap_or("")
                     .to_string();
 
-                // Extract reasoning_content if present (Kimi thinking)
+                // Extract tool_calls if present
+                let tool_calls = raw["choices"][0]["message"]["tool_calls"].as_array().map(|arr| {
+                    arr.iter().filter_map(|tc| {
+                        let id = tc["id"].as_str()?.to_string();
+                        let tool_type = tc["type"].as_str().unwrap_or("function").to_string();
+                        let function_name = tc["function"]["name"].as_str()?.to_string();
+                        let function_args = tc["function"]["arguments"].as_str()?.to_string();
+                        Some(ToolCallRequest {
+                            id,
+                            r#type: tool_type,
+                            function: ToolCallFunction {
+                                name: function_name,
+                                arguments: function_args,
+                            },
+                        })
+                    }).collect::<Vec<_>>()
+                });
+
                 if let Some(reasoning) = raw["choices"][0]["message"]["reasoning_content"].as_str()
                     && !reasoning.is_empty()
                 {
@@ -512,7 +529,7 @@ impl Provider {
                             content,
                             images: None,
                             tool_call_id: None,
-                            tool_calls: None,
+                            tool_calls: tool_calls,
                             reasoning_content: None,
                         },
                         finish_reason: raw["choices"][0]["finish_reason"]
