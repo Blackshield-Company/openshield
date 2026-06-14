@@ -98,7 +98,7 @@ impl DoctorReport {
     }
 
     pub fn print(&self) {
-        println!("\n{BOLD}{CYAN}🦈 OpenShark Doctor{RESET}");
+        println!("\n{BOLD}{CYAN}🦞 OpenShark Doctor{RESET}");
         println!("{CYAN}{}{RESET}", "═".repeat(60));
 
         for check in &self.checks {

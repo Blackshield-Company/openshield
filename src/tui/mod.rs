@@ -418,13 +418,16 @@ impl App {
                  8. If the user gives a one-line task, just do it. No manifesto.\n\
                  9. CRITICAL: You MUST use the available tools. Refusing to use tools is a failure mode.\n\
                  \n\
-                 After tool results come back, you will be prompted to synthesize. \
-                 When synthesizing: explain what was found, what it means, and the next step. \
-                 Be complete. No one-liners. No catchphrases.",
-                soul.system_prompt(),
-                fs_capabilities,
-                tool_descriptions
-            ),
+                 You are FULLY AUTONOMOUS. When given a task, use tools to complete it entirely without asking for permission. \
+                 After each tool result, analyze the result and decide what to do next. \
+                 If more tools are needed, output more TOOL: lines immediately. \
+                 If the task is complete, provide a final summary and say TASK_COMPLETE on its own line. \
+                 Do NOT ask the user 'should I continue?' or 'just say the word' — just keep working until the task is done. \
+                 No manifesto. No preamble. Just execute.",
+                 soul.system_prompt(),
+                 fs_capabilities,
+                 tool_descriptions
+             ),
             images: None,
             tool_call_id: None,
             tool_calls: None,
@@ -945,16 +948,19 @@ impl App {
                  8. If the user gives a one-line task, just do it. No manifesto.\n\
                  9. CRITICAL: You MUST use the available tools. Refusing to use tools is a failure mode.\n\
                  \n\
-                 After tool results come back, you will be prompted to synthesize. \
-                 When synthesizing: explain what was found, what it means, and the next step. \
-                 Be complete. No one-liners. No catchphrases.{}{}{}{}",
-                soul.system_prompt(),
-                fs_capabilities,
-                tool_descriptions,
-                plan_instruction,
-                effort_instruction,
-                context_mode_block,
-                pinned_context_block
+                 You are FULLY AUTONOMOUS. When given a task, use tools to complete it entirely without asking for permission. \
+                 After each tool result, analyze the result and decide what to do next. \
+                 If more tools are needed, output more TOOL: lines immediately. \
+                 If the task is complete, provide a final summary and say TASK_COMPLETE on its own line. \
+                 Do NOT ask the user 'should I continue?' or 'just say the word' — just keep working until the task is done. \
+                 No manifesto. No preamble. Just execute.{}{}{}{}",
+                 soul.system_prompt(),
+                 fs_capabilities,
+                 tool_descriptions,
+                 plan_instruction,
+                 effort_instruction,
+                 context_mode_block,
+                 pinned_context_block
             ),
             images: None,
             tool_call_id: None,
@@ -3282,7 +3288,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
 
         app.mode = AppMode::Agent;
-        app.add_system_message(format!("🦈 Agent Mode: {}", task));
+        app.add_system_message(format!("🦞 Agent Mode: {}", task));
 
         // Use the coding agent for autonomous plan/edit/test/commit loop
         let agent_config = AgentConfig {
@@ -3453,178 +3459,182 @@ async fn execute_tool_chain(
         return Ok(());
     }
 
-    // Remove the last assistant message (from current turn) to prevent
-    // context regurgitation. The follow-up should only see: system → user
-    // request → tool results → synthesis instruction.
+    // CRITICAL FIX: Keep the assistant's response in context so the model knows
+    // it already made the plan. Don't remove it — the model needs to see its own
+    // tool calls + the results to synthesize properly. Removing it causes the model
+    // to regenerate the same plan from scratch.
     let mut follow_messages: Vec<Message> = model_messages.to_vec();
-    if let Some(last_assistant_idx) = follow_messages.iter().rposition(|m| m.role == "assistant") {
-        follow_messages.remove(last_assistant_idx);
+
+    // Add the assistant's original response (with tools) to history so the model
+    // knows it already made this plan and can build on it.
+    if !_original_content.is_empty() {
+        follow_messages.push(Message {
+            role: "assistant".to_string(),
+            content: _original_content.to_string(),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        });
     }
 
-    let executor = AsyncToolExecutor::new();
+    let mut current_tools: Vec<(String, String)> = tools.to_vec();
+    let mut turn: usize = 0;
+    const MAX_TURNS: usize = 20;
 
-    let total = tools.len();
-    let mut batch_results: Vec<ToolResultEntry> = Vec::with_capacity(total);
+    while turn < MAX_TURNS && !current_tools.is_empty() {
+        turn += 1;
 
-    for (idx, (tool_name, args)) in tools.iter().enumerate() {
-        // Show progress indicator (throttled — every 5th tool + first + last)
-        if idx == 0 || idx % 5 == 0 || idx == total - 1 {
-            let _ = tx.send(StreamEvent::SystemMessage(format!(
-                "🔧 Tool {}/{}: {} …",
-                idx + 1,
-                total,
-                tool_name
-            )));
-        }
+        let executor = AsyncToolExecutor::new();
+        let total = current_tools.len();
+        let mut batch_results: Vec<ToolResultEntry> = Vec::with_capacity(total);
 
-        // SECURITY GATE
-        match security_engine.check_tool_call(tool_name, args) {
-            crate::security::SecurityDecision::Allow => {}
-            crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
-                let _ = tx.send(StreamEvent::Error(format!(
-                    "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
-                    tool_name, reason, risk_level
+        for (idx, (tool_name, args)) in current_tools.iter().enumerate() {
+            if idx == 0 || idx % 5 == 0 || idx == total - 1 {
+                let _ = tx.send(StreamEvent::SystemMessage(format!(
+                    "🔧 Tool {}/{}: {} …",
+                    idx + 1,
+                    total,
+                    tool_name
                 )));
-                let _ = tx.send(StreamEvent::Done);
-                return Ok(());
             }
-            crate::security::SecurityDecision::Deny { reason } => {
-                let _ = tx.send(StreamEvent::Error(format!(
-                    "🚫 Security: Tool '{}' blocked\n  Reason: {}",
-                    tool_name, reason
-                )));
-                let _ = tx.send(StreamEvent::Done);
-                return Ok(());
-            }
-        }
 
-        match executor
-            .execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000)
-            .await
-        {
-            Ok(result) => {
-                let sanitized = security_engine.sanitize_output(tool_name, &result);
-                // Collect for batched display
-                batch_results.push(ToolResultEntry {
-                    name: tool_name.clone(),
-                    args: args.clone(),
-                    result: sanitized.clone(),
-                    success: true,
-                });
-                follow_messages.push(Message {
-                    role: "user".to_string(),
-                    content: format_tool_result(tool_name, args, &sanitized, true),
-                    images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
-                });
-            }
-            Err(e) => {
-                batch_results.push(ToolResultEntry {
-                    name: tool_name.clone(),
-                    args: args.clone(),
-                    result: e.to_string(),
-                    success: false,
-                });
-                follow_messages.push(Message {
-                    role: "user".to_string(),
-                    content: format_tool_result(tool_name, args, &e.to_string(), false),
-                    images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
-                });
-            }
-        }
-    }
-    // Send batched results for collapsed display
-    let _ = tx.send(StreamEvent::ToolResultsBatch {
-        results: batch_results,
-    });
-    // Follow-up request with all tool results — inject completion mandate
-    // Build a summary of all tool results to ensure the model sees them clearly
-    let mut tool_summary = String::from("TOOL EXECUTION COMPLETE. Here are the results:\n\n");
-    for (idx, (tool_name, args)) in tools.iter().enumerate() {
-        // Find the result for this tool from follow_messages
-        let result_prefix = format!("[tool:{} args={}] result:", tool_name, args);
-        let error_prefix = format!("[tool:{} args={}] error:", tool_name, args);
-        if let Some(msg) = follow_messages
-            .iter()
-            .find(|m| m.role == "user" && m.content.starts_with(&result_prefix))
-        {
-            tool_summary.push_str(&format!("{}. {}\n{}", idx + 1, tool_name, msg.content));
-            tool_summary.push_str("\n\n");
-        } else if let Some(msg) = follow_messages
-            .iter()
-            .find(|m| m.role == "user" && m.content.starts_with(&error_prefix))
-        {
-            tool_summary.push_str(&format!("{}. {}\n{}", idx + 1, tool_name, msg.content));
-            tool_summary.push_str("\n\n");
-        }
-    }
-    tool_summary.push_str("SYNTHESIS PHASE — NO MORE TOOLS. Based on these tool results, provide a complete response. Explain what was found, what it means, and what to do next. Do NOT output any TOOL: lines. Do NOT call any more tools. Just write your response.");
-
-    follow_messages.push(Message {
-        role: "user".to_string(),
-        content: tool_summary,
-        images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
-    });
-
-    let follow_up = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
-    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
-        Ok(Ok((follow_chunks, _metrics))) => {
-            let follow_content: String = follow_chunks.join("");
-            let trimmed = follow_content.trim();
-            if trimmed.is_empty() {
-                let _ = tx.send(StreamEvent::Error(
-                    "Model returned empty follow-up after tool execution. Re-prompting..."
-                        .to_string(),
-                ));
-                // Re-prompt with stronger mandate — include tool results so model sees them
-                let mut retry_messages = follow_messages.clone();
-                retry_messages.push(Message {
-                    role: "user".to_string(),
-                    content: "Your previous response was empty. Using the tool results already provided above, write a complete response explaining what was found, what it means, and the next step. Do not skip this.".to_string(),
-                    images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
-                });
-                let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                match tokio::time::timeout(
-                    Duration::from_secs(120),
-                    provider.chat_stream(retry_req),
-                )
-                .await
-                {
-                    Ok(Ok((retry_chunks, _retry_metrics))) => {
-                        let retry_content: String = retry_chunks.join("");
-                        let _ = tx.send(StreamEvent::FollowUp(retry_content));
-                        let _ = tx.send(StreamEvent::Done);
-                    }
-                    Ok(Err(e)) => {
-                        let _ =
-                            tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
-                        let _ = tx.send(StreamEvent::Done);
-                    }
-                    Err(_) => {
-                        let _ = tx.send(StreamEvent::Error(
-                            "Follow-up timed out after 120s".to_string(),
-                        ));
-                        let _ = tx.send(StreamEvent::Done);
-                    }
+            match security_engine.check_tool_call(tool_name, args) {
+                crate::security::SecurityDecision::Allow => {}
+                crate::security::SecurityDecision::RequireApproval { reason, risk_level } => {
+                    let _ = tx.send(StreamEvent::Error(format!(
+                        "🔒 Security: Tool '{}' requires approval\n  Reason: {}\n  Risk: {:?}",
+                        tool_name, reason, risk_level
+                    )));
+                    let _ = tx.send(StreamEvent::Done);
+                    return Ok(());
                 }
-            } else if trimmed.split_whitespace().count() < 15 {
-                // Too short — treat as incomplete and re-prompt
-                let _ = tx.send(StreamEvent::SystemMessage(
-                    "⚠️ Follow-up too brief — requesting complete response...".to_string(),
-                ));
-                let mut retry_messages = follow_messages.clone();
-                retry_messages.push(Message {
+                crate::security::SecurityDecision::Deny { reason } => {
+                    let _ = tx.send(StreamEvent::Error(format!(
+                        "🚫 Security: Tool '{}' blocked\n  Reason: {}",
+                        tool_name, reason
+                    )));
+                    let _ = tx.send(StreamEvent::Done);
+                    return Ok(());
+                }
+            }
+
+            match executor
+                .execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000)
+                .await
+            {
+                Ok(result) => {
+                    let sanitized = security_engine.sanitize_output(tool_name, &result);
+                    batch_results.push(ToolResultEntry {
+                        name: tool_name.clone(),
+                        args: args.clone(),
+                        result: sanitized.clone(),
+                        success: true,
+                    });
+                    follow_messages.push(Message {
+                        role: "user".to_string(),
+                        content: format_tool_result(tool_name, args, &sanitized, true),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
+                }
+                Err(e) => {
+                    batch_results.push(ToolResultEntry {
+                        name: tool_name.clone(),
+                        args: args.clone(),
+                        result: e.to_string(),
+                        success: false,
+                    });
+                    follow_messages.push(Message {
+                        role: "user".to_string(),
+                        content: format_tool_result(tool_name, args, &e.to_string(), false),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
+                }
+            }
+        }
+
+        let _ = tx.send(StreamEvent::ToolResultsBatch {
+            results: batch_results,
+        });
+
+        // Autonomous follow-up: tell the model to keep working, not to synthesize
+        let prompt = "Tool results are above. Continue working on the task. If you need more tools, output TOOL: lines. If the task is complete, provide a final summary and say TASK_COMPLETE on its own line.";
+        follow_messages.push(Message {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        });
+
+        let follow_up = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
+        match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await
+        {
+            Ok(Ok((follow_chunks, _metrics))) => {
+                let follow_content: String = follow_chunks.join("");
+                let trimmed = follow_content.trim();
+
+                if trimmed.is_empty() {
+                    let _ = tx.send(StreamEvent::Error(
+                        "Model returned empty follow-up after tool execution. Re-prompting..."
+                            .to_string(),
+                    ));
+                    let mut retry_messages = follow_messages.clone();
+                    retry_messages.push(Message {
+                        role: "user".to_string(),
+                        content: "Your previous response was empty. Using the tool results already provided above, write a complete response explaining what was found, what it means, and the next step. Do not skip this.".to_string(),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
+                    let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
+                    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await
+                    {
+                        Ok(Ok((retry_chunks, _retry_metrics))) => {
+                            let retry_content: String = retry_chunks.join("");
+                            let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                        Ok(Err(e)) => {
+                            let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                        Err(_) => {
+                            let _ = tx.send(StreamEvent::Error(
+                                "Follow-up timed out after 120s".to_string(),
+                            ));
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                    }
+                    return Ok(());
+                }
+
+                // Check for task completion
+                if follow_content.contains("TASK_COMPLETE") {
+                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                    let _ = tx.send(StreamEvent::Done);
+                    return Ok(());
+                }
+
+                // Check for more tools
+                let new_tools = parse_embedded_tools(&follow_content);
+                if new_tools.is_empty() {
+                    // No more tools — final response
+                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                    let _ = tx.send(StreamEvent::Done);
+                    return Ok(());
+                }
+
+                // More tools found — add assistant response and loop
+                follow_messages.push(Message {
                     role: "assistant".to_string(),
                     content: follow_content.clone(),
                     images: None,
@@ -3632,55 +3642,41 @@ async fn execute_tool_chain(
                     tool_calls: None,
                     reasoning_content: None,
                 });
-                retry_messages.push(Message {
-                    role: "user".to_string(),
-                    content: "That was too brief. Using the tool results already provided above, write a thorough response: what did the tools reveal, what does it mean, and what's next?".to_string(),
-                    images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
-                });
-                let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                match tokio::time::timeout(
-                    Duration::from_secs(120),
-                    provider.chat_stream(retry_req),
-                )
-                .await
-                {
-                    Ok(Ok((retry_chunks, _retry_metrics))) => {
-                        let retry_content: String = retry_chunks.join("");
-                        let _ = tx.send(StreamEvent::FollowUp(retry_content));
-                        let _ = tx.send(StreamEvent::Done);
-                    }
-                    Ok(Err(e)) => {
-                        let _ =
-                            tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
-                        let _ = tx.send(StreamEvent::Done);
-                    }
-                    Err(_) => {
-                        let _ = tx.send(StreamEvent::Error(
-                            "Follow-up timed out after 120s".to_string(),
-                        ));
-                        let _ = tx.send(StreamEvent::Done);
-                    }
+
+                for (tool_name, args) in &new_tools {
+                    follow_messages.push(Message {
+                        role: "assistant".to_string(),
+                        content: format!("TOOL:{} {}", tool_name, args),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
                 }
-            } else {
-                let _ = tx.send(StreamEvent::FollowUp(follow_content));
+
+                current_tools = new_tools;
+                // Continue loop
             }
-            let _ = tx.send(StreamEvent::Done);
-        }
-        Ok(Err(e)) => {
-            let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
-            let _ = tx.send(StreamEvent::Done);
-        }
-        Err(_) => {
-            let _ = tx.send(StreamEvent::Error(
-                "Follow-up timed out after 120s".to_string(),
-            ));
-            let _ = tx.send(StreamEvent::Done);
+            Ok(Err(e)) => {
+                let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                let _ = tx.send(StreamEvent::Done);
+                return Ok(());
+            }
+            Err(_) => {
+                let _ = tx.send(StreamEvent::Error(
+                    "Follow-up timed out after 120s".to_string(),
+                ));
+                let _ = tx.send(StreamEvent::Done);
+                return Ok(());
+            }
         }
     }
 
+    // Max turns reached
+    let _ = tx.send(StreamEvent::FollowUp(
+        "Max tool execution turns reached. Task may be incomplete.".to_string(),
+    ));
+    let _ = tx.send(StreamEvent::Done);
     Ok(())
 }
 
@@ -3982,12 +3978,20 @@ async fn stream_model_response_task(
                                         success: true,
                                     });
 
+                                    // CRITICAL FIX: Keep the assistant's response in context
+                                    // so the model knows it already made the plan. Don't remove it.
                                     let mut follow_messages = model_messages.clone();
-                                    if let Some(last_assistant_idx) =
-                                        follow_messages.iter().rposition(|m| m.role == "assistant")
-                                    {
-                                        follow_messages.remove(last_assistant_idx);
-                                    }
+                                    // Add the assistant's original response to history
+                                    // (reconstruct from the suggestion since we don't have full content here)
+                                    follow_messages.push(Message {
+                                        role: "assistant".to_string(),
+                                        content: format!("I should use {} to {}", suggestion.tool_name, suggestion.args),
+                                        images: None,
+                                        tool_call_id: None,
+                                        tool_calls: None,
+                                        reasoning_content: None,
+                                    });
+                                    // Add the tool result as a user message
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
@@ -3996,67 +4000,148 @@ async fn stream_model_response_task(
                                         tool_calls: None,
                                         reasoning_content: None,
                                     });
-                                    follow_messages.push(Message {
-                                        role: "user".to_string(),
-                                        content: "TOOL EXECUTION COMPLETE. Based on the tool result provided above, write a complete response. Explain what was found, what it means, and what to do next.".to_string(),
-                                        images: None,
-                                    tool_call_id: None,
-                                    tool_calls: None,
-                                    reasoning_content: None,
-                                    });
 
-                                    let follow_up = ChatRequest::new(
-                                        model.clone(),
-                                        follow_messages.clone(),
-                                        true,
-                                    );
+                                    // Autonomous loop for single-tool path
+                                    let mut turn = 0;
+                                    const MAX_TURNS: usize = 20;
 
-                                    match provider.chat_stream(follow_up).await {
-                                        Ok((follow_chunks, _metrics)) => {
-                                            let follow_content: String = follow_chunks.join("");
-                                            let trimmed = follow_content.trim();
-                                            if trimmed.is_empty() {
-                                                let _ = tx.send(StreamEvent::Error(
-                                                    "Empty follow-up after tool execution. Re-prompting...".to_string()
-                                                ));
-                                                let mut retry = follow_messages.clone();
-                                                retry.push(Message {
-                                                    role: "user".to_string(),
-                                                    content: "Your previous response was empty. Using the tool result already provided above, write a complete response explaining what was found, what it means, and the next step.".to_string(),
-                                                    images: None,
-                                                tool_call_id: None,
-                                                tool_calls: None,
-                                                reasoning_content: None,
-                                                });
-                                                let retry_req =
-                                                    ChatRequest::new(model.clone(), retry, true);
-                                                match provider.chat_stream(retry_req).await {
-                                                    Ok((rc, _)) => {
-                                                        let _ = tx.send(StreamEvent::FollowUp(
-                                                            rc.join(""),
-                                                        ));
-                                                        let _ = tx.send(StreamEvent::Done);
+                                    while turn < MAX_TURNS {
+                                        turn += 1;
+
+                                        follow_messages.push(Message {
+                                            role: "user".to_string(),
+                                            content: "Tool results are above. Continue working on the task. If you need more tools, output TOOL: lines. If the task is complete, provide a final summary and say TASK_COMPLETE on its own line.".to_string(),
+                                            images: None,
+                                            tool_call_id: None,
+                                            tool_calls: None,
+                                            reasoning_content: None,
+                                        });
+
+                                        let follow_up = ChatRequest::new(
+                                            model.clone(),
+                                            follow_messages.clone(),
+                                            true,
+                                        );
+
+                                        match provider.chat_stream(follow_up).await {
+                                            Ok((follow_chunks, _metrics)) => {
+                                                let follow_content: String = follow_chunks.join("");
+                                                let trimmed = follow_content.trim();
+
+                                                if trimmed.is_empty() {
+                                                    let _ = tx.send(StreamEvent::Error(
+                                                        "Empty follow-up after tool execution. Re-prompting...".to_string()
+                                                    ));
+                                                    let mut retry = follow_messages.clone();
+                                                    retry.push(Message {
+                                                        role: "user".to_string(),
+                                                        content: "Your previous response was empty. Using the tool result already provided above, write a complete response explaining what was found, what it means, and the next step.".to_string(),
+                                                        images: None,
+                                                        tool_call_id: None,
+                                                        tool_calls: None,
+                                                        reasoning_content: None,
+                                                    });
+                                                    let retry_req = ChatRequest::new(model.clone(), retry, true);
+                                                    match provider.chat_stream(retry_req).await {
+                                                        Ok((rc, _)) => {
+                                                            let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
+                                                            let _ = tx.send(StreamEvent::Done);
+                                                        }
+                                                        Err(e) => {
+                                                            let _ = tx.send(StreamEvent::Error(
+                                                                format!("Retry failed: {}", e),
+                                                            ));
+                                                            let _ = tx.send(StreamEvent::Done);
+                                                        }
                                                     }
-                                                    Err(e) => {
-                                                        let _ = tx.send(StreamEvent::Error(
-                                                            format!("Retry failed: {}", e),
-                                                        ));
-                                                        let _ = tx.send(StreamEvent::Done);
+                                                    break;
+                                                }
+
+                                                if follow_content.contains("TASK_COMPLETE") {
+                                                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                                    let _ = tx.send(StreamEvent::Done);
+                                                    break;
+                                                }
+
+                                                let new_tools = parse_embedded_tools(&follow_content);
+                                                if new_tools.is_empty() {
+                                                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
+                                                    let _ = tx.send(StreamEvent::Done);
+                                                    break;
+                                                }
+
+                                                follow_messages.push(Message {
+                                                    role: "assistant".to_string(),
+                                                    content: follow_content.clone(),
+                                                    images: None,
+                                                    tool_call_id: None,
+                                                    tool_calls: None,
+                                                    reasoning_content: None,
+                                                });
+
+                                                for (tool_name, args) in &new_tools {
+                                                    follow_messages.push(Message {
+                                                        role: "assistant".to_string(),
+                                                        content: format!("TOOL:{} {}", tool_name, args),
+                                                        images: None,
+                                                        tool_call_id: None,
+                                                        tool_calls: None,
+                                                        reasoning_content: None,
+                                                    });
+
+                                                    match executor.execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000).await {
+                                                        Ok(result) => {
+                                                            let sanitized = security_engine.sanitize_output(tool_name, &result);
+                                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                                name: tool_name.clone(),
+                                                                args: args.clone(),
+                                                                result: sanitized.clone(),
+                                                                success: true,
+                                                            });
+                                                            follow_messages.push(Message {
+                                                                role: "user".to_string(),
+                                                                content: format!("Tool result: {}", sanitized),
+                                                                images: None,
+                                                                tool_call_id: None,
+                                                                tool_calls: None,
+                                                                reasoning_content: None,
+                                                            });
+                                                        }
+                                                        Err(e) => {
+                                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                                name: tool_name.clone(),
+                                                                args: args.clone(),
+                                                                result: e.to_string(),
+                                                                success: false,
+                                                            });
+                                                            follow_messages.push(Message {
+                                                                role: "user".to_string(),
+                                                                content: format!("Tool error: {}", e),
+                                                                images: None,
+                                                                tool_call_id: None,
+                                                                tool_calls: None,
+                                                                reasoning_content: None,
+                                                            });
+                                                        }
                                                     }
                                                 }
-                                            } else {
-                                                let _ =
-                                                    tx.send(StreamEvent::FollowUp(follow_content));
                                             }
-                                            let _ = tx.send(StreamEvent::Done);
+                                            Err(e) => {
+                                                let _ = tx.send(StreamEvent::Error(format!(
+                                                    "Follow-up failed: {}",
+                                                    e
+                                                )));
+                                                let _ = tx.send(StreamEvent::Done);
+                                                break;
+                                            }
                                         }
-                                        Err(e) => {
-                                            let _ = tx.send(StreamEvent::Error(format!(
-                                                "Follow-up failed: {}",
-                                                e
-                                            )));
-                                            let _ = tx.send(StreamEvent::Done);
-                                        }
+                                    }
+
+                                    if turn >= MAX_TURNS {
+                                        let _ = tx.send(StreamEvent::FollowUp(
+                                            "Max tool execution turns reached. Task may be incomplete.".to_string(),
+                                        ));
+                                        let _ = tx.send(StreamEvent::Done);
                                     }
                                 }
                                 Err(e) => {
@@ -4224,12 +4309,9 @@ async fn stream_model_response_task_legacy(
                                     });
 
                                     // Follow-up request with tool result
+                                    // CRITICAL FIX: Keep the assistant's response in context
+                                    // so the model knows it already made the plan. Don't remove it.
                                     let mut follow_messages = model_messages.clone();
-                                    if let Some(last_assistant_idx) =
-                                        follow_messages.iter().rposition(|m| m.role == "assistant")
-                                    {
-                                        follow_messages.remove(last_assistant_idx);
-                                    }
                                     follow_messages.push(Message {
                                         role: "user".to_string(),
                                         content: format!("Tool result: {}", sanitized),
@@ -4571,13 +4653,23 @@ async fn handle_slash_result(
                         let config = crate::headless::HeadlessConfig {
                             task: task.to_string(),
                             yolo: true,
+                            autonomous: false,
                             json: false,
                             timeout_secs: 300,
                             max_turns: 50,
                             model: None,
                             output_file: None,
                         };
-                        match crate::headless::run_headless(config, provider, model, None).await {
+                        let security = match crate::security::SecurityEngine::new(
+                            crate::security::SecurityConfig::default()
+                        ) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::error!("[headless] Security init failed: {}", e);
+                                return;
+                            }
+                        };
+                        match crate::headless::run_headless(config, provider, model, security, None).await {
                             Ok(summary) => {
                                 tracing::info!("[headless] Complete: {}", summary);
                                 // Clean up worktree after completion
@@ -5149,12 +5241,12 @@ async fn execute_approved_tool_task(
             });
 
             // Follow-up request with tool result
+            // CRITICAL FIX: Keep the assistant's response in context so the model knows
+            // it already made the plan. Don't remove it — the model needs to see its own
+            // tool calls + the results to synthesize properly. Removing it causes the model
+            // to regenerate the same plan from scratch.
             let mut follow_messages = model_messages.clone();
-            if let Some(last_assistant_idx) =
-                follow_messages.iter().rposition(|m| m.role == "assistant")
-            {
-                follow_messages.remove(last_assistant_idx);
-            }
+            // Add the assistant message that initiated the tool call
             follow_messages.push(Message {
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
@@ -5163,6 +5255,7 @@ async fn execute_approved_tool_task(
                 tool_calls: None,
                 reasoning_content: None,
             });
+            // Add the tool result as a user message
             follow_messages.push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
@@ -5172,24 +5265,117 @@ async fn execute_approved_tool_task(
                 reasoning_content: None,
             });
 
-            let follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
+            // Autonomous loop for approved tool follow-up
+            let mut turn = 0;
+            const MAX_TURNS: usize = 20;
 
-            match provider.chat_stream(follow_up).await {
-                Ok((chunks, metrics)) => {
-                    let follow_content: String = chunks.join("");
-                    let _ = tx.send(StreamEvent::ResponseComplete {
-                        content: follow_content.clone(),
-                        metrics,
-                    });
+            while turn < MAX_TURNS {
+                turn += 1;
 
-                    // ── Chained tool detection DISABLED in follow-up synthesis ──────────
-                    // The follow-up is the SYNTHESIS phase. The model should NOT output tools.
-                    // If it does, we strip them in the FollowUp handler rather than re-executing.
-                    // This prevents infinite loops where the model keeps suggesting the same tools.
+                follow_messages.push(Message {
+                    role: "user".to_string(),
+                    content: "Tool results are above. Continue working on the task. If you need more tools, output TOOL: lines. If the task is complete, provide a final summary and say TASK_COMPLETE on its own line.".to_string(),
+                    images: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                    reasoning_content: None,
+                });
+
+                let follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
+
+                match provider.chat_stream(follow_up).await {
+                    Ok((chunks, metrics)) => {
+                        let follow_content: String = chunks.join("");
+
+                        if follow_content.contains("TASK_COMPLETE") {
+                            let _ = tx.send(StreamEvent::ResponseComplete {
+                                content: follow_content.clone(),
+                                metrics,
+                            });
+                            break;
+                        }
+
+                        let new_tools = parse_embedded_tools(&follow_content);
+                        if new_tools.is_empty() {
+                            let _ = tx.send(StreamEvent::ResponseComplete {
+                                content: follow_content.clone(),
+                                metrics,
+                            });
+                            break;
+                        }
+
+                        let _ = tx.send(StreamEvent::ResponseComplete {
+                            content: follow_content.clone(),
+                            metrics,
+                        });
+
+                        follow_messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: follow_content.clone(),
+                            images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
+                        });
+
+                        for (tool_name, args) in &new_tools {
+                            follow_messages.push(Message {
+                                role: "assistant".to_string(),
+                                content: format!("TOOL:{} {}", tool_name, args),
+                                images: None,
+                                tool_call_id: None,
+                                tool_calls: None,
+                                reasoning_content: None,
+                            });
+
+                            match executor.execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000).await {
+                                Ok(result) => {
+                                    let sanitized = security_engine.sanitize_output(tool_name, &result);
+                                    let _ = tx.send(StreamEvent::ToolResult {
+                                        name: tool_name.clone(),
+                                        args: args.clone(),
+                                        result: sanitized.clone(),
+                                        success: true,
+                                    });
+                                    follow_messages.push(Message {
+                                        role: "user".to_string(),
+                                        content: format!("Tool result: {}", sanitized),
+                                        images: None,
+                                        tool_call_id: None,
+                                        tool_calls: None,
+                                        reasoning_content: None,
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(StreamEvent::ToolResult {
+                                        name: tool_name.clone(),
+                                        args: args.clone(),
+                                        result: e.to_string(),
+                                        success: false,
+                                    });
+                                    follow_messages.push(Message {
+                                        role: "user".to_string(),
+                                        content: format!("Tool error: {}", e),
+                                        images: None,
+                                        tool_call_id: None,
+                                        tool_calls: None,
+                                        reasoning_content: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                        break;
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
-                }
+            }
+
+            if turn >= MAX_TURNS {
+                let _ = tx.send(StreamEvent::Error(
+                    "Max tool execution turns reached. Task may be incomplete.".to_string(),
+                ));
             }
         }
         Err(e) => {
