@@ -101,7 +101,7 @@ pub(crate) fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
     // Compact header: harness name + version (hardcoded, separate from agent identity)
     let mut header_lines = vec![Line::from(vec![
-        Span::styled("🦞 ", shark_style()),
+        Span::styled("🦈 ", shark_style()),
         Span::styled("openshark", highlight_style()),
         Span::styled(format!(" v{}", crate::VERSION), muted_style()),
     ])];
@@ -577,7 +577,7 @@ pub(crate) fn draw_chat_area(f: &mut Frame, app: &App, area: Rect) {
             ),
             "assistant" => {
                 let agent_emoji = if app.config.agent.emoji.is_empty() {
-                    "🦞"
+                    "🦈"
                 } else {
                     &app.config.agent.emoji
                 };

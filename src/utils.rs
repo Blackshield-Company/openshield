@@ -50,11 +50,11 @@ mod tests {
 
     #[test]
     fn test_truncate_emoji() {
-        // "🦞🎹" = 4 bytes each = 8 bytes total
-        let s = "🦞🎹";
-        assert_eq!(truncate_str(s, 8), "🦞🎹");
-        assert_eq!(truncate_str(s, 5), "🦞");
-        assert_eq!(truncate_str(s, 4), "🦞");
+        // "🦈🎹" = 4 bytes each = 8 bytes total
+        let s = "🦈🎹";
+        assert_eq!(truncate_str(s, 8), "🦈🎹");
+        assert_eq!(truncate_str(s, 5), "🦈");
+        assert_eq!(truncate_str(s, 4), "🦈");
         assert_eq!(truncate_str(s, 3), "");
     }
 

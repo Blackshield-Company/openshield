@@ -458,7 +458,7 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
         .get_recent_sessions(50)
         .context("Failed to load recent sessions")?;
 
-    println!("🦞 Routing Decisions");
+    println!("🦈 Routing Decisions");
     println!(
         "Auto-route: {}",
         if config.auto_route {
