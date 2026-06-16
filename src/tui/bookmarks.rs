@@ -5,13 +5,6 @@
 
 #![allow(dead_code)]
 
-use ratatui::{
-    Frame,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-};
 use serde::{Deserialize, Serialize};
 
 /// A saved checkpoint of session state.
@@ -193,10 +186,10 @@ impl BookmarkManager {
                 .join(format!("{}.json", session_id)),
             None => return, // Silently skip if config dir unavailable
         };
-        if let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data)
-        {
-            self.bookmarks = bookmarks;
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data) {
+                self.bookmarks = bookmarks;
+            }
         }
     }
 
@@ -212,129 +205,4 @@ impl BookmarkManager {
             let _ = std::fs::write(&path, data);
         }
     }
-}
-
-/// Draw the bookmark manager overlay.
-pub fn draw_bookmark_manager(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
-    if !manager.visible {
-        return;
-    }
-
-    let popup_width = (area.width as f32 * 0.6) as u16;
-    let popup_height = 20u16.min(area.height - 4);
-    let popup_x = (area.width - popup_width) / 2;
-    let popup_y = (area.height - popup_height) / 3;
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-    f.render_widget(Clear, popup_area);
-
-    match manager.mode {
-        BookmarkMode::List => draw_list_mode(f, manager, popup_area),
-        BookmarkMode::Create => draw_create_mode(f, manager, popup_area),
-        BookmarkMode::Confirm => draw_confirm_mode(f, manager, popup_area),
-    }
-}
-
-fn draw_list_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(area);
-
-    let filter_text = if manager.filter.is_empty() {
-        Text::from(Line::from(Span::styled(
-            "Type to filter bookmarks...",
-            Style::default().fg(Color::DarkGray),
-        )))
-    } else {
-        Text::from(Line::from(Span::raw(&manager.filter)))
-    };
-    let filter_paragraph = Paragraph::new(filter_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Bookmarks (Ctrl+N=new, Enter=load, Del=delete) "),
-    );
-    f.render_widget(filter_paragraph, chunks[0]);
-
-    let filtered = manager.filtered();
-    let items: Vec<ListItem> = filtered
-        .iter()
-        .enumerate()
-        .map(|(i, bm)| {
-            let is_selected = i == manager.selected;
-            let name_style = if is_selected {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-                    .bg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::Cyan)
-            };
-            let desc_style = if is_selected {
-                Style::default().fg(Color::Gray).bg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            let time_style = if is_selected {
-                Style::default().fg(Color::Yellow).bg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::Yellow)
-            };
-
-            let mut spans = vec![
-                Span::styled(format!(" {:20} ", bm.name), name_style),
-                Span::styled(format!("{} ", bm.description), desc_style),
-            ];
-            spans.push(Span::styled(format!("[{}]", bm.created_at), time_style));
-
-            ListItem::new(Line::from(spans))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    f.render_widget(list, chunks[1]);
-}
-
-fn draw_create_mode(f: &mut Frame, manager: &BookmarkManager, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(1),
-        ])
-        .split(area);
-
-    let name_title = if manager.input_stage == 0 {
-        " Bookmark Name (*) "
-    } else {
-        " Bookmark Name "
-    };
-    let name_text = Text::from(Line::from(Span::raw(&manager.input_name)));
-    let name_paragraph =
-        Paragraph::new(name_text).block(Block::default().borders(Borders::ALL).title(name_title));
-    f.render_widget(name_paragraph, chunks[0]);
-
-    let desc_title = if manager.input_stage == 1 {
-        " Description (*) "
-    } else {
-        " Description "
-    };
-    let desc_text = Text::from(Line::from(Span::raw(&manager.input_desc)));
-    let desc_paragraph =
-        Paragraph::new(desc_text).block(Block::default().borders(Borders::ALL).title(desc_title));
-    f.render_widget(desc_paragraph, chunks[1]);
-
-    let help = Text::from(Line::from(Span::styled(
-        "Tab/Enter: next field | Esc: cancel",
-        Style::default().fg(Color::DarkGray),
-    )));
-    let help_paragraph = Paragraph::new(help).block(Block::default().borders(Borders::ALL));
-    f.render_widget(help_paragraph, chunks[2]);
-}
-
-fn draw_confirm_mode(_f: &mut Frame, _manager: &BookmarkManager, _area: Rect) {
-    // Simple confirmation — handled by caller with a system message
 }

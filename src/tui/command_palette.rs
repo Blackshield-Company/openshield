@@ -5,14 +5,6 @@
 
 #![allow(dead_code)]
 
-use ratatui::{
-    Frame,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-};
-
 /// A single command entry in the palette.
 #[derive(Debug, Clone)]
 pub struct CommandEntry {
@@ -188,87 +180,4 @@ impl CommandPalette {
         let filtered = self.filtered();
         filtered.get(self.selected).map(|cmd| cmd.name.clone())
     }
-}
-
-/// Draw the command palette overlay.
-pub fn draw_command_palette(f: &mut Frame, palette: &CommandPalette, area: Rect) {
-    if !palette.visible {
-        return;
-    }
-
-    // Centered popup — 60% width, up to 20 lines tall
-    let popup_width = (area.width as f32 * 0.6) as u16;
-    let popup_height = 20u16.min(area.height - 4);
-    let popup_x = (area.width - popup_width) / 2;
-    let popup_y = (area.height - popup_height) / 3; // Upper third
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-    // Clear background
-    f.render_widget(Clear, popup_area);
-
-    // Split into filter input + list
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(popup_area);
-
-    // Filter input box
-    let filter_text = if palette.filter.is_empty() {
-        Text::from(Line::from(Span::styled(
-            "Type to filter commands...",
-            Style::default().fg(Color::DarkGray),
-        )))
-    } else {
-        Text::from(Line::from(Span::raw(&palette.filter)))
-    };
-    let filter_paragraph = Paragraph::new(filter_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Command Palette "),
-    );
-    f.render_widget(filter_paragraph, chunks[0]);
-
-    // Command list
-    let filtered = palette.filtered();
-    let items: Vec<ListItem> = filtered
-        .iter()
-        .enumerate()
-        .map(|(i, cmd)| {
-            let is_selected = i == palette.selected;
-            let name_style = if is_selected {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-                    .bg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::Cyan)
-            };
-            let desc_style = if is_selected {
-                Style::default().fg(Color::Gray).bg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            let shortcut_style = if is_selected {
-                Style::default().fg(Color::Yellow).bg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::Yellow)
-            };
-
-            let mut spans = vec![
-                Span::styled(format!(" {:12} ", cmd.name), name_style),
-                Span::styled(cmd.description.clone(), desc_style),
-            ];
-            if let Some(ref shortcut) = cmd.shortcut {
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(format!("[{}]", shortcut), shortcut_style));
-            }
-
-            ListItem::new(Line::from(spans))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    f.render_widget(list, chunks[1]);
 }

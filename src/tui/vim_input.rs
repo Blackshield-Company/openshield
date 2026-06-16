@@ -79,12 +79,12 @@ impl VimState {
         }
     }
 
-    pub fn mode_color(&self) -> ratatui::style::Color {
+    pub fn mode_color(&self) -> crossterm::style::Color {
         match self.mode {
-            VimMode::Normal => ratatui::style::Color::Green,
-            VimMode::Insert => ratatui::style::Color::Blue,
-            VimMode::Visual => ratatui::style::Color::Yellow,
-            VimMode::Command => ratatui::style::Color::Magenta,
+            VimMode::Normal => crossterm::style::Color::Green,
+            VimMode::Insert => crossterm::style::Color::Blue,
+            VimMode::Visual => crossterm::style::Color::Yellow,
+            VimMode::Command => crossterm::style::Color::Magenta,
         }
     }
 }
@@ -180,13 +180,12 @@ fn handle_normal_mode(
     cursor: &mut usize,
 ) -> (bool, bool) {
     // Number keys build count prefix
-    if let KeyCode::Char(c) = key.code
-        && c.is_ascii_digit()
-        && c != '0'
-    {
-        let digit = c.to_digit(10).expect("is_ascii_digit guarantees valid digit") as usize;
-        vim.count = Some(vim.count.unwrap_or(0) * 10 + digit);
-        return (true, false);
+    if let KeyCode::Char(c) = key.code {
+        if c.is_ascii_digit() && c != '0' {
+            let digit = c.to_digit(10).expect("is_ascii_digit guarantees valid digit") as usize;
+            vim.count = Some(vim.count.unwrap_or(0) * 10 + digit);
+            return (true, false);
+        }
     }
 
     let count = vim.count.take().unwrap_or(1);

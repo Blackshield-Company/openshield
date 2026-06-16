@@ -76,6 +76,7 @@ impl CheckpointStack {
     }
 
     /// Length of undo stack.
+    #[allow(dead_code)]
     pub fn undo_len(&self) -> usize {
         self.undo_stack.len()
     }
