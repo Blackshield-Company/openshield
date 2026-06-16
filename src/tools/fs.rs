@@ -55,6 +55,24 @@ fn expand_path(path: &str) -> PathBuf {
 
 fn cmd_read(path_str: &str) -> Result<String> {
     let path = expand_path(path_str);
+    let metadata = fs::metadata(&path)
+        .with_context(|| format!("Failed to stat {}", path.display()))?;
+
+    const MAX_SIZE: u64 = 100 * 1024; // 100KB
+    if metadata.len() > MAX_SIZE {
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        let truncated: String = content.chars().take(MAX_SIZE as usize).collect();
+        return Ok(format!(
+            "{}\n\n[WARNING: File is {} ({} bytes). Truncated to first {} chars. Use `fs cat {} <offset> <limit>` for pagination.]",
+            truncated,
+            format_size(metadata.len()),
+            metadata.len(),
+            MAX_SIZE,
+            path_str
+        ));
+    }
+
     let content =
         fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
     Ok(content)
@@ -124,8 +142,13 @@ fn cmd_list(path_str: &str) -> Result<String> {
 
     let mut dirs = Vec::new();
     let mut files = Vec::new();
+    let mut total = 0usize;
+    const MAX_ENTRIES: usize = 1000;
 
     for entry in entries {
+        if total >= MAX_ENTRIES {
+            break;
+        }
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         let meta = entry.metadata()?;
@@ -147,6 +170,7 @@ fn cmd_list(path_str: &str) -> Result<String> {
         } else {
             files.push(line);
         }
+        total += 1;
     }
 
     dirs.sort();
@@ -161,7 +185,12 @@ fn cmd_list(path_str: &str) -> Result<String> {
     for f in &files {
         result.push_str(&format!("{}\n", f));
     }
-    result.push_str(&format!("\n{} dirs, {} files\n", dirs.len(), files.len()));
+    let note = if total >= MAX_ENTRIES {
+        format!(" (truncated to {} entries)", MAX_ENTRIES)
+    } else {
+        String::new()
+    };
+    result.push_str(&format!("\n{} dirs, {} files{}\n", dirs.len(), files.len(), note));
     Ok(result)
 }
 
@@ -173,6 +202,7 @@ fn cmd_tree(args: &str) -> Result<String> {
     let mut result = format!("{}\n", path.display());
     let mut file_count = 0;
     let mut dir_count = 0;
+    const MAX_ENTRIES: usize = 1000;
 
     for entry in WalkDir::new(&path)
         .max_depth(max_depth)
@@ -180,6 +210,12 @@ fn cmd_tree(args: &str) -> Result<String> {
         .filter_map(|e| e.ok())
         .skip(1)
     {
+        if file_count + dir_count >= MAX_ENTRIES {
+            result.push_str(&format!("\n[... {} more entries (truncated at {})]\n", 
+                WalkDir::new(&path).max_depth(max_depth).into_iter().filter_map(|e| e.ok()).count() - MAX_ENTRIES - 1,
+                MAX_ENTRIES));
+            break;
+        }
         let depth = entry.depth();
         let indent = "  ".repeat(depth - 1);
         let name = entry.file_name().to_string_lossy();
@@ -249,6 +285,7 @@ fn cmd_stat(path_str: &str) -> Result<String> {
 fn cmd_glob(pattern: &str) -> Result<String> {
     let expanded = shellexpand::tilde(pattern).to_string();
     let mut results = Vec::new();
+    const MAX_RESULTS: usize = 100;
 
     // Simple glob: split into base dir and pattern
     let (base, pat) = if let Some(last_slash) = expanded.rfind('/') {
@@ -271,13 +308,19 @@ fn cmd_glob(pattern: &str) -> Result<String> {
         let name = entry.file_name().to_string_lossy();
         if re.is_match(&name) {
             results.push(entry.path().display().to_string());
+            if results.len() >= MAX_RESULTS {
+                break;
+            }
         }
     }
 
     results.sort();
-    let mut result = format!("Glob: {}\nFound {} matches:\n", expanded, results.len());
+    let mut result = format!("Glob: {}\nFound {} matches (showing {}):\n", expanded, results.len(), results.len().min(MAX_RESULTS));
     for r in &results {
         result.push_str(&format!("  {}\n", r));
+    }
+    if results.len() >= MAX_RESULTS {
+        result.push_str("\n[... results truncated at 100]\n");
     }
     Ok(result)
 }
@@ -289,6 +332,7 @@ fn cmd_find(args: &str) -> Result<String> {
     }
     let path = expand_path(tokens[0]);
     let name = tokens[1];
+    const MAX_RESULTS: usize = 100;
 
     let mut results = Vec::new();
     for entry in WalkDir::new(&path)
@@ -299,18 +343,25 @@ fn cmd_find(args: &str) -> Result<String> {
         let entry_name = entry.file_name().to_string_lossy();
         if entry_name.contains(name) {
             results.push(entry.path().display().to_string());
+            if results.len() >= MAX_RESULTS {
+                break;
+            }
         }
     }
 
     results.sort();
     let mut result = format!(
-        "Find '{}' under {}\nFound {} matches:\n",
+        "Find '{}' under {}\nFound {} matches (showing {}):\n",
         name,
         path.display(),
-        results.len()
+        results.len(),
+        results.len().min(MAX_RESULTS)
     );
     for r in &results {
         result.push_str(&format!("  {}\n", r));
+    }
+    if results.len() >= MAX_RESULTS {
+        result.push_str("\n[... results truncated at 100]\n");
     }
     Ok(result)
 }
