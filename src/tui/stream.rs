@@ -354,6 +354,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     let model_messages = app.model_messages.clone();
                     let is_multi_model = app.multi_model_mode;
                     let config = app.config.clone();
+                    let security_engine = app.security_engine.clone();
                     tokio::spawn(async move {
                         let _ = stream_model_response_task(
                             tx,
@@ -363,6 +364,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                             model_messages,
                             is_multi_model,
                             config,
+                            security_engine,
                         )
                         .await;
                     });

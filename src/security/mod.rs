@@ -270,6 +270,8 @@ pub struct SecurityEngine {
     /// Permission profile registry for switching presets.
     #[allow(dead_code)]
     pub profile_registry: Arc<Mutex<ProfileRegistry>>,
+    /// Autonomous mode — when true, auto-approves all tools except Critical/sudo/sensitive.
+    autonomous_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -315,14 +317,20 @@ impl SecurityEngine {
             guardrails,
             identity_manager,
             profile_registry: Arc::new(Mutex::new(ProfileRegistry::new())),
+            autonomous_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
+    }
+
+    /// Set autonomous mode on the security engine.
+    pub fn set_autonomous_mode(&self, enabled: bool) {
+        self.autonomous_mode.store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Main security gate: checks a tool call before execution.
     /// When autonomous_mode is true, elevates auto-approve threshold to High
     /// so the model can curl, redirect output, etc. without blocking.
     pub fn check_tool_call(&self, tool_name: &str, args: &str) -> SecurityDecision {
-        self.check_tool_call_with_mode(tool_name, args, false)
+        self.check_tool_call_with_mode(tool_name, args, self.autonomous_mode.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Check tool call with explicit autonomous mode override.

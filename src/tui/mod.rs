@@ -1272,6 +1272,7 @@ impl App {
         let model_messages = self.model_messages.clone();
         let is_multi_model = self.multi_model_mode;
         let config = self.config.clone();
+        let security_engine = self.security_engine.clone();
         tokio::spawn(async move {
             let _ = stream_model_response_task(
                 tx,
@@ -1281,6 +1282,7 @@ impl App {
                 model_messages,
                 is_multi_model,
                 config,
+                security_engine,
             )
             .await;
         });
@@ -1944,6 +1946,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.autonomous_mode = !app.autonomous_mode;
+            app.security_engine.set_autonomous_mode(app.autonomous_mode);
             let status = if app.autonomous_mode {
                 "🚀 AUTONOMOUS MODE ON — High-risk tools auto-approved (curl, ssh, redirects). sudo/sensitive paths still blocked."
             } else {
@@ -3282,6 +3285,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     let model_messages = app.model_messages.clone();
                     let is_multi_model = app.multi_model_mode;
                     let config = app.config.clone();
+                    let security_engine = app.security_engine.clone();
                     tokio::spawn(async move {
                         let _ = stream_model_response_task(
                             tx,
@@ -3291,6 +3295,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                             model_messages,
                             is_multi_model,
                             config,
+                            security_engine,
                         )
                         .await;
                     });
@@ -3531,6 +3536,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     let model_config = app.model_config.clone();
     let is_multi_model = app.multi_model_mode;
     let config = app.config.clone();
+    let security_engine = app.security_engine.clone();
 
     tokio::spawn(async move {
         let _ = stream_model_response_task(
@@ -3541,6 +3547,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             model_messages,
             is_multi_model,
             config,
+            security_engine,
         )
         .await;
     });
@@ -3859,22 +3866,9 @@ async fn stream_model_response_task(
     model_messages: Vec<Message>,
     is_multi_model: bool,
     config: Config,
+    security_engine: crate::security::SecurityEngine,
 ) -> Result<()> {
     let _ = tx.send(StreamEvent::Start);
-
-    // Create security engine for this task
-    let security_engine = match crate::security::SecurityEngine::new(
-        crate::security::SecurityConfig::load().unwrap_or_default(),
-    ) {
-        Ok(engine) => engine,
-        Err(e) => {
-            let _ = tx.send(StreamEvent::Error(format!(
-                "Security engine init failed: {}",
-                e
-            )));
-            return Ok(());
-        }
-    };
 
     let mut request = ChatRequest::new(model.clone(), model_messages.clone(), true);
     if let Some(ref model_config) = model_config {
@@ -4198,12 +4192,14 @@ async fn stream_model_response_task(
                                                                             "🚫 Tool '{}' blocked: {}",
                                                                             name, reason
                                                                         )));
+                                                                        continue;
                                                                     }
                                                                     crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
                                                                         let _ = tx.send(StreamEvent::SystemMessage(format!(
                                                                             "⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)",
                                                                             name
                                                                         )));
+                                                                        continue;
                                                                     }
                                                                 }
                                                             }
@@ -5192,6 +5188,7 @@ async fn handle_slash_result(
                 }
                 "autonomous" => {
                     app.autonomous_mode = value;
+                    app.security_engine.set_autonomous_mode(value);
                     app.add_system_message(format!(
                         "🤖 Autonomous mode: {}",
                         if value { "ON" } else { "OFF" }
