@@ -2,6 +2,7 @@
 //!
 //! Since ratatui is text-based, we can't render actual pixels.
 //! Instead we show rich metadata indicators and ASCII placeholders.
+#![allow(dead_code)]
 
 /// Extract metadata from a base64 data URL.
 pub fn extract_image_info(data_url: &str) -> ImageInfo {

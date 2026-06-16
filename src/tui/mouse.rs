@@ -9,8 +9,22 @@
 #![allow(dead_code)]
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Rect;
 use unicode_width::UnicodeWidthChar;
+
+/// Simple rectangle for hit testing.
+#[derive(Debug, Clone, Copy)]
+pub struct Rect {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl Rect {
+    pub fn contains(&self, col: u16, row: u16) -> bool {
+        col >= self.x && col < self.x + self.width && row >= self.y && row < self.y + self.height
+    }
+}
 
 /// Mouse state tracking.
 #[derive(Debug, Clone, Default)]
@@ -68,8 +82,7 @@ pub enum MouseAction {
 }
 
 /// Translate a raw crossterm mouse event into a high-level action.
-/// Uses approximate layout heuristics since we don't have access to
-/// ratatui's layout rects outside the draw call.
+/// Uses approximate layout heuristics.
 pub fn translate_mouse_event(event: MouseEvent, _app: &crate::tui::App) -> MouseAction {
     let (_col, row) = (event.column, event.row);
 
@@ -271,14 +284,14 @@ pub fn handle_mouse_event(
 
     match event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if chat_area.contains(ratatui::layout::Position::new(col, row)) {
+            if chat_area.contains(col, row) {
                 let relative_row = row - chat_area.y;
                 MouseAction::ChatClick {
                     y: relative_row as usize,
                 }
-            } else if input_area.contains(ratatui::layout::Position::new(col, row)) {
+            } else if input_area.contains(col, row) {
                 MouseAction::InputClick
-            } else if sidebar_area.contains(ratatui::layout::Position::new(col, row)) {
+            } else if sidebar_area.contains(col, row) {
                 let relative_row = row - sidebar_area.y;
                 MouseAction::SidebarClick {
                     y: relative_row as usize,
@@ -288,14 +301,14 @@ pub fn handle_mouse_event(
             }
         }
         MouseEventKind::ScrollUp => {
-            if chat_area.contains(ratatui::layout::Position::new(col, row)) {
+            if chat_area.contains(col, row) {
                 MouseAction::ScrollUp
             } else {
                 MouseAction::None
             }
         }
         MouseEventKind::ScrollDown => {
-            if chat_area.contains(ratatui::layout::Position::new(col, row)) {
+            if chat_area.contains(col, row) {
                 MouseAction::ScrollDown
             } else {
                 MouseAction::None
