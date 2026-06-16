@@ -1,5 +1,8 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Terminal, backend::Backend};
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, enable_raw_mode, disable_raw_mode};
+use crossterm::cursor::{Hide, Show};
+use crossterm::{execute};
+use std::io::{stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,11 +20,11 @@ use uuid::Uuid;
 mod bookmarks;
 mod clipboard_image;
 mod command_palette;
+mod components;
 mod image_display;
 mod mouse;
 mod theme;
 mod vim_input;
-use theme::*;
 
 mod ascii_art;
 mod chat;
@@ -113,6 +116,7 @@ pub(crate) struct App {
     /// Message history for the model.
     model_messages: Vec<Message>,
     /// Start time for session.
+    #[allow(dead_code)]
     session_start: Instant,
     /// Token usage tracking (estimated).
     tokens_used: u64,
@@ -153,6 +157,7 @@ pub(crate) struct App {
     /// Per-session performance metrics.
     session_perf: SessionPerformance,
     /// Skill registry for loaded skills.
+    #[allow(dead_code)]
     skill_registry: Option<crate::skills::SkillRegistry>,
     /// Plugin registry for custom hooks.
     plugin_registry: Option<crate::plugins::PluginRegistry>,
@@ -170,6 +175,7 @@ pub(crate) struct App {
     /// Per-agent streaming buffers for swarm mode.
     agent_streams: std::collections::HashMap<String, AgentStreamState>,
     /// Which agents have their tool results expanded in the inspector.
+    #[allow(dead_code)]
     agent_tool_expanded: std::collections::HashSet<String>,
     /// Pending image attachment for the next user message.
     pending_image: Option<String>,
@@ -227,7 +233,7 @@ pub(crate) struct App {
     /// Smart context — manually pinned files.
     smart_context: crate::context_pinner::SmartContext,
     /// Cached chat area rect for mouse selection coordinate translation.
-    chat_area_rect: Option<ratatui::layout::Rect>,
+    chat_area_rect: Option<crate::tui::mouse::Rect>,
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +278,7 @@ impl SessionPerformance {
         self.tools += 1;
     }
 
+    #[allow(dead_code)]
     fn avg_first_token(&self) -> u64 {
         if self.first_token_ms.is_empty() {
             0
@@ -280,6 +287,7 @@ impl SessionPerformance {
         }
     }
 
+    #[allow(dead_code)]
     fn avg_total_latency(&self) -> u64 {
         if self.total_latency_ms.is_empty() {
             0
@@ -288,6 +296,7 @@ impl SessionPerformance {
         }
     }
 
+    #[allow(dead_code)]
     fn avg_tool_exec(&self) -> u64 {
         if self.tool_exec_ms.is_empty() {
             0
@@ -1179,6 +1188,7 @@ impl App {
     }
 
     /// Get visible messages based on scroll.
+    #[allow(dead_code)]
     fn visible_messages(&self, height: usize) -> Vec<&ChatMessage> {
         let start = self.scroll;
         if start >= self.messages.len() {
@@ -1209,6 +1219,7 @@ impl App {
     }
 
     /// Get session duration as formatted string.
+    #[allow(dead_code)]
     fn session_duration(&self) -> String {
         let elapsed = self.session_start.elapsed();
         let mins = elapsed.as_secs() / 60;
@@ -1296,8 +1307,10 @@ pub async fn run(config: Config) -> Result<()> {
         crate::tui::theme::set_theme(theme);
     }
 
-    let mut terminal = ratatui::init();
-    terminal.clear()?;
+    // Enter raw terminal mode
+    let mut out = stdout();
+    execute!(out, EnterAlternateScreen, Hide)?;
+    enable_raw_mode()?;
 
     let mut app = App::new(config.clone())?;
 
@@ -1313,7 +1326,7 @@ pub async fn run(config: Config) -> Result<()> {
     }
     let mut last_tick = Instant::now();
 
-    let result = run_app(&mut terminal, &mut app, &mut last_tick).await;
+    let result = run_app(&mut app, &mut last_tick).await;
 
     // Cleanup MCP connections
     app.shutdown_mcp().await;
@@ -1323,17 +1336,18 @@ pub async fn run(config: Config) -> Result<()> {
         app.mouse_state.disable();
     }
 
-    ratatui::restore();
+    // Restore terminal
+    disable_raw_mode()?;
+    execute!(out, Show, LeaveAlternateScreen)?;
     result
 }
 
 async fn run_app(
-    terminal: &mut Terminal<impl Backend>,
     app: &mut App,
     last_tick: &mut Instant,
 ) -> Result<()> {
     loop {
-        terminal.draw(|f| draw_ui(f, &mut *app))?;
+        draw_ui(app)?;
 
         // Drain any stream events from the background task before handling input.
         // Use Option::take() to avoid borrowing app.stream_rx while calling apply_stream_event.
@@ -1956,10 +1970,10 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             let names = crate::tui::theme::Theme::names();
-            let current = crate::tui::theme::current_theme().name;
+            let current = crate::tui::theme::current_theme().name();
             let idx = names.iter().position(|n| n == &current).unwrap_or(0);
             let next_idx = (idx + 1) % names.len();
-            let next_name = names[next_idx].clone();
+            let next_name = names[next_idx];
             if let Some(theme) = crate::tui::theme::Theme::by_name(&next_name) {
                 crate::tui::theme::set_theme(theme);
                 app.add_system_message(format!("🎨 Theme: {}", next_name));
@@ -3671,12 +3685,18 @@ async fn execute_tool_chain(
             }
         }
 
-        let _ = tx.send(StreamEvent::ToolResultsBatch {
-            results: batch_results,
-        });
+        // CRITICAL FIX: Only send ToolResultsBatch if we have results AND we're not in the legacy path
+        // that already sends individual ToolResult events. The batch is for display only.
+        if !batch_results.is_empty() {
+            let _ = tx.send(StreamEvent::ToolResultsBatch {
+                results: batch_results,
+            });
+        }
 
-        // Autonomous follow-up: tell the model to keep working, not to synthesize
-        let prompt = "Tool results are above. Analyze the results and determine the SINGLE NEXT tool needed to make progress. You MUST output a TOOL: line. Do NOT summarize. Do NOT explain. Do NOT ask questions. Just execute the next tool. If the task is TRULY complete (verified by tool results), say TASK_COMPLETE.";
+        // Autonomous follow-up: tell the model to synthesize OR continue with ONE tool
+        // CRITICAL FIX: The old prompt forced the model to ALWAYS output a TOOL: line,
+        // causing infinite loops. Now we ask it to analyze and EITHER synthesize OR call one more tool.
+        let prompt = "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If ONE more tool is needed, output a single TOOL: line.\n3. Do NOT chain multiple tools in one response.\n4. Do NOT ask the user questions.";
         follow_messages.push(Message {
             role: "user".to_string(),
             content: prompt.to_string(),
@@ -4387,9 +4407,11 @@ async fn stream_model_response_task(
                                     while turn < MAX_TURNS {
                                         turn += 1;
 
+                                        // CRITICAL FIX: The old prompt forced the model to ALWAYS output a TOOL: line,
+                                        // causing infinite loops. Now we ask it to analyze and EITHER synthesize OR call one more tool.
                                         follow_messages.push(Message {
                                             role: "user".to_string(),
-                                            content: "Tool results are above. Analyze the results and determine the SINGLE NEXT tool needed to make progress. You MUST output a TOOL: line. Do NOT summarize. Do NOT explain. Do NOT ask questions. Just execute the next tool. If the task is TRULY complete (verified by tool results), say TASK_COMPLETE.".to_string(),
+                                            content: "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If ONE more tool is needed, output a single TOOL: line.\n3. Do NOT chain multiple tools in one response.\n4. Do NOT ask the user questions.".to_string(),
                                             images: None,
                                             tool_call_id: None,
                                             tool_calls: None,

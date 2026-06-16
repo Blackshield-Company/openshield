@@ -74,8 +74,11 @@ pub(crate) struct SecondaryResponse {
 /// Per-agent streaming state for swarm mode.
 #[derive(Debug, Clone)]
 pub(crate) struct AgentStreamState {
+    #[allow(dead_code)]
     pub agent_id: String,
+    #[allow(dead_code)]
     pub agent_name: String,
+    #[allow(dead_code)]
     pub role: String,
     pub content: String,
     pub is_streaming: bool,
@@ -239,14 +242,9 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 if let Some(ref evolution) = app.evolution {
                     evolution.track_tool_outcome(&r.name, r.success, 0);
                 }
-                app.model_messages.push(Message {
-                    role: "user".to_string(),
-                    content: format!("Tool result: {}", r.result),
-                    images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
-                });
+                // CRITICAL FIX: Don't push to model_messages here.
+                // The individual ToolResult events already push to model_messages,
+                // or the tool chain handles it directly. Pushing here causes duplicates.
             }
         }
         StreamEvent::ToolResult {
