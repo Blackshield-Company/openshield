@@ -447,6 +447,8 @@ impl App {
             messages: Vec::new(),
             scroll: 0,
             should_exit: false,
+            ctrl_c_count: 0,
+            last_ctrl_c: None,
             mode: AppMode::Splash,
             session_id: session_id.clone(),
             model: model.clone(),
@@ -468,8 +470,6 @@ impl App {
             project_path,
             sidebar_expanded: true,
             focused_pane: 1,
-            ctrl_c_count: 0,
-            last_ctrl_c: None,
             branches: vec![SessionBranch {
                 name: "main".to_string(),
                 messages: Vec::new(),
