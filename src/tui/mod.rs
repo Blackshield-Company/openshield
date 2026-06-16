@@ -4427,8 +4427,8 @@ async fn stream_model_response_task(
                                             });
                                         }
 
-                                        match provider.chat_stream(follow_up).await {
-                                            Ok((follow_chunks, _metrics)) => {
+                                        match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
+                                            Ok(Ok((follow_chunks, _metrics))) => {
                                                 let follow_content: String = follow_chunks.join("");
                                                 let trimmed = follow_content.trim();
 
@@ -4446,14 +4446,20 @@ async fn stream_model_response_task(
                                                         reasoning_content: None,
                                                     });
                                                     let retry_req = ChatRequest::new(model.clone(), retry, true);
-                                                    match provider.chat_stream(retry_req).await {
-                                                        Ok((rc, _)) => {
+                                                    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
+                                                        Ok(Ok((rc, _))) => {
                                                             let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
                                                             let _ = tx.send(StreamEvent::Done);
                                                         }
-                                                        Err(e) => {
+                                                        Ok(Err(e)) => {
                                                             let _ = tx.send(StreamEvent::Error(
                                                                 format!("Retry failed: {}", e),
+                                                            ));
+                                                            let _ = tx.send(StreamEvent::Done);
+                                                        }
+                                                        Err(_) => {
+                                                            let _ = tx.send(StreamEvent::Error(
+                                                                "Retry timed out after 120s".to_string(),
                                                             ));
                                                             let _ = tx.send(StreamEvent::Done);
                                                         }
@@ -4530,11 +4536,18 @@ async fn stream_model_response_task(
                                                     }
                                                 }
                                             }
-                                            Err(e) => {
+                                            Ok(Err(e)) => {
                                                 let _ = tx.send(StreamEvent::Error(format!(
                                                     "Follow-up failed: {}",
                                                     e
                                                 )));
+                                                let _ = tx.send(StreamEvent::Done);
+                                                break;
+                                            }
+                                            Err(_) => {
+                                                let _ = tx.send(StreamEvent::Error(
+                                                    "Follow-up timed out after 120s".to_string(),
+                                                ));
                                                 let _ = tx.send(StreamEvent::Done);
                                                 break;
                                             }
