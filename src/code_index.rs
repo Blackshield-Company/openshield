@@ -183,17 +183,25 @@ impl CodeIndex {
     }
 
     /// Spawn a background thread that refreshes the index every `interval`.
+    /// Stops after a reasonable number of iterations to avoid wasting resources.
     pub fn spawn_background_refresh(self: &Arc<Self>, interval: Duration) {
         let this = Arc::clone(self);
         std::thread::spawn(move || {
-            loop {
+            // Skip first refresh — the DB is likely empty from open(), and the first
+            // rebuild can be expensive on large repos. Let the user settle in first.
+            std::thread::sleep(interval);
+            const MAX_REFRESHES: u32 = 12; // ~1 hour at 5-min intervals
+            let mut count = 0;
+            while count < MAX_REFRESHES {
                 std::thread::sleep(interval);
                 if let Err(e) = this.rebuild() {
                     tracing::warn!("Background code index refresh failed: {}", e);
                 } else {
                     tracing::info!("Background code index refreshed");
                 }
+                count += 1;
             }
+            tracing::info!("Background code index refresh stopped after {} cycles", count);
         });
     }
 }

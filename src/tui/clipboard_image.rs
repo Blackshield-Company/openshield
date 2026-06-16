@@ -9,6 +9,7 @@ use anyhow::Result;
 /// Returns Ok(Some(data_url)) if an image was found,
 /// Ok(None) if no image in clipboard,
 /// Err if clipboard access failed.
+/// Rejects images larger than 5MB to prevent memory bloat.
 pub fn try_paste_image_from_clipboard() -> Result<Option<String>> {
     use arboard::Clipboard;
 
@@ -20,6 +21,10 @@ pub fn try_paste_image_from_clipboard() -> Result<Option<String>> {
         Ok(image_data) => {
             // Convert arboard's ImageData to bytes
             let bytes = image_data.bytes.into_owned();
+            const MAX_IMAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
+            if bytes.len() > MAX_IMAGE_SIZE {
+                return Ok(None); // Silently reject oversized images
+            }
             // Determine MIME type from the image data
             let mime_type = detect_image_mime_type(&bytes);
             let data_url = crate::image_utils::encode_image_bytes_to_data_url(&bytes, mime_type);
