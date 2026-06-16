@@ -21,6 +21,7 @@ fn detect_mime_type(path: &Path) -> &'static str {
 }
 
 /// Read an image file and encode it as a base64 data URL.
+/// Rejects images larger than 5MB to prevent memory bloat.
 ///
 /// # Arguments
 /// * `path` - Path to the image file
@@ -29,11 +30,17 @@ fn detect_mime_type(path: &Path) -> &'static str {
 /// A string in the format `data:image/png;base64,...` or similar.
 ///
 /// # Errors
-/// Returns an error if the file cannot be read.
+/// Returns an error if the file cannot be read or exceeds 5MB.
 pub fn encode_image_to_data_url(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("Failed to read image file: {}", path.display()))?;
-
+    const MAX_IMAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
+    if bytes.len() > MAX_IMAGE_SIZE {
+        return Err(anyhow::anyhow!(
+            "Image too large: {} exceeds 5MB limit",
+            path.display()
+        ));
+    }
     let mime_type = detect_mime_type(path);
     let base64 = STANDARD.encode(&bytes);
 
