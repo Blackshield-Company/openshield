@@ -791,6 +791,7 @@ impl App {
             reasoning: None,
         };
         self.messages.push(msg);
+        self.truncate_messages_if_needed();
 
         let memory_msg = MemoryMessage {
             id: Uuid::new_v4().to_string(),
@@ -830,6 +831,7 @@ impl App {
             reasoning: reasoning.clone(),
         };
         self.messages.push(msg);
+        self.truncate_messages_if_needed();
 
         let memory_msg = MemoryMessage {
             id: Uuid::new_v4().to_string(),
@@ -855,6 +857,7 @@ impl App {
 
     /// Add a system/tool message to the chat.
     fn add_system_message(&mut self, content: String) {
+        self.truncate_messages_if_needed();
         let msg = ChatMessage {
             role: "system".to_string(),
             content: content.clone(),
@@ -864,9 +867,42 @@ impl App {
             reasoning: None,
         };
         self.messages.push(msg);
+
+        let memory_msg = MemoryMessage {
+            id: Uuid::new_v4().to_string(),
+            session_id: self.session_id.clone(),
+            role: "system".to_string(),
+            content,
+            created_at: Utc::now(),
+            tokens_used: None,
+        };
+        let _ = self.memory.save_message(&memory_msg);
     }
 
-    /// Rebuild the system prompt based on current plan_mode state.
+    /// Prevent unbounded RAM growth by truncating old chat messages.
+    fn truncate_messages_if_needed(&mut self) {
+        const MAX_MESSAGES: usize = 300;
+        const KEEP_FIRST: usize = 2;
+        const KEEP_LAST: usize = 200;
+        if self.messages.len() <= MAX_MESSAGES {
+            return;
+        }
+        let keep_first = KEEP_FIRST.min(self.messages.len());
+        let keep_last = KEEP_LAST.min(self.messages.len().saturating_sub(keep_first));
+        let mut new_messages = Vec::with_capacity(keep_first + keep_last + 1);
+        new_messages.extend(self.messages.iter().take(keep_first).cloned());
+        new_messages.push(ChatMessage {
+            role: "system".to_string(),
+            content: format!("[... {} older messages truncated to save memory]", self.messages.len() - keep_first - keep_last),
+            images: None,
+            timestamp: Utc::now(),
+            multi_model_responses: Vec::new(),
+            reasoning: None,
+        });
+        new_messages.extend(self.messages.iter().rev().take(keep_last).rev().cloned());
+        self.messages = new_messages;
+    }
+
     fn rebuild_system_prompt(&mut self) {
         let soul = crate::agent::soul::load_soul_from_config(&self.config);
 

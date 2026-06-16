@@ -211,9 +211,7 @@ fn cmd_tree(args: &str) -> Result<String> {
         .skip(1)
     {
         if file_count + dir_count >= MAX_ENTRIES {
-            result.push_str(&format!("\n[... {} more entries (truncated at {})]\n", 
-                WalkDir::new(&path).max_depth(max_depth).into_iter().filter_map(|e| e.ok()).count() - MAX_ENTRIES - 1,
-                MAX_ENTRIES));
+            result.push_str(&format!("\n[... truncated at {} entries]\n", MAX_ENTRIES));
             break;
         }
         let depth = entry.depth();
