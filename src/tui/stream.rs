@@ -164,8 +164,10 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 }
             } else {
                 let clean_content = strip_think_tags(&content);
-                app.add_assistant_message(clean_content, reasoning_to_save);
-                if let Some(suggestion) = detect_high_confidence_suggestion(&content) {
+                app.add_assistant_message(clean_content.clone(), reasoning_to_save);
+                if app.should_auto_continue(&clean_content) {
+                    app.auto_continue();
+                } else if let Some(suggestion) = detect_high_confidence_suggestion(&content) {
                     match app
                         .security_engine
                         .check_tool_call(&suggestion.tool_name, &suggestion.args)
@@ -367,7 +369,11 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 }
             } else {
                 app.empty_response_count = 0;
-                app.add_assistant_message(strip_think_tags(&content), None);
+                let clean = strip_think_tags(&content);
+                app.add_assistant_message(clean.clone(), None);
+                if app.should_auto_continue(&clean) {
+                    app.auto_continue();
+                }
             }
         }
         StreamEvent::MultiModelResponse {

@@ -120,7 +120,7 @@ pub async fn trigger_analysis(config: &Config) -> Result<()> {
     let memory = MemoryStore::new(&config.memory_db_path)?;
     let sessions = memory.get_recent_sessions(100)?;
 
-    println!("🦞 Self-Improvement Analysis");
+    println!("🦈 Self-Improvement Analysis");
     println!("Analyzing last {} sessions...", sessions.len());
     println!();
 

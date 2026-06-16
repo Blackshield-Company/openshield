@@ -30,7 +30,7 @@ fn prompt_bool(question: &str, default: bool) -> Result<bool> {
 }
 
 pub async fn run() -> Result<()> {
-    println!("🦞 OpenShark Setup");
+    println!("🦈 OpenShark Setup");
     println!("==================");
     println!();
     println!("OpenShark will create:");
@@ -54,7 +54,7 @@ pub async fn run() -> Result<()> {
     let agent_name = prompt("Agent name (lowercase, no spaces):", Some("synthclaw"))?;
     let display_name = prompt("Display name:", Some(&capitalize_first(&agent_name)))?;
     println!();
-    println!("ℹ️  Use Unicode emoji (e.g. 🎹🦞) not Discord codes (:emoji:)");
+    println!("ℹ️  Use Unicode emoji (e.g. 🎹🦈) not Discord codes (:emoji:)");
     let emoji = prompt("Emoji:", Some(""))?;
     let tagline = prompt("Tagline:", Some(""))?;
     let greeting = prompt(
@@ -126,7 +126,7 @@ pub async fn run() -> Result<()> {
     println!();
 
     // ── Provider Configuration ──────────────────────────────────────────────
-    println!("🎹🦞 Provider Configuration");
+    println!("🎹🦈 Provider Configuration");
     println!("───────────────────────────");
     println!();
 

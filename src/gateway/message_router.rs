@@ -461,7 +461,7 @@ Branches are per-channel and last until restart."#;
             }
             "!status" => {
                 let state = self.channel_states.get_or_create(channel_id);
-                let mut lines = vec!["🦞 **OpenShark Status**\n".to_string()];
+                let mut lines = vec!["🦈 **OpenShark Status**\n".to_string()];
                 lines.push(format!("Model: `{}`", state.model));
                 lines.push(format!(
                     "History: {} messages",
@@ -471,7 +471,7 @@ Branches are per-channel and last until restart."#;
                 let _ = reply_tx.send(lines.join("\n"));
             }
             "!help" => {
-                let help = r#"🦞 **OpenShark Keyword Commands**
+                let help = r#"🦈 **OpenShark Keyword Commands**
 
 |**Prefix commands:**
 • `!model` — List models
@@ -709,7 +709,7 @@ Use `/help` for the full slash command list.
                 "agent" => {
                     if let Some(task) = get_string_option(&cmd.data.options, "task") {
                         let _ = reply_tx.send(format!(
-                            "🦞 Starting agent task: **{}**\nThis may take a moment...",
+                            "🦈 Starting agent task: **{}**\nThis may take a moment...",
                             task
                         ));
 
@@ -880,7 +880,7 @@ Use `/help` for the full slash command list.
                 // ─── Status / Info ───
                 "status" => {
                     let state = self.channel_states.get_or_create(channel_id);
-                    let mut lines = vec!["🦞 **OpenShark Status**\n".to_string()];
+                    let mut lines = vec!["🦈 **OpenShark Status**\n".to_string()];
                     lines.push(format!("Model: `{}`", state.model));
                     lines.push(format!(
                         "History: {} messages (max: {})",
@@ -1098,7 +1098,7 @@ Use `/help` for the full slash command list.
 
                 // ─── Help ───
                 "help" => {
-                    let help_text = r#"🦞 **OpenShark Discord Commands**
+                    let help_text = r#"🦈 **OpenShark Discord Commands**
 
 **Chat:**
 • `/chat message:<text>` — Chat with OpenShark

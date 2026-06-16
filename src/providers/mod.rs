@@ -268,7 +268,7 @@ impl Provider {
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(std::time::Duration::from_secs(60))
             .tcp_keepalive(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(std::time::Duration::from_secs(60))
             .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
@@ -295,7 +295,7 @@ impl Provider {
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(std::time::Duration::from_secs(60))
             .tcp_keepalive(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(std::time::Duration::from_secs(60))
             .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
@@ -345,9 +345,10 @@ impl Provider {
                     .messages
                     .iter()
                     .filter(|m| {
-                        // Filter out empty assistant/tool messages — they violate API requirements.
-                        // Messages with tool_calls but empty content are fine (content becomes null).
-                        if (m.role == "assistant" || m.role == "tool")
+                        // Filter out empty assistant messages that have no tool_calls.
+                        // Tool messages must always be sent (API requires content field).
+                        // Assistant messages with tool_calls are kept (content becomes null).
+                        if m.role == "assistant"
                             && m.content.trim().is_empty()
                             && m.tool_calls.is_none()
                         {
@@ -356,12 +357,9 @@ impl Provider {
                         true
                     })
                     .map(|m| {
-                        // For assistant messages with tool_calls but no content,
-                        // the API requires content to be null (not empty string)
-                        let content = if m.role == "assistant"
-                            && m.content.is_empty()
-                            && m.tool_calls.is_some()
-                        {
+                        // For assistant messages with tool_calls, the API requires content to be null
+                        // (not empty string or whitespace). Force null whenever tool_calls is present.
+                        let content = if m.role == "assistant" && m.tool_calls.is_some() {
                             serde_json::Value::Null
                         } else {
                             m.to_openai_content()
@@ -396,6 +394,7 @@ impl Provider {
                 }
                 if let Some(ref tools) = request.tools {
                     body["tools"] = json!(tools);
+                    body["tool_choice"] = json!("auto");
                 }
                 body
             }
@@ -728,8 +727,24 @@ impl Provider {
         let mut chunks = Vec::new();
         let mut first_token_time: Option<Instant> = None;
         let mut buffer = String::new();
+        // FIXED: Use a fixed deadline so empty keepalive chunks don't reset the timer
+        let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
 
-        while let Some(chunk_result) = stream.next().await {
+        loop {
+            let remaining = stream_deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                chunks.push("[⏱ Stream timed out after 60s of inactivity]".to_string());
+                break;
+            }
+            let chunk_result = match tokio::time::timeout(remaining, stream.next()).await {
+                Ok(Some(result)) => result,
+                Ok(None) => break, // stream ended normally
+                Err(_) => {
+                    chunks.push("[⏱ Stream timed out after 60s of inactivity]".to_string());
+                    break;
+                }
+            };
+
             let chunk = chunk_result?;
             let text = String::from_utf8_lossy(&chunk);
             buffer.push_str(&text);
@@ -917,20 +932,24 @@ impl Provider {
             // Accumulate tool call fragments across SSE chunks, keyed by index
             let mut pending_tool_calls: HashMap<u32, AccumulatedToolCall> = HashMap::new();
 
-            let stream_timeout = std::time::Duration::from_secs(120);
+            // FIXED: Use a fixed deadline so empty keepalive chunks don't reset the timer
+            let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
             loop {
-                let chunk = tokio::select! {
-                    chunk_result = stream.next() => {
-                        match chunk_result {
-                            Some(Ok(c)) => c,
-                            Some(Err(e)) => {
-                                let _ = tx.send(StreamChunk::Content(format!("[stream read error: {}]", e)));
-                                return;
-                            }
-                            None => break, // stream ended normally
-                        }
+                let remaining = stream_deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    let _ = tx.send(StreamChunk::Content(
+                        "[⏱ Stream timed out after 120s of inactivity]".to_string()
+                    ));
+                    break;
+                }
+                let chunk = match tokio::time::timeout(remaining, stream.next()).await {
+                    Ok(Some(Ok(c))) => c,
+                    Ok(Some(Err(e))) => {
+                        let _ = tx.send(StreamChunk::Content(format!("[stream read error: {}]", e)));
+                        return;
                     }
-                    _ = tokio::time::sleep(stream_timeout) => {
+                    Ok(None) => break, // stream ended normally
+                    Err(_) => {
                         let _ = tx.send(StreamChunk::Content(
                             "[⏱ Stream timed out after 120s of inactivity]".to_string()
                         ));
@@ -972,24 +991,8 @@ impl Provider {
                                         .and_then(|c| c.get("finish_reason"))
                                         .and_then(|f| f.as_str());
 
-                                    // Emit finish reason if present
-                                    if let Some(fr) = finish_reason {
-                                        if fr == "tool_calls" {
-                                            // Flush all accumulated tool calls
-                                            for (_idx, tc) in pending_tool_calls.drain() {
-                                                let _ = tx.send(StreamChunk::ToolCall {
-                                                    id: tc.id,
-                                                    name: tc.name,
-                                                    arguments: tc.arguments,
-                                                });
-                                            }
-                                            let _ = tx.send(StreamChunk::Finish(fr.to_string()));
-                                        } else if fr == "stop" {
-                                            let _ = tx.send(StreamChunk::Finish(fr.to_string()));
-                                        }
-                                    }
-
-                                    // Accumulate tool call fragments by index
+                                    // Accumulate tool call fragments by index FIRST
+                                    // (before checking finish_reason, so final chunks aren't lost)
                                     if let Some(tcs) = tool_calls {
                                         for tc in tcs {
                                             let index = tc
@@ -1002,16 +1005,18 @@ impl Provider {
 
                                             if let Some(id) = tc.get("id").and_then(|i| i.as_str())
                                                 && !id.is_empty()
+                                                && entry.id.is_empty()
                                             {
-                                                entry.id.push_str(id);
+                                                entry.id = id.to_string();
                                             }
                                             if let Some(name) = tc
                                                 .get("function")
                                                 .and_then(|f| f.get("name"))
                                                 .and_then(|n| n.as_str())
                                                 && !name.is_empty()
+                                                && entry.name.is_empty()
                                             {
-                                                entry.name.push_str(name);
+                                                entry.name = name.to_string();
                                             }
                                             if let Some(args) = tc
                                                 .get("function")
@@ -1020,6 +1025,33 @@ impl Provider {
                                             {
                                                 entry.arguments.push_str(args);
                                             }
+                                        }
+                                    }
+
+                                    // Emit finish reason if present
+                                    if let Some(fr) = finish_reason
+                                        && !fr.is_empty()
+                                    {
+                                        if fr == "tool_calls" {
+                                            // Flush all accumulated tool calls
+                                            for (_idx, tc) in pending_tool_calls.drain() {
+                                                let _ = tx.send(StreamChunk::ToolCall {
+                                                    id: tc.id,
+                                                    name: tc.name,
+                                                    arguments: tc.arguments,
+                                                });
+                                            }
+                                            let _ = tx.send(StreamChunk::Finish(fr.to_string()));
+                                        } else if fr == "stop" || fr == "length" || fr == "content_filter" {
+                                            // Flush any remaining tool calls before sending stop
+                                            for (_idx, tc) in pending_tool_calls.drain() {
+                                                let _ = tx.send(StreamChunk::ToolCall {
+                                                    id: tc.id,
+                                                    name: tc.name,
+                                                    arguments: tc.arguments,
+                                                });
+                                            }
+                                            let _ = tx.send(StreamChunk::Finish(fr.to_string()));
                                         }
                                     }
 
@@ -1081,6 +1113,14 @@ impl Provider {
                 }
             }
             // Stream ended normally — send Finish so the TUI knows we're done
+            // Flush any remaining tool calls that weren't sent due to missing finish_reason
+            for (_idx, tc) in pending_tool_calls.drain() {
+                let _ = tx.send(StreamChunk::ToolCall {
+                    id: tc.id,
+                    name: tc.name,
+                    arguments: tc.arguments,
+                });
+            }
             let _ = tx.send(StreamChunk::Finish("stop".to_string()));
         });
 
