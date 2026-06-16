@@ -5298,6 +5298,7 @@ async fn handle_slash_result(
                     let new_config = app
                         .profile_registry
                         .apply_to_config(&app.security_engine.config);
+                    let was_autonomous = app.autonomous_mode;
                     app.security_engine = crate::security::SecurityEngine::new(new_config)
                         .unwrap_or_else(|e| {
                             app.add_system_message(format!(
@@ -5306,6 +5307,7 @@ async fn handle_slash_result(
                             ));
                             app.security_engine.clone()
                         });
+                    app.security_engine.set_autonomous_mode(was_autonomous);
                     app.add_system_message(format!("🔒 {}", app.profile_registry.active_summary()));
                 }
             } else {
