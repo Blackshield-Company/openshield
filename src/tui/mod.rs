@@ -447,6 +447,8 @@ impl App {
             messages: Vec::new(),
             scroll: 0,
             should_exit: false,
+            ctrl_c_count: 0,
+            last_ctrl_c: None,
             mode: AppMode::Splash,
             session_id: session_id.clone(),
             model: model.clone(),
@@ -468,8 +470,6 @@ impl App {
             project_path,
             sidebar_expanded: true,
             focused_pane: 1,
-            ctrl_c_count: 0,
-            last_ctrl_c: None,
             branches: vec![SessionBranch {
                 name: "main".to_string(),
                 messages: Vec::new(),
@@ -791,6 +791,7 @@ impl App {
             reasoning: None,
         };
         self.messages.push(msg);
+        self.truncate_messages_if_needed();
 
         let memory_msg = MemoryMessage {
             id: Uuid::new_v4().to_string(),
@@ -830,6 +831,7 @@ impl App {
             reasoning: reasoning.clone(),
         };
         self.messages.push(msg);
+        self.truncate_messages_if_needed();
 
         let memory_msg = MemoryMessage {
             id: Uuid::new_v4().to_string(),
@@ -855,6 +857,7 @@ impl App {
 
     /// Add a system/tool message to the chat.
     fn add_system_message(&mut self, content: String) {
+        self.truncate_messages_if_needed();
         let msg = ChatMessage {
             role: "system".to_string(),
             content: content.clone(),
@@ -864,9 +867,42 @@ impl App {
             reasoning: None,
         };
         self.messages.push(msg);
+
+        let memory_msg = MemoryMessage {
+            id: Uuid::new_v4().to_string(),
+            session_id: self.session_id.clone(),
+            role: "system".to_string(),
+            content,
+            created_at: Utc::now(),
+            tokens_used: None,
+        };
+        let _ = self.memory.save_message(&memory_msg);
     }
 
-    /// Rebuild the system prompt based on current plan_mode state.
+    /// Prevent unbounded RAM growth by truncating old chat messages.
+    fn truncate_messages_if_needed(&mut self) {
+        const MAX_MESSAGES: usize = 300;
+        const KEEP_FIRST: usize = 2;
+        const KEEP_LAST: usize = 200;
+        if self.messages.len() <= MAX_MESSAGES {
+            return;
+        }
+        let keep_first = KEEP_FIRST.min(self.messages.len());
+        let keep_last = KEEP_LAST.min(self.messages.len().saturating_sub(keep_first));
+        let mut new_messages = Vec::with_capacity(keep_first + keep_last + 1);
+        new_messages.extend(self.messages.iter().take(keep_first).cloned());
+        new_messages.push(ChatMessage {
+            role: "system".to_string(),
+            content: format!("[... {} older messages truncated to save memory]", self.messages.len() - keep_first - keep_last),
+            images: None,
+            timestamp: Utc::now(),
+            multi_model_responses: Vec::new(),
+            reasoning: None,
+        });
+        new_messages.extend(self.messages.iter().rev().take(keep_last).rev().cloned());
+        self.messages = new_messages;
+    }
+
     fn rebuild_system_prompt(&mut self) {
         let soul = crate::agent::soul::load_soul_from_config(&self.config);
 
@@ -4391,8 +4427,8 @@ async fn stream_model_response_task(
                                             });
                                         }
 
-                                        match provider.chat_stream(follow_up).await {
-                                            Ok((follow_chunks, _metrics)) => {
+                                        match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
+                                            Ok(Ok((follow_chunks, _metrics))) => {
                                                 let follow_content: String = follow_chunks.join("");
                                                 let trimmed = follow_content.trim();
 
@@ -4410,14 +4446,20 @@ async fn stream_model_response_task(
                                                         reasoning_content: None,
                                                     });
                                                     let retry_req = ChatRequest::new(model.clone(), retry, true);
-                                                    match provider.chat_stream(retry_req).await {
-                                                        Ok((rc, _)) => {
+                                                    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
+                                                        Ok(Ok((rc, _))) => {
                                                             let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
                                                             let _ = tx.send(StreamEvent::Done);
                                                         }
-                                                        Err(e) => {
+                                                        Ok(Err(e)) => {
                                                             let _ = tx.send(StreamEvent::Error(
                                                                 format!("Retry failed: {}", e),
+                                                            ));
+                                                            let _ = tx.send(StreamEvent::Done);
+                                                        }
+                                                        Err(_) => {
+                                                            let _ = tx.send(StreamEvent::Error(
+                                                                "Retry timed out after 120s".to_string(),
                                                             ));
                                                             let _ = tx.send(StreamEvent::Done);
                                                         }
@@ -4494,11 +4536,18 @@ async fn stream_model_response_task(
                                                     }
                                                 }
                                             }
-                                            Err(e) => {
+                                            Ok(Err(e)) => {
                                                 let _ = tx.send(StreamEvent::Error(format!(
                                                     "Follow-up failed: {}",
                                                     e
                                                 )));
+                                                let _ = tx.send(StreamEvent::Done);
+                                                break;
+                                            }
+                                            Err(_) => {
+                                                let _ = tx.send(StreamEvent::Error(
+                                                    "Follow-up timed out after 120s".to_string(),
+                                                ));
                                                 let _ = tx.send(StreamEvent::Done);
                                                 break;
                                             }
@@ -5595,6 +5644,7 @@ async fn execute_approved_tool_task(
     security_engine: crate::security::SecurityEngine,
     suggestion: ToolSuggestion,
 ) -> Result<()> {
+    let _ = tx.send(StreamEvent::Start);
     let executor = AsyncToolExecutor::new();
     match executor
         .execute_with_timeout_simple(suggestion.tool_name.clone(), suggestion.args.clone(), 30000)
@@ -5674,8 +5724,8 @@ async fn execute_approved_tool_task(
                 }
                 follow_up.max_tokens = Some(512);
 
-                match provider.chat_stream(follow_up).await {
-                    Ok((chunks, metrics)) => {
+                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
+                    Ok(Ok((chunks, metrics))) => {
                         let follow_content: String = chunks.join("");
 
                         if follow_content.contains("TASK_COMPLETE") {
@@ -5756,8 +5806,14 @@ async fn execute_approved_tool_task(
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                        break;
+                    }
+                    Err(_) => {
+                        let _ = tx.send(StreamEvent::Error(
+                            "Follow-up timed out after 120s".to_string(),
+                        ));
                         break;
                     }
                 }

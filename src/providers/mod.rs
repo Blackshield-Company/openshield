@@ -729,6 +729,9 @@ impl Provider {
         let mut buffer = String::new();
         // FIXED: Use a fixed deadline so empty keepalive chunks don't reset the timer
         let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // Prevent unbounded chunk accumulation for very long responses
+        const MAX_CHUNKS: usize = 10_000;
+        let mut merged_buffer = String::new();
 
         loop {
             let remaining = stream_deadline.saturating_duration_since(std::time::Instant::now());
@@ -807,6 +810,13 @@ impl Provider {
                         if let Some(delta) = delta_content {
                             if first_token_time.is_none() {
                                 first_token_time = Some(Instant::now());
+                            }
+                            // Merge chunks if we're approaching the limit to save RAM
+                            if chunks.len() >= MAX_CHUNKS {
+                                merged_buffer.push_str(&chunks.join(""));
+                                chunks.clear();
+                                chunks.push(merged_buffer.clone());
+                                merged_buffer.clear();
                             }
                             chunks.push(delta.to_string());
                         }

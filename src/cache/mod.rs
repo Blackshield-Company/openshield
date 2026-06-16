@@ -102,8 +102,10 @@ impl ResponseCache {
     }
 
     /// Store a response in the cache with a TTL in seconds.
-    /// Persistence is done asynchronously to avoid blocking the caller.
+    /// Persistence is done synchronously for simplicity.
+    /// Enforces a max entry limit to prevent unbounded memory growth.
     pub fn set(&self, key: &str, response: &str, ttl_secs: u64) -> Result<()> {
+        const MAX_CACHE_ENTRIES: usize = 1000;
         let expires_at = current_timestamp_secs().saturating_add(ttl_secs);
         let entry = CachedResponse {
             response: response.to_string(),
@@ -114,6 +116,13 @@ impl ResponseCache {
                 .inner
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Cache lock poisoned: {}", e))?;
+            // Evict oldest entries if we're at the limit (simple FIFO: remove first key)
+            if map.len() >= MAX_CACHE_ENTRIES && !map.contains_key(key) {
+                let first_key = map.keys().next().cloned();
+                if let Some(k) = first_key {
+                    map.remove(&k);
+                }
+            }
             map.insert(key.to_string(), entry);
         }
         if let Ok(mut stats) = self.stats.lock() {
