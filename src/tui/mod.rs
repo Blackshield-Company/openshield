@@ -5631,6 +5631,7 @@ async fn execute_approved_tool_task(
     security_engine: crate::security::SecurityEngine,
     suggestion: ToolSuggestion,
 ) -> Result<()> {
+    let _ = tx.send(StreamEvent::Start);
     let executor = AsyncToolExecutor::new();
     match executor
         .execute_with_timeout_simple(suggestion.tool_name.clone(), suggestion.args.clone(), 30000)
@@ -5710,8 +5711,8 @@ async fn execute_approved_tool_task(
                 }
                 follow_up.max_tokens = Some(512);
 
-                match provider.chat_stream(follow_up).await {
-                    Ok((chunks, metrics)) => {
+                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
+                    Ok(Ok((chunks, metrics))) => {
                         let follow_content: String = chunks.join("");
 
                         if follow_content.contains("TASK_COMPLETE") {
@@ -5792,8 +5793,14 @@ async fn execute_approved_tool_task(
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
+                        break;
+                    }
+                    Err(_) => {
+                        let _ = tx.send(StreamEvent::Error(
+                            "Follow-up timed out after 120s".to_string(),
+                        ));
                         break;
                     }
                 }
