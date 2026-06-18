@@ -14,7 +14,6 @@
 /// - Connection status line
 /// - Help bar with key commands
 /// - Input prompt with blinking cursor
-
 use crate::tui::theme::{ansi_fg, ansi_reset, Color};
 
 // ── Color Constants (OpenShark True Colors) ───────────────────────────────────
@@ -45,17 +44,11 @@ pub fn banner(term_width: usize) -> String {
     lines.push(String::new());
     lines.push(String::new());
 
-    // Large blocky "SHARK" logo (like CLAW Code's header)
-    let logo_lines = shark_logo();
+    // Large blocky "OPENSHARK" logo
+    let logo_lines = openshark_logo();
     for line in logo_lines {
         lines.push(center_line(line, term_width));
     }
-
-    // "Code" with lobster emoji (like CLAW Code's "Code 🦀")
-    lines.push(center_line(
-        format!("{}  Code 🦞{}", ansi_fg(C_SHARK_PINK), ansi_reset()),
-        term_width,
-    ));
 
     lines.push(String::new());
 
@@ -124,31 +117,33 @@ pub fn banner(term_width: usize) -> String {
 
 // ── Logo: "SHARK" in blocky pixel style ─────────────────────────────────────
 
-fn shark_logo() -> Vec<String> {
-    // Blocky pixel-art "SHARK" — red/pink like CLAW Code's logo
+fn openshark_logo() -> Vec<String> {
+    // Blocky pixel-art "OPENSHARK" — 9 letters, variable width, 73 chars total
+    // O P E N S H A R K
+    // K: 2-char left stem on all rows, symmetric diagonals stepping from center.
     vec![
         format!(
-            "{}███████ ██   ██  █████  ███████ ██   ██{}",
+            "{} ██████  ██████  ███████ ███   ██ ███████ ██   ██   ███   ██████  ██   ██{}",
             ansi_fg(C_SHARK_PINK),
             ansi_reset()
         ),
         format!(
-            "{}██      ██   ██ ██   ██ ██      ██  ██ {}",
+            "{}██    ██ ██   ██ ██      ████  ██ ██      ██   ██  ██ ██  ██   ██ ██  ██ {}",
             ansi_fg(C_SHARK_PINK),
             ansi_reset()
         ),
         format!(
-            "{}███████ ███████ ███████ █████   █████  {}",
+            "{}██    ██ ██████  █████   ██ ██ ██ ███████ ███████  █████  █████   ██ ██  {}",
             ansi_fg(C_SHARK_HIGHLIGHT),
             ansi_reset()
         ),
         format!(
-            "{}     ██ ██   ██ ██   ██ ██      ██  ██ {}",
+            "{}██    ██ ██      ██      ██  ████      ██ ██   ██ ██   ██ ██  ██  ██  ██ {}",
             ansi_fg(C_SHARK_PINK),
             ansi_reset()
         ),
         format!(
-            "{}███████ ██   ██ ██   ██ ███████ ██   ██{}",
+            "{} ██████  ██      ███████ ██   ███ ███████ ██   ██ ██   ██ ██   ██ ██   ██{}",
             ansi_fg(C_SHARK_PINK),
             ansi_reset()
         ),

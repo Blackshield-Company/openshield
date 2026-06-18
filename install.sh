@@ -8,7 +8,7 @@ REPO="https://github.com/synthalorian/openshark.git"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/openshark}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
-echo "🦞 OpenShark Installer"
+echo "🦈 OpenShark Installer"
 echo "======================"
 
 # Check for Rust

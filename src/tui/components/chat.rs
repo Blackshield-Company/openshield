@@ -1,87 +1,121 @@
-/// Direct ANSI rendering for the chat area and input bar.
-/// Refactored to match Hermes/Claw-Code TUI style:
-/// - Gold-bordered boxed chat area with centered title
-/// - Cleaner message formatting with role icons and color-coded headers
-/// - Status bar style input bar with model info, progress, and timer
-/// - Bottom status bar like Hermes: model | ctx | [████░░░░░░] | 38s | [OK]
-use std::io::{self, stdout, Write};
+use std::io::{self, Write};
 
 use crossterm::{
     cursor::MoveTo,
-    style::{Print, ResetColor, SetForegroundColor},
-    terminal::{Clear, ClearType},
+    style::{Print, ResetColor},
     queue,
 };
 
 use crate::tui::theme::*;
 use crate::tui::{App, ChatMessage};
 
-/// Draw the main chat area with messages using direct ANSI output.
+/// Draw the unified message feed — full width, no borders, everything scrolls.
 /// `area` is (x, y, width, height) in terminal coordinates.
-pub fn draw_chat_area(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
+///
+/// ANTI-FLICKER: no per-line Clear(UntilNewLine), no flush. The caller handles
+/// clearing the entire screen once and flushing once at frame end.
+pub fn draw_unified_feed(
+    out: &mut impl Write,
+    app: &App,
+    area: (u16, u16, u16, u16),
+) -> io::Result<()> {
     let (x, y, width, height) = area;
-    let mut out = stdout();
 
-    let border_color = if app.focused_pane == 1 {
-        current_theme().border_focused
-    } else {
-        current_theme().border
-    };
-    let gold = Color::Rgb { r: 255, g: 215, b: 0 };
+    let inner_width = width.saturating_sub(2); // 1-char padding each side
+    let inner_height = height as usize;
 
-    // Top border with centered title
-    queue!(out, MoveTo(x, y), SetForegroundColor(border_color))?;
-    queue!(out, Print("┌"), Print("─".repeat((width - 2) as usize)), Print("┐"))?;
-    queue!(out, ResetColor)?;
+    // Build a flat list of all visible lines in the feed:
+    // system info header + messages + streaming content + reasoning
+    let mut all_lines: Vec<String> = Vec::new();
 
-    let title = " Chat ";
-    let title_x = x + (width - title.len() as u16) / 2;
-    queue!(out, MoveTo(title_x, y), SetForegroundColor(gold), Print(title), ResetColor)?;
+    // ── System info header (scrolls with feed) ───────────────────────────────
+    all_lines.push(format_info_line("Model", &app.model, inner_width as usize));
+    all_lines.push(format_info_line(
+        "Session",
+        &app.session_id[..app.session_id.len().min(24)],
+        inner_width as usize,
+    ));
+    all_lines.push(format_info_line(
+        "Ctx",
+        &format!("{} / {}", app.context_used(), app.model_context_length),
+        inner_width as usize,
+    ));
+    all_lines.push(format_info_line(
+        "Tokens",
+        &app.tokens_used.to_string(),
+        inner_width as usize,
+    ));
+    all_lines.push(format_info_line(
+        "Tools",
+        &app.tool_calls_count.to_string(),
+        inner_width as usize,
+    ));
+    all_lines.push(format_info_line("Branch", "main", inner_width as usize));
 
-    // Side borders
-    for row in 1..height - 1 {
-        queue!(out, MoveTo(x, y + row), SetForegroundColor(border_color), Print("│"), ResetColor)?;
-        queue!(out, MoveTo(x + width - 1, y + row), SetForegroundColor(border_color), Print("│"), ResetColor)?;
-    }
+    // Separator
+    all_lines.push(format!(
+        "{}─{}",
+        ansi_fg(Color::Rgb {
+            r: 140,
+            g: 120,
+            b: 160,
+        }),
+        ansi_reset()
+    ));
 
-    // Bottom border
-    queue!(out, MoveTo(x, y + height - 1), SetForegroundColor(border_color))?;
-    queue!(out, Print("└"), Print("─".repeat((width - 2) as usize)), Print("┘"))?;
-    queue!(out, ResetColor)?;
-
-    // Content area (inside borders)
-    let inner_x = x + 1;
-    let inner_y = y + 1;
-    let inner_width = width.saturating_sub(2);
-    let inner_height = height.saturating_sub(2) as usize;
-
-    // Calculate visible messages based on scroll
-    let total_messages = app.messages.len();
-    let scroll = app.scroll.min(total_messages.saturating_sub(inner_height));
-
-    let mut current_row = 0u16;
-    for msg in app.messages.iter().skip(scroll).take(inner_height) {
+    // ── Messages ────────────────────────────────────────────────────────────
+    for msg in &app.messages {
         let msg_lines = format_message(msg, inner_width as usize);
-        for line in msg_lines {
-            if current_row >= inner_height as u16 {
-                break;
-            }
-            queue!(out, MoveTo(inner_x, inner_y + current_row), Print(&line), Clear(ClearType::UntilNewLine))?;
-            current_row += 1;
-        }
-        // Separator line between messages
-        if current_row < inner_height as u16 {
-            queue!(out, MoveTo(inner_x, inner_y + current_row), Clear(ClearType::UntilNewLine))?;
-            current_row += 1;
-        }
+        all_lines.extend(msg_lines);
+        // Thin separator between messages
+        all_lines.push(String::new());
     }
 
-    // Clear remaining rows
-    for row in current_row..inner_height as u16 {
-        queue!(out, MoveTo(inner_x, inner_y + row), Clear(ClearType::UntilNewLine))?;
+    // ── Streaming content (if active) ───────────────────────────────────────
+    if app.is_streaming && !app.streaming_content.is_empty() {
+        let streaming_lines =
+            format_streaming_content(&app.streaming_content, inner_width as usize);
+        all_lines.extend(streaming_lines);
     }
 
-    out.flush()
+    // ── Reasoning content (if active) ───────────────────────────────────────
+    if app.is_reasoning && !app.reasoning_content.is_empty() {
+        let reasoning_lines =
+            format_reasoning_content(&app.reasoning_content, inner_width as usize);
+        all_lines.extend(reasoning_lines);
+    }
+
+    // Calculate scroll offset
+    let total_lines = all_lines.len();
+    let scroll = app.scroll.min(total_lines.saturating_sub(inner_height));
+
+    // Draw visible lines — NO Clear(UntilNewLine), just Print. The screen was
+    // already cleared once by the caller at frame start.
+    let mut current_row = 0u16;
+    for line in all_lines.iter().skip(scroll).take(inner_height) {
+        let draw_x = x + 1; // 1-char left padding
+        queue!(
+            out,
+            MoveTo(draw_x, y + current_row),
+            Print(line),
+            ResetColor,
+        )?;
+        current_row += 1;
+    }
+
+    // Clear remaining rows — only needed for the bottom of the feed area when
+    // there aren't enough lines to fill it. Still no per-line clear needed
+    // because the screen was cleared at frame start.
+    for row in current_row..height {
+        queue!(
+            out,
+            MoveTo(x + 1, y + row),
+            Print(" "),
+            ResetColor,
+        )?;
+    }
+
+    Ok(())
 }
 
 /// Format a single chat message into displayable strings with ANSI colors.
@@ -89,10 +123,42 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
 
     let (role_icon, role_color, role_name) = match msg.role.as_str() {
-        "user" => ("👤", Color::Rgb { r: 255, g: 215, b: 0 }, "You"),       // Gold
-        "assistant" => ("🦞", Color::Rgb { r: 255, g: 77, b: 158 }, "Shark"), // Pink
-        "system" => ("📋", Color::Rgb { r: 140, g: 120, b: 160 }, "System"),  // Muted
-        _ => ("❓", Color::Rgb { r: 220, g: 220, b: 220 }, "Unknown"),
+        "user" => (
+            "👤",
+            Color::Rgb {
+                r: 255,
+                g: 215,
+                b: 0,
+            },
+            "You",
+        ), // Gold
+        "assistant" => (
+            "🦈",
+            Color::Rgb {
+                r: 255,
+                g: 77,
+                b: 158,
+            },
+            "Shark",
+        ), // Pink
+        "system" => (
+            "📋",
+            Color::Rgb {
+                r: 140,
+                g: 120,
+                b: 160,
+            },
+            "System",
+        ), // Muted
+        _ => (
+            "❓",
+            Color::Rgb {
+                r: 220,
+                g: 220,
+                b: 220,
+            },
+            "Unknown",
+        ),
     };
 
     // Role header with icon and name
@@ -101,7 +167,11 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
         ansi_fg(role_color),
         role_icon,
         role_name,
-        ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 }),
+        ansi_fg(Color::Rgb {
+            r: 140,
+            g: 120,
+            b: 160,
+        }),
         ansi_reset()
     );
     lines.push(header);
@@ -112,7 +182,11 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
         for w in wrapped {
             lines.push(format!(
                 "{}{}{}",
-                ansi_fg(Color::Rgb { r: 220, g: 220, b: 220 }),
+                ansi_fg(Color::Rgb {
+                    r: 220,
+                    g: 220,
+                    b: 220,
+                }),
                 w,
                 ansi_reset()
             ));
@@ -123,7 +197,11 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
     for response in &msg.multi_model_responses {
         lines.push(format!(
             "{}  ↳ {} ({}ms, {}tok){}",
-            ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 }),
+            ansi_fg(Color::Rgb {
+                r: 140,
+                g: 120,
+                b: 160,
+            }),
             response.model_name,
             response.latency_ms,
             response.tokens,
@@ -134,7 +212,11 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
             for w in wrapped {
                 lines.push(format!(
                     "{}    {}{}",
-                    ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 }),
+                    ansi_fg(Color::Rgb {
+                        r: 140,
+                        g: 120,
+                        b: 160,
+                    }),
                     w,
                     ansi_reset()
                 ));
@@ -143,6 +225,105 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
     }
 
     lines
+}
+
+fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let header = format!(
+        "{}🦈 Shark {}(streaming…){}",
+        ansi_fg(Color::Rgb {
+            r: 255,
+            g: 77,
+            b: 158,
+        }),
+        ansi_fg(Color::Rgb {
+            r: 140,
+            g: 120,
+            b: 160,
+        }),
+        ansi_reset()
+    );
+    lines.push(header);
+
+    for line in content.lines() {
+        let wrapped = wrap_line(line, width.saturating_sub(2));
+        for w in wrapped {
+            lines.push(format!(
+                "{}{}{}",
+                ansi_fg(Color::Rgb {
+                    r: 220,
+                    g: 220,
+                    b: 220,
+                }),
+                w,
+                ansi_reset()
+            ));
+        }
+    }
+    lines
+}
+
+fn format_reasoning_content(content: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let header = format!(
+        "{}💭 Reasoning {}(thinking…){}",
+        ansi_fg(Color::Rgb {
+            r: 140,
+            g: 120,
+            b: 160,
+        }),
+        ansi_fg(Color::Rgb {
+            r: 100,
+            g: 100,
+            b: 120,
+        }),
+        ansi_reset()
+    );
+    lines.push(header);
+
+    for line in content.lines() {
+        let wrapped = wrap_line(line, width.saturating_sub(2));
+        for w in wrapped {
+            lines.push(format!(
+                "{}{}{}",
+                ansi_fg(Color::Rgb {
+                    r: 140,
+                    g: 140,
+                    b: 160,
+                }),
+                w,
+                ansi_reset()
+            ));
+        }
+    }
+    lines
+}
+
+fn format_info_line(label: &str, value: &str, width: usize) -> String {
+    let label_color = ansi_fg(Color::Rgb {
+        r: 140,
+        g: 120,
+        b: 160,
+    });
+    let value_color = ansi_fg(Color::Rgb {
+        r: 220,
+        g: 220,
+        b: 220,
+    });
+    let reset = ansi_reset();
+    let label_w = 10usize;
+    let value_w = width.saturating_sub(label_w + 2);
+    format!(
+        "{}{:>label_w$}{} {}{:<value_w$}{}",
+        label_color,
+        label,
+        reset,
+        value_color,
+        value.chars().take(value_w).collect::<String>(),
+        reset,
+        label_w = label_w,
+        value_w = value_w
+    )
 }
 
 /// Simple word-wrap that respects display width.
@@ -176,91 +357,131 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
     result
 }
 
-/// Draw the input bar at the bottom — styled like a status bar.
-/// Hermes style: model | ctx -- | [████░░░░░░] | 38s | [OK]
-pub fn draw_input_bar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
-    let (x, y, width, _height) = area;
-    let mut out = stdout();
+/// Calculate the number of display lines needed for the input text.
+/// Handles newlines and Unicode width properly.
+pub(crate) fn calculate_input_lines(text: &str, available_width: usize) -> usize {
+    if text.is_empty() || available_width == 0 {
+        return 1;
+    }
 
-    let gold = Color::Rgb { r: 255, g: 215, b: 0 };
-    let cyan = Color::Rgb { r: 0, g: 255, b: 255 };
-    let green = Color::Rgb { r: 80, g: 255, b: 120 };
-    let muted = Color::Rgb { r: 140, g: 120, b: 160 };
+    let mut total_lines = 0;
+    for line in text.split('\n') {
+        let wrapped = wrap_line(line, available_width);
+        total_lines += wrapped.len().max(1);
+    }
 
-    // Build status bar string
-    let model_short = app.model.split('/').last().unwrap_or(&app.model);
-    let model_part = format!("{}{}{}", ansi_fg(cyan), model_short, ansi_reset());
-
-    let ctx_part = format!("{}ctx --{}", ansi_fg(muted), ansi_reset());
-
-    let progress = if app.is_streaming {
-        let elapsed = app.stream_start_time.map(|s| s.elapsed().as_secs()).unwrap_or(0);
-        let bars = (elapsed % 10) as usize;
-        let filled = "█".repeat(bars);
-        let empty = "░".repeat(10 - bars);
-        let elapsed_str = format_elapsed(app.stream_start_time);
-        format!(
-            "{}[{}{}]{} {}",
-            ansi_fg(green),
-            filled,
-            empty,
-            ansi_reset(),
-            elapsed_str
-        )
-    } else {
-        format!("{}[░░░░░░░░░░]{} --", ansi_fg(muted), ansi_reset())
-    };
-
-    let status = if app.is_streaming {
-        format!("{}[STREAM]{}", ansi_fg(gold), ansi_reset())
-    } else {
-        format!("{}[OK]{}", ansi_fg(green), ansi_reset())
-    };
-
-    let status_bar = format!("{} | {} | {} | {}", model_part, ctx_part, progress, status);
-
-    // Draw the status bar line at the top of the input area
-    queue!(out, MoveTo(x, y), SetForegroundColor(gold))?;
-    queue!(out, Print("┌"), Print("─".repeat((width - 2) as usize)), Print("┐"))?;
-    queue!(out, ResetColor)?;
-
-    // Status bar content
-    let status_x = x + 1;
-    queue!(out, MoveTo(status_x, y), Print(&status_bar), Clear(ClearType::UntilNewLine), ResetColor)?;
-
-    // Input prompt line
-    let prompt_y = y + 1;
-    let prompt = format!("{}>{}", ansi_fg(gold), ansi_reset());
-    let display_input = if app.input.is_empty() {
-        format!(
-            "{} {}Type a message or command...{}",
-            prompt,
-            ansi_fg(muted),
-            ansi_reset()
-        )
-    } else {
-        format!("{} {}{}", prompt, ansi_fg(Color::Rgb { r: 220, g: 220, b: 220 }), &app.input)
-    };
-
-    queue!(out, MoveTo(x, prompt_y), SetForegroundColor(gold), Print("│"), ResetColor)?;
-    queue!(out, MoveTo(x + 1, prompt_y), Print(&display_input), Clear(ClearType::UntilNewLine), ResetColor)?;
-    queue!(out, MoveTo(x + width - 1, prompt_y), SetForegroundColor(gold), Print("│"), ResetColor)?;
-
-    // Bottom border
-    let bottom_y = y + 2;
-    queue!(out, MoveTo(x, bottom_y), SetForegroundColor(gold))?;
-    queue!(out, Print("└"), Print("─".repeat((width - 2) as usize)), Print("┘"))?;
-    queue!(out, ResetColor)?;
-
-    out.flush()
+    total_lines.max(1)
 }
 
-fn format_elapsed(start: Option<std::time::Instant>) -> String {
-    match start {
-        Some(s) => {
-            let secs = s.elapsed().as_secs();
-            format!("{}s", secs)
-        }
-        None => "--".to_string(),
+/// Wrap input text into display lines, respecting newlines and Unicode width.
+pub(crate) fn wrap_input_text(text: &str, max_width: usize) -> Vec<String> {
+    if text.is_empty() || max_width == 0 {
+        return vec![text.to_string()];
     }
+
+    let mut lines = Vec::new();
+    for line in text.split('\n') {
+        let wrapped = wrap_line(line, max_width);
+        for w in wrapped {
+            lines.push(w);
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
+/// Draw the input bar at the bottom — clean, no borders, full width.
+/// Just a `>` prompt with the input text.
+///
+/// ANTI-FLICKER: no flush. Caller handles it at frame end.
+pub fn draw_input_bar(
+    out: &mut impl Write,
+    app: &App,
+    area: (u16, u16, u16, u16),
+) -> io::Result<()> {
+    let (x, y, width, height) = area;
+
+    let gold = Color::Rgb {
+        r: 255,
+        g: 215,
+        b: 0,
+    };
+    let muted = Color::Rgb {
+        r: 140,
+        g: 120,
+        b: 160,
+    };
+
+    // Separator line
+    let sep = format!("{}─{}", ansi_fg(muted), ansi_reset());
+    let sep_full = format!(
+        "{}{}{}",
+        sep,
+        "─".repeat(width.saturating_sub(2) as usize),
+        sep
+    );
+    queue!(out, MoveTo(x, y), Print(&sep_full), ResetColor)?;
+
+    // Input prompt line(s)
+    let prompt = format!("{}>{} ", ansi_fg(gold), ansi_reset());
+    let prompt_width = 2; // "> "
+    let available_width = width.saturating_sub(prompt_width + 2) as usize; // +2 for margins
+
+    if app.input.is_empty() {
+        let placeholder = format!(
+            "{}Type a message or command...{}",
+            ansi_fg(muted),
+            ansi_reset()
+        );
+        let line = format!("{}{}", prompt, placeholder);
+        queue!(out, MoveTo(x + 1, y + 1), Print(&line), ResetColor)?;
+    } else {
+        // Wrap input text across multiple lines if needed
+        let input_color = ansi_fg(Color::Rgb {
+            r: 220,
+            g: 220,
+            b: 220,
+        });
+        let reset = ansi_reset();
+
+        let wrapped = wrap_input_text(&app.input, available_width);
+        for (row_idx, line_text) in wrapped.iter().enumerate() {
+            let row_y = y + 1 + row_idx as u16;
+            if row_y >= y + height {
+                break; // Safety: don't overflow the allocated area
+            }
+            if row_idx == 0 {
+                let line = format!("{}{}{}{}", prompt, input_color, line_text, reset);
+                queue!(out, MoveTo(x + 1, row_y), Print(&line), ResetColor)?;
+            } else {
+                // Continuation lines: indent to align with first line of text
+                let indent = "  ".to_string(); // match prompt width
+                let line = format!("{}{}{}{}", indent, input_color, line_text, reset);
+                queue!(out, MoveTo(x + 1, row_y), Print(&line), ResetColor)?;
+            }
+        }
+    }
+
+    // Clear any extra rows in the input area that weren't used by wrapped text
+    let used_rows = if app.input.is_empty() {
+        1
+    } else {
+        let wrapped = wrap_input_text(&app.input, available_width);
+        wrapped.len().min(height.saturating_sub(1) as usize) as u16
+    };
+    for row in (1 + used_rows)..height {
+        let row_y = y + row;
+        queue!(
+            out,
+            MoveTo(x + 1, row_y),
+            Print(" ".repeat(width.saturating_sub(2) as usize)),
+            ResetColor,
+        )?;
+    }
+
+    Ok(())
 }

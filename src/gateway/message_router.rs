@@ -1238,6 +1238,26 @@ Use `/help` for the full slash command list.
         let tool_name = parts[0].trim();
         let args = parts.get(1).unwrap_or(&"").trim();
 
+        // Security gate — apply security checks before executing any tool
+        let security = match crate::security::SecurityEngine::new(
+            crate::security::SecurityConfig::load().unwrap_or_default()
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                return Some(format!("🔒 Security engine failed for tool '{}': {}", tool_name, e));
+            }
+        };
+
+        match security.check_tool_call(tool_name, args) {
+            crate::security::SecurityDecision::Allow => {}
+            crate::security::SecurityDecision::RequireApproval { reason, .. } => {
+                return Some(format!("🔒 Tool '{}' requires approval: {}", tool_name, reason));
+            }
+            crate::security::SecurityDecision::Deny { reason } => {
+                return Some(format!("🚫 Tool '{}' blocked: {}", tool_name, reason));
+            }
+        }
+
         if let Some(tool) = find_tool(tool_name) {
             match tool.execute(args) {
                 Ok(result) => Some(result),
