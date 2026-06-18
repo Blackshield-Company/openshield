@@ -410,7 +410,7 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
         }
         "test" => {
             if let Some(path) = get_str("path") {
-                let mut result = path;
+                let mut result = format!("run {}", path);
                 if let Some(framework) = get_str("framework") {
                     result.push(' ');
                     result.push_str(&framework);
@@ -426,7 +426,7 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
                 get_str("old_string"),
                 get_str("new_string"),
             ) {
-                Some(format!("{} {} {}", file, old_string, new_string))
+                Some(format!("replace {} {} {}", file, old_string, new_string))
             } else {
                 None
             }

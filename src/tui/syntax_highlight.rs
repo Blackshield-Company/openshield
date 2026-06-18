@@ -277,14 +277,12 @@ fn tokenize_and_highlight(line: &str, keywords: &[&str], types: &[&str], builtin
 
     while let Some(ch) = chars.next() {
         // Comments
-        if !in_string && !in_comment && ch == '/' {
-            if let Some(&next) = chars.peek() {
-                if next == '/' {
+        if !in_string && !in_comment && ch == '/'
+            && let Some(&next) = chars.peek()
+                && next == '/' {
                     result.push_str(&italic_span(line, Color::DarkGrey));
                     break;
                 }
-            }
-        }
 
         // Strings
         if !in_comment && (ch == '"' || ch == '\'') {
@@ -308,13 +306,12 @@ fn tokenize_and_highlight(line: &str, keywords: &[&str], types: &[&str], builtin
         }
 
         // Numbers
-        if !in_comment && (ch.is_numeric() || (ch == '-' && num_buf.is_empty())) {
-            if !in_number {
+        if !in_comment && (ch.is_numeric() || (ch == '-' && num_buf.is_empty()))
+            && !in_number {
                 in_number = true;
                 num_buf.push(ch);
                 continue;
             }
-        }
 
         if in_number {
             if ch.is_numeric() || ch == '.' || ch == 'e' || ch == 'E' || ch == '_' {

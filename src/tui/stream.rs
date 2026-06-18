@@ -417,6 +417,8 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
         }
         StreamEvent::Error(msg) => {
             app.is_streaming = false;
+            app.is_reasoning = false;
+            app.reasoning_content.clear();
             app.stream_start_time = None;
             app.add_system_message(msg);
         }
@@ -437,6 +439,8 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
         }
         StreamEvent::Done => {
             app.is_streaming = false;
+            app.is_reasoning = false;
+            app.reasoning_content.clear();
             app.stream_start_time = None;
         }
     }

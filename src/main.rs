@@ -915,12 +915,36 @@ async fn main() -> anyhow::Result<()> {
                         // Parse and execute any embedded TOOL: lines from the response
                         let embedded_tools = parse_embedded_tools_cli(&full_response);
                         if !embedded_tools.is_empty() {
+                            let security = match security::SecurityEngine::new(
+                                security::SecurityConfig::load().unwrap_or_default()
+                            ) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    println!("🔒 Security engine failed: {}", e);
+                                    println!("   Skipping tool execution for safety.");
+                                    return Ok(());
+                                }
+                            };
+
                             for (tool_name, args) in embedded_tools {
+                                match security.check_tool_call(&tool_name, &args) {
+                                    security::SecurityDecision::Allow => {}
+                                    security::SecurityDecision::RequireApproval { reason, .. } => {
+                                        println!("🔒 Tool '{}' requires approval: {}", tool_name, reason);
+                                        continue;
+                                    }
+                                    security::SecurityDecision::Deny { reason } => {
+                                        println!("🚫 Tool '{}' blocked: {}", tool_name, reason);
+                                        continue;
+                                    }
+                                }
+
                                 println!("🔧 Executing: {} {}", tool_name, args);
                                 match tools::find_tool(&tool_name) {
                                     Some(tool) => match tool.execute(&args) {
                                         Ok(result) => {
-                                            println!("✅ Result:\n{}", result);
+                                            let sanitized = security.sanitize_output(&tool_name, &result);
+                                            println!("✅ Result:\n{}", sanitized);
                                         }
                                         Err(e) => {
                                             println!("❌ Error: {}", e);

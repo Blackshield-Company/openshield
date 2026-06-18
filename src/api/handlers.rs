@@ -31,6 +31,43 @@ pub async fn list_tools() -> Json<serde_json::Value> {
 
 /// POST /api/v1/tools/:name
 pub async fn execute_tool(Path(name): Path<String>, body: Json<ToolRequest>) -> impl IntoResponse {
+    let security = match crate::security::SecurityEngine::new(
+        crate::security::SecurityConfig::load().unwrap_or_default()
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("Security engine init failed: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    match security.check_tool_call(&name, &body.args) {
+        crate::security::SecurityDecision::Allow => {}
+        crate::security::SecurityDecision::RequireApproval { reason, .. } => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError {
+                    error: format!("Tool '{}' requires approval: {}", name, reason),
+                }),
+            )
+                .into_response();
+        }
+        crate::security::SecurityDecision::Deny { reason } => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError {
+                    error: format!("Tool '{}' denied: {}", name, reason),
+                }),
+            )
+                .into_response();
+        }
+    }
+
     let result = if let Some(async_tool) = crate::tools::find_async_tool(&name) {
         async_tool.execute_async(&body.args).await
     } else if let Some(tool) = crate::tools::find_tool(&name) {
@@ -47,8 +84,8 @@ pub async fn execute_tool(Path(name): Path<String>, body: Json<ToolRequest>) -> 
 
     match result {
         Ok(output) => Json(ToolResponse {
-            tool: name,
-            output,
+            tool: name.clone(),
+            output: security.sanitize_output(&name, &output),
             success: true,
         })
         .into_response(),
@@ -231,6 +268,100 @@ pub async fn start_agent_task(
         let mut tasks = state.running_tasks.write().await;
         tasks.push(task);
     }
+
+    // Spawn the headless agent in the background and update the task when done
+    let state_clone = state.clone();
+    let task_id_clone = task_id.clone();
+    let task_str = body.task.clone();
+    let model_override = body.model.clone();
+    let timeout_secs = body.timeout_secs;
+    let max_turns = body.max_turns;
+    let yolo = body.yolo;
+    tokio::spawn(async move {
+        let config = match crate::config::Config::load_or_default() {
+            Ok(c) => c,
+            Err(e) => {
+                let mut tasks = state_clone.running_tasks.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
+                    t.status = AgentTaskStatus::Failed;
+                    t.result = Some(format!("Config load failed: {}", e));
+                    t.updated_at = chrono::Utc::now().to_rfc3339();
+                }
+                return;
+            }
+        };
+
+        let (provider_name, provider_config) = match config.providers.iter().next() {
+            Some((n, p)) => (n.clone(), p.clone()),
+            None => {
+                let mut tasks = state_clone.running_tasks.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
+                    t.status = AgentTaskStatus::Failed;
+                    t.result = Some("No providers configured".to_string());
+                    t.updated_at = chrono::Utc::now().to_rfc3339();
+                }
+                return;
+            }
+        };
+
+        let provider = crate::providers::Provider::new(
+            provider_name,
+            provider_config.base_url,
+            provider_config.api_key,
+            provider_config.kind,
+            provider_config.headers,
+        );
+
+        let model = model_override.unwrap_or_else(|| config.default_model.clone());
+        let headless_config = crate::headless::HeadlessConfig {
+            task: task_str,
+            yolo,
+            autonomous: false,
+            json: false,
+            timeout_secs,
+            max_turns,
+            model: Some(model.clone()),
+            output_file: None,
+        };
+
+        let security = match crate::security::SecurityEngine::new(
+            crate::security::SecurityConfig::load().unwrap_or_default()
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                let mut tasks = state_clone.running_tasks.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
+                    t.status = AgentTaskStatus::Failed;
+                    t.result = Some(format!("Security engine failed: {}", e));
+                    t.updated_at = chrono::Utc::now().to_rfc3339();
+                }
+                return;
+            }
+        };
+
+        let result = crate::headless::run_headless(
+            headless_config,
+            provider,
+            model,
+            security,
+            None,
+        ).await;
+
+        let mut tasks = state_clone.running_tasks.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
+            match result {
+                Ok(summary) => {
+                    t.status = AgentTaskStatus::Completed;
+                    t.result = Some(summary);
+                }
+                Err(e) => {
+                    t.status = AgentTaskStatus::Failed;
+                    t.result = Some(format!("Error: {}", e));
+                }
+            }
+            t.updated_at = chrono::Utc::now().to_rfc3339();
+        }
+    });
 
     (StatusCode::ACCEPTED, Json(json!({ "task_id": task_id })))
 }

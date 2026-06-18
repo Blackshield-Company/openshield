@@ -89,6 +89,7 @@ pub struct AgentRunner {
     event_tx: mpsc::UnboundedSender<SwarmEvent>,
     context: Arc<RwLock<AgentContext>>,
     max_iterations: usize,
+    security_engine: crate::security::SecurityEngine,
 }
 
 impl AgentRunner {
@@ -99,6 +100,15 @@ impl AgentRunner {
         event_tx: mpsc::UnboundedSender<SwarmEvent>,
         system_prompt: &str,
     ) -> Self {
+        let security_engine = crate::security::SecurityEngine::new(
+            crate::security::SecurityConfig::load().unwrap_or_default()
+        ).unwrap_or_else(|e| {
+            tracing::warn!("Failed to initialize security engine for swarm agent: {}. Using default.", e);
+            crate::security::SecurityEngine::new(crate::security::SecurityConfig::default()).unwrap_or_else(|_| {
+                panic!("Failed to create default security engine for swarm agent");
+            })
+        });
+
         Self {
             agent_id,
             provider,
@@ -106,6 +116,7 @@ impl AgentRunner {
             event_tx,
             context: Arc::new(RwLock::new(AgentContext::new(system_prompt))),
             max_iterations: 10,
+            security_engine,
         }
     }
 
@@ -265,6 +276,49 @@ impl AgentRunner {
                 tool_name: suggestion.tool_name.clone(),
                 args: suggestion.args.chars().take(100).collect::<String>(),
             });
+
+            // Security gate — apply security checks before executing any tool
+            match self.security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
+                crate::security::SecurityDecision::Allow => {}
+                crate::security::SecurityDecision::RequireApproval { reason, .. } => {
+                    let msg = format!(
+                        "🔒 Tool '{}' requires approval (swarm agent): {}",
+                        suggestion.tool_name, reason
+                    );
+                    let _ = self.event_tx.send(SwarmEvent::AgentToolResult {
+                        agent_id: self.agent_id.clone(),
+                        tool_name: suggestion.tool_name.clone(),
+                        result: msg.clone(),
+                        success: false,
+                    });
+                    {
+                        let mut ctx = self.context.write().await;
+                        ctx.add_assistant_message(&content);
+                        ctx.add_tool_result(&suggestion.tool_name, &msg);
+                    }
+                    messages = self.context.read().await.messages.clone();
+                    continue;
+                }
+                crate::security::SecurityDecision::Deny { reason } => {
+                    let msg = format!(
+                        "🚫 Tool '{}' blocked (swarm agent): {}",
+                        suggestion.tool_name, reason
+                    );
+                    let _ = self.event_tx.send(SwarmEvent::AgentToolResult {
+                        agent_id: self.agent_id.clone(),
+                        tool_name: suggestion.tool_name.clone(),
+                        result: msg.clone(),
+                        success: false,
+                    });
+                    {
+                        let mut ctx = self.context.write().await;
+                        ctx.add_assistant_message(&content);
+                        ctx.add_tool_result(&suggestion.tool_name, &msg);
+                    }
+                    messages = self.context.read().await.messages.clone();
+                    continue;
+                }
+            }
 
             let executor = AsyncToolExecutor::new();
             let (tool_result, _success) = match executor

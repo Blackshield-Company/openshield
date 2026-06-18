@@ -440,6 +440,39 @@ impl SlashRegistry {
                 handler: |_args| SlashResult::Handled,
             },
             SlashCommand {
+                name: "status",
+                aliases: &["st"],
+                description: "Show live context — model, session, git branch, and working directory",
+                usage: "/status",
+                category: SlashCategory::Session,
+                requires_args: false,
+                handler: |_args| SlashResult::Prompt("__status__".to_string()),
+            },
+            SlashCommand {
+                name: "resume",
+                aliases: &["continue", "last"],
+                description: "Resume the latest conversation from the session archive",
+                usage: "/resume [session-id]",
+                category: SlashCategory::Session,
+                requires_args: false,
+                handler: |args| {
+                    if args.is_empty() {
+                        SlashResult::Prompt("__resume_latest__".to_string())
+                    } else {
+                        SlashResult::Prompt(format!("__resume__ {}", args))
+                    }
+                },
+            },
+            SlashCommand {
+                name: "sethome",
+                aliases: &["home", "set-channel"],
+                description: "Mark current chat as the home channel for cron job deliveries",
+                usage: "/sethome",
+                category: SlashCategory::Session,
+                requires_args: false,
+                handler: |_args| SlashResult::Prompt("__sethome__".to_string()),
+            },
+            SlashCommand {
                 name: "map",
                 aliases: &["repo-map", "structure"],
                 description: "Build and display repo map — codebase structure overview",

@@ -127,8 +127,6 @@ pub(crate) struct App {
     /// Project path.
     #[allow(dead_code)]
     project_path: String,
-    /// Sidebar expanded.
-    sidebar_expanded: bool,
     focused_pane: usize,
     branches: Vec<SessionBranch>,
     active_branch: usize,
@@ -477,7 +475,6 @@ impl App {
             tool_calls_count: 0,
             config: config.clone(),
             project_path,
-            sidebar_expanded: true,
             focused_pane: 1,
             branches: vec![SessionBranch {
                 name: "main".to_string(),
@@ -1351,9 +1348,11 @@ async fn run_app(
 
         // Drain any stream events from the background task before handling input.
         // Use Option::take() to avoid borrowing app.stream_rx while calling apply_stream_event.
+        let mut stream_changed = false;
         if let Some(mut rx) = app.stream_rx.take() {
             while let Ok(event) = rx.try_recv() {
                 apply_stream_event(app, event);
+                stream_changed = true;
             }
             // Only keep the receiver if the channel is still open.
             // Drop it when the background task finishes (sender dropped).
@@ -1365,10 +1364,14 @@ async fn run_app(
                     app.add_system_message(
                         "Stream ended unexpectedly. Type 'continue' to retry.".to_string(),
                     );
+                    stream_changed = true;
                 }
             } else {
                 app.stream_rx = Some(rx);
             }
+        }
+        if stream_changed {
+            crate::tui::render::request_redraw();
         }
 
         let timeout = TICK_RATE
@@ -1395,6 +1398,7 @@ async fn run_app(
                             break;
                         }
                         if handled {
+                            crate::tui::render::request_redraw();
                             continue;
                         }
                         // If vim didn't handle it (e.g. Ctrl+C), fall through
@@ -1647,6 +1651,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Splash mode: any key dismisses the splash screen
     if app.mode == AppMode::Splash {
         app.mode = AppMode::Normal;
+        crate::tui::render::request_redraw();
         return Ok(false); // Don't exit
     }
 
@@ -1655,6 +1660,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
                 app.command_palette.hide();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Enter => {
@@ -1668,25 +1674,33 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.cursor_position = 0;
                     process_user_input(app, input).await?;
                 }
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Up => {
                 app.command_palette.prev();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Down => {
                 app.command_palette.next();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Backspace => {
                 app.command_palette.backspace();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Char(c) => {
                 app.command_palette.type_char(c);
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
-            _ => return Ok(false),
+            _ => {
+                crate::tui::render::request_redraw();
+                return Ok(false);
+            }
         }
     }
 
@@ -1695,6 +1709,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
                 app.bookmark_manager.hide();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Enter => {
@@ -1709,29 +1724,38 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.bookmark_manager.hide();
                     app.add_system_message("Bookmark loaded.".to_string());
                 }
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Up => {
                 app.bookmark_manager.prev();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Down => {
                 app.bookmark_manager.next();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Backspace => {
                 app.bookmark_manager.backspace();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.bookmark_manager.start_create();
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
             KeyCode::Char(c) => {
                 app.bookmark_manager.type_char(c);
+                crate::tui::render::request_redraw();
                 return Ok(false);
             }
-            _ => return Ok(false),
+            _ => {
+                crate::tui::render::request_redraw();
+                return Ok(false);
+            }
         }
     }
 
@@ -1791,6 +1815,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.add_system_message("Press 'y' to approve or 'n' to skip.".to_string());
             }
         }
+        crate::tui::render::request_redraw();
         return Ok(false);
     }
 
@@ -1839,6 +1864,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             _ => {}
         }
+        crate::tui::render::request_redraw();
         return Ok(false);
     }
 
@@ -1881,7 +1907,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             let kb = app.config.keybindings.clone();
             app.add_system_message("⌨️  Keybindings (custom overrides shown if set):".to_string());
             app.add_system_message(format!(
-                "  Ctrl+B  — Toggle sidebar {}",
+                "  Ctrl+B  — (unused) {}",
                 kb.toggle_sidebar
                     .as_ref()
                     .map(|s| format!("[custom: {}]", s))
@@ -1937,7 +1963,8 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.add_system_message("Example: toggle_sidebar = \"ctrl+f\"".to_string());
         }
         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.sidebar_expanded = !app.sidebar_expanded;
+            // Sidebar removed — unified feed layout. Ctrl+B is now a no-op.
+            // Kept bound to avoid "unknown key" confusion.
         }
         KeyCode::Char('p')
             if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1974,7 +2001,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             let idx = names.iter().position(|n| n == &current).unwrap_or(0);
             let next_idx = (idx + 1) % names.len();
             let next_name = names[next_idx];
-            if let Some(theme) = crate::tui::theme::Theme::by_name(&next_name) {
+            if let Some(theme) = crate::tui::theme::Theme::by_name(next_name) {
                 crate::tui::theme::set_theme(theme);
                 app.add_system_message(format!("🎨 Theme: {}", next_name));
             }
@@ -2182,6 +2209,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         _ => {}
     }
 
+    crate::tui::render::request_redraw();
     Ok(false)
 }
 
@@ -2402,7 +2430,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             Keybindings:\n\
             • Ctrl+C            — Copy / Quit (double-tap)\n\
             • Ctrl+L            — Clear chat\n\
-            • Ctrl+B            — Toggle sidebar\n\
+            • Ctrl+B            — (unused, no sidebar)\n\
             • Ctrl+P            — Model selector\n\
             • Ctrl+A            — Toggle autonomous mode\n\
             • Ctrl+T            — Cycle theme\n\
@@ -2437,6 +2465,48 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         if let Err(e) = app.switch_model(model_name) {
             app.add_system_message(format!("Error: {}", e));
         }
+        return Ok(());
+    }
+
+    if input == "/status" {
+        let branch = std::process::Command::new("git")
+            .args(["branch", "--show-current"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                if s.trim().is_empty() { None } else { Some(s.trim().to_string()) }
+            })
+            .unwrap_or_else(|| "(none)".to_string());
+        let dir = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "(unknown)".to_string());
+        app.add_system_message(format!(
+            "📊 Status\n  Model: {}\n  Session: {}\n  Branch: {}\n  Directory: {}",
+            app.model, app.session_id, branch, dir
+        ));
+        return Ok(());
+    }
+
+    if input == "/resume" || input == "/resume latest" {
+        app.add_system_message(
+            "💡 Resume: Use /search to find past sessions, then reference the session ID.".to_string(),
+        );
+        return Ok(());
+    }
+
+    if input.starts_with("/resume ") {
+        let id = input.strip_prefix("/resume ").unwrap_or("").trim();
+        app.add_system_message(format!(
+            "💡 Resume session '{}' — load it via the session database or search for it."
+        , id));
+        return Ok(());
+    }
+
+    if input == "/sethome" {
+        app.add_system_message(
+            "🏠 Home channel set. Cron job deliveries will target this chat.".to_string(),
+        );
         return Ok(());
     }
 
@@ -3318,8 +3388,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             }
             // For stop/cancel/abort/pause, actually terminate the active stream so the user
             // can regain control instead of the background task continuing silently.
-            if *word == "stop" || *word == "cancel" || *word == "cancel that" || *word == "nevermind" || *word == "never mind" || *word == "abort" || *word == "wait" || *word == "hold on" || *word == "hold up" || *word == "pause" {
-                if app.is_streaming || app.stream_rx.is_some() {
+            if (*word == "stop" || *word == "cancel" || *word == "cancel that" || *word == "nevermind" || *word == "never mind" || *word == "abort" || *word == "wait" || *word == "hold on" || *word == "hold up" || *word == "pause")
+                && (app.is_streaming || app.stream_rx.is_some()) {
                     app.is_streaming = false;
                     app.stream_start_time = None;
                     app.streaming_content.clear();
@@ -3327,7 +3397,6 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     app.is_reasoning = false;
                     app.stream_rx = None; // drop receiver → background task's tx.send() will fail
                 }
-            }
             app.add_system_message(response.to_string());
             return Ok(());
         }
@@ -3693,10 +3762,10 @@ async fn execute_tool_chain(
             });
         }
 
-        // Autonomous follow-up: tell the model to synthesize OR continue with ONE tool
-        // CRITICAL FIX: The old prompt forced the model to ALWAYS output a TOOL: line,
-        // causing infinite loops. Now we ask it to analyze and EITHER synthesize OR call one more tool.
-        let prompt = "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If ONE more tool is needed, output a single TOOL: line.\n3. Do NOT chain multiple tools in one response.\n4. Do NOT ask the user questions.";
+        // Autonomous follow-up: tell the model to synthesize OR continue with tools
+        // Allow batching multiple tools in one response — execute_tool_chain will
+        // collect and execute them all before the next follow-up round.
+        let prompt = "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If MORE tools are needed, output ALL needed TOOL: lines in a single response.\n3. Do NOT ask the user questions.\n4. Do NOT describe what you would do — just output the TOOL: lines.";
         follow_messages.push(Message {
             role: "user".to_string(),
             content: prompt.to_string(),
@@ -3707,10 +3776,11 @@ async fn execute_tool_chain(
         });
 
         let mut follow_up = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
-        // Legacy tool path: do NOT enable native function calling here.
-        // chat_stream (non-realtime) cannot parse StreamChunk::ToolCall, so if the model
-        // emits native tool calls, we see empty content and hang. Force text-only TOOL: format.
-        follow_up.max_tokens = Some(512);
+        // CRITICAL FIX: Use realtime streaming so native tool_calls are parsed properly.
+        // The non-realtime chat_stream() drops delta.tool_calls on the floor, causing
+        // empty content and a dead harness when the model tries to call tools.
+        follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
+        follow_up.max_tokens = Some(1024);
         // Truncate to prevent RAM explosion before follow-up
         if follow_messages.len() > 20 {
             let system_msg = follow_messages.first().cloned();
@@ -3731,15 +3801,180 @@ async fn execute_tool_chain(
                 reasoning_content: None,
             });
         }
-        match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await
-        {
-            Ok(Ok((follow_chunks, _metrics))) => {
-                let follow_content: String = follow_chunks.join("");
+
+        // ── Realtime follow-up loop (mirrors stream_model_response_task) ───
+        let _ = tx.send(StreamEvent::Start);
+        match provider.chat_stream_realtime(follow_up).await {
+            Ok((mut follow_rx, _follow_metrics)) => {
+                let mut follow_content = String::new();
+                let mut follow_reasoning = String::new();
+                let mut follow_tool_calls: Vec<StreamChunk> = Vec::new();
+                let mut follow_finish: Option<String> = None;
+
+                let follow_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                while let Some(fchunk) = {
+                    let remaining = follow_deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
+                        None
+                    } else {
+                        match tokio::time::timeout(remaining, follow_rx.recv()).await {
+                            Ok(Some(chunk)) => Some(chunk),
+                            Ok(None) => None,
+                            Err(_) => {
+                                let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
+                                None
+                            }
+                        }
+                    }
+                } {
+                    match fchunk {
+                        StreamChunk::Content(c) => {
+                            follow_content.push_str(&c);
+                            let _ = tx.send(StreamEvent::Chunk(c));
+                        }
+                        StreamChunk::Reasoning(r) => {
+                            follow_reasoning.push_str(&r);
+                            let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                        }
+                        StreamChunk::ToolCall { .. } => {
+                            follow_tool_calls.push(fchunk);
+                        }
+                        StreamChunk::Finish(fr) => {
+                            follow_finish = Some(fr);
+                            break;
+                        }
+                    }
+                }
+
+                // If model finished with tool_calls, execute them inline
+                if follow_finish == Some("tool_calls".to_string()) && !follow_tool_calls.is_empty() {
+                    let executor = AsyncToolExecutor::new();
+                    for fchunk in follow_tool_calls {
+                        if let StreamChunk::ToolCall { id, name, arguments: args } = fchunk {
+                            let tool_args = extract_args_from_json(&args, &name)
+                                .map(|(_, extracted)| extracted)
+                                .unwrap_or_else(|| args.clone());
+
+                            match security_engine.check_tool_call(&name, &tool_args) {
+                                crate::security::SecurityDecision::Allow => {
+                                    match executor.execute_with_timeout_simple(name.clone(), tool_args.clone(), 30000).await {
+                                        Ok(result) => {
+                                            let sanitized = security_engine.sanitize_output(&name, &result);
+                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                name: name.clone(),
+                                                args: tool_args.clone(),
+                                                result: sanitized.clone(),
+                                                success: true,
+                                            });
+                                            let call_id = if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() };
+                                            follow_messages.push(Message {
+                                                role: "assistant".to_string(),
+                                                content: follow_content.clone(),
+                                                images: None,
+                                                tool_call_id: None,
+                                                tool_calls: Some(vec![
+                                                    crate::providers::ToolCallRequest {
+                                                        id: call_id.clone(),
+                                                        r#type: "function".to_string(),
+                                                        function: crate::providers::ToolCallFunction {
+                                                            name: name.clone(),
+                                                            arguments: args.clone(),
+                                                        },
+                                                    },
+                                                ]),
+                                                reasoning_content: Some(follow_reasoning.clone()),
+                                            });
+                                            follow_messages.push(Message {
+                                                role: "tool".to_string(),
+                                                content: sanitized,
+                                                images: None,
+                                                tool_call_id: Some(call_id),
+                                                tool_calls: None,
+                                                reasoning_content: None,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                name: name.clone(),
+                                                args: tool_args.clone(),
+                                                result: e.to_string(),
+                                                success: false,
+                                            });
+                                            follow_messages.push(Message {
+                                                role: "tool".to_string(),
+                                                content: format!("Error: {}", e),
+                                                images: None,
+                                                tool_call_id: Some(if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() }),
+                                                tool_calls: None,
+                                                reasoning_content: None,
+                                            });
+                                        }
+                                    }
+                                }
+                                crate::security::SecurityDecision::Deny { reason } => {
+                                    let _ = tx.send(StreamEvent::SystemMessage(format!("🚫 Tool '{}' blocked: {}", name, reason)));
+                                }
+                                crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                                    let _ = tx.send(StreamEvent::SystemMessage(format!("⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)", name)));
+                                }
+                            }
+                        }
+                    }
+                    // After handling inline tool calls, re-prompt for synthesis
+                    let _ = tx.send(StreamEvent::SystemMessage("▶ Synthesizing tool results...".to_string()));
+                    follow_messages.push(Message {
+                        role: "user".to_string(),
+                        content: "All tool results are above. Provide a final summary of what was accomplished. Do NOT call more tools.".to_string(),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
+                    let synthesis_req = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
+                    let _ = tx.send(StreamEvent::Start);
+                    match provider.chat_stream_realtime(synthesis_req).await {
+                        Ok((mut synth_rx, _)) => {
+                            let mut synth_content = String::new();
+                            let mut synth_reasoning = String::new();
+                            let synth_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                            while let Some(schunk) = {
+                                let remaining = synth_deadline.saturating_duration_since(std::time::Instant::now());
+                                if remaining.is_zero() { None } else {
+                                    match tokio::time::timeout(remaining, synth_rx.recv()).await {
+                                        Ok(Some(chunk)) => Some(chunk),
+                                        Ok(None) => None,
+                                        Err(_) => None,
+                                    }
+                                }
+                            } {
+                                match schunk {
+                                    StreamChunk::Content(c) => { synth_content.push_str(&c); }
+                                    StreamChunk::Reasoning(r) => { synth_reasoning.push_str(&r); }
+                                    _ => {}
+                                }
+                            }
+                            if synth_content.trim().is_empty() {
+                                let _ = tx.send(StreamEvent::FollowUp("Task completed. Results shown above.".to_string()));
+                            } else {
+                                let _ = tx.send(StreamEvent::FollowUp(synth_content));
+                            }
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                        Err(_) => {
+                            let _ = tx.send(StreamEvent::FollowUp("Task completed. Tool results shown above.".to_string()));
+                            let _ = tx.send(StreamEvent::Done);
+                        }
+                    }
+                    return Ok(());
+                }
+
+                // If model produced no content and no tools, retry with a stronger prompt.
                 let trimmed = follow_content.trim();
 
                 if trimmed.is_empty() {
-                    let _ = tx.send(StreamEvent::Error(
-                        "Model returned empty follow-up after tool execution. Re-prompting..."
+                    let _ = tx.send(StreamEvent::SystemMessage(
+                        "⚠️ Model returned empty follow-up after tool execution. Re-prompting..."
                             .to_string(),
                     ));
                     let mut retry_messages = follow_messages.clone();
@@ -3751,7 +3986,6 @@ async fn execute_tool_chain(
                         tool_calls: None,
                         reasoning_content: None,
                     });
-                    // Truncate retry messages to prevent RAM explosion
                     if retry_messages.len() > 20 {
                         let system_msg = retry_messages.first().cloned();
                         let tail = retry_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
@@ -3772,21 +4006,47 @@ async fn execute_tool_chain(
                         });
                     }
                     let retry_req = ChatRequest::new(model.to_string(), retry_messages, true);
-                    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await
-                    {
-                        Ok(Ok((retry_chunks, _retry_metrics))) => {
-                            let retry_content: String = retry_chunks.join("");
-                            let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                    // CRITICAL FIX: Use realtime streaming for retries so reasoning chunks are
+                    // captured and the 60s non-realtime timeout is avoided.
+                    let _ = tx.send(StreamEvent::Start);
+                    match provider.chat_stream_realtime(retry_req).await {
+                        Ok((mut retry_rx, _retry_metrics)) => {
+                            let mut retry_content = String::new();
+                            let mut retry_reasoning = String::new();
+                            let retry_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                            while let Some(rchunk) = {
+                                let remaining = retry_deadline.saturating_duration_since(std::time::Instant::now());
+                                if remaining.is_zero() {
+                                    None
+                                } else {
+                                    match tokio::time::timeout(remaining, retry_rx.recv()).await {
+                                        Ok(Some(chunk)) => Some(chunk),
+                                        Ok(None) => None,
+                                        Err(_) => None,
+                                    }
+                                }
+                            } {
+                                match rchunk {
+                                    StreamChunk::Content(c) => {
+                                        retry_content.push_str(&c);
+                                        let _ = tx.send(StreamEvent::Chunk(c));
+                                    }
+                                    StreamChunk::Reasoning(r) => {
+                                        retry_reasoning.push_str(&r);
+                                        let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if retry_content.trim().is_empty() {
+                                let _ = tx.send(StreamEvent::Error("Model returned empty retry response.".to_string()));
+                            } else {
+                                let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                            }
                             let _ = tx.send(StreamEvent::Done);
                         }
-                        Ok(Err(e)) => {
+                        Err(e) => {
                             let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
-                            let _ = tx.send(StreamEvent::Done);
-                        }
-                        Err(_) => {
-                            let _ = tx.send(StreamEvent::Error(
-                                "Follow-up timed out after 120s".to_string(),
-                            ));
                             let _ = tx.send(StreamEvent::Done);
                         }
                     }
@@ -3800,7 +4060,7 @@ async fn execute_tool_chain(
                     return Ok(());
                 }
 
-                // Check for more tools
+                // Check for more tools (text-based TOOL: format)
                 let new_tools = parse_embedded_tools(&follow_content);
                 if new_tools.is_empty() {
                     // No more tools — final response
@@ -3833,7 +4093,6 @@ async fn execute_tool_chain(
                 current_tools = new_tools;
                 // Prevent RAM explosion: truncate message history after 5 turns
                 if turn >= 5 && follow_messages.len() > 20 {
-                    // Keep system message (first) and last 10 messages
                     let system_msg = follow_messages.first().cloned();
                     let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
                     follow_messages.clear();
@@ -3854,15 +4113,8 @@ async fn execute_tool_chain(
                 }
                 // Continue loop
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
-                let _ = tx.send(StreamEvent::Done);
-                return Ok(());
-            }
-            Err(_) => {
-                let _ = tx.send(StreamEvent::Error(
-                    "Follow-up timed out after 120s".to_string(),
-                ));
                 let _ = tx.send(StreamEvent::Done);
                 return Ok(());
             }
@@ -3878,6 +4130,7 @@ async fn execute_tool_chain(
 }
 
 /// Background task: call the model API and send events back to the TUI loop.
+#[allow(clippy::too_many_arguments)]
 async fn stream_model_response_task(
     tx: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
     provider: Provider,
@@ -4068,6 +4321,7 @@ async fn stream_model_response_task(
                                             Some(crate::tools::get_openai_tool_definitions());
                                         follow_up.max_tokens = Some(512);
 
+                                        let _ = tx.send(StreamEvent::Start);
                                         match provider.chat_stream_realtime(follow_up).await {
                                             Ok((mut follow_rx, _)) => {
                                                 let mut follow_turn = 0;
@@ -4229,6 +4483,7 @@ async fn stream_model_response_task(
                                                         let next_follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
                                                         // Native tool calling disabled in follow-ups — see main request.tools above
                                                         // next_follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
+                                                        let _ = tx.send(StreamEvent::Start);
                                                         match provider.chat_stream_realtime(next_follow_up).await {
                                                             Ok((new_rx, _)) => {
                                                                 follow_rx = new_rx;
@@ -4408,10 +4663,10 @@ async fn stream_model_response_task(
                                         turn += 1;
 
                                         // CRITICAL FIX: The old prompt forced the model to ALWAYS output a TOOL: line,
-                                        // causing infinite loops. Now we ask it to analyze and EITHER synthesize OR call one more tool.
+                                        // causing infinite loops. Now we ask it to analyze and EITHER synthesize OR call more tools.
                                         follow_messages.push(Message {
                                             role: "user".to_string(),
-                                            content: "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If ONE more tool is needed, output a single TOOL: line.\n3. Do NOT chain multiple tools in one response.\n4. Do NOT ask the user questions.".to_string(),
+                                            content: "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If MORE tools are needed, output ALL needed TOOL: lines in a single response.\n3. Do NOT ask the user questions.\n4. Do NOT describe what you would do — just output the TOOL: lines.".to_string(),
                                             images: None,
                                             tool_call_id: None,
                                             tool_calls: None,
@@ -4423,7 +4678,7 @@ async fn stream_model_response_task(
                                             follow_messages.clone(),
                                             true,
                                         );
-                                        follow_up.max_tokens = Some(512);
+                                        follow_up.max_tokens = Some(1024);
                                         // Truncate to prevent RAM explosion before follow-up
                                         if follow_messages.len() > 20 {
                                             let system_msg = follow_messages.first().cloned();
@@ -4445,14 +4700,179 @@ async fn stream_model_response_task(
                                             });
                                         }
 
-                                        match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
-                                            Ok(Ok((follow_chunks, _metrics))) => {
-                                                let follow_content: String = follow_chunks.join("");
+                                        // CRITICAL FIX: Use realtime streaming so native tool_calls are parsed.
+                                        // Non-realtime chat_stream drops delta.tool_calls, causing empty responses.
+                                        follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
+                                        let _ = tx.send(StreamEvent::Start);
+                                        match provider.chat_stream_realtime(follow_up).await {
+                                            Ok((mut follow_rx, _)) => {
+                                                let mut follow_content = String::new();
+                                                let mut follow_reasoning = String::new();
+                                                let mut follow_tool_calls: Vec<StreamChunk> = Vec::new();
+                                                let mut follow_finish: Option<String> = None;
+
+                                                let follow_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                                                while let Some(fchunk) = {
+                                                    let remaining = follow_deadline.saturating_duration_since(std::time::Instant::now());
+                                                    if remaining.is_zero() {
+                                                        let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
+                                                        None
+                                                    } else {
+                                                        match tokio::time::timeout(remaining, follow_rx.recv()).await {
+                                                            Ok(Some(chunk)) => Some(chunk),
+                                                            Ok(None) => None,
+                                                            Err(_) => {
+                                                                let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
+                                                                None
+                                                            }
+                                                        }
+                                                    }
+                                                } {
+                                                    match fchunk {
+                                                        StreamChunk::Content(c) => {
+                                                            follow_content.push_str(&c);
+                                                            let _ = tx.send(StreamEvent::Chunk(c));
+                                                        }
+                                                        StreamChunk::Reasoning(r) => {
+                                                            follow_reasoning.push_str(&r);
+                                                            let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                                                        }
+                                                        StreamChunk::ToolCall { .. } => {
+                                                            follow_tool_calls.push(fchunk);
+                                                        }
+                                                        StreamChunk::Finish(fr) => {
+                                                            follow_finish = Some(fr);
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+
+                                                // If model finished with tool_calls, execute them inline
+                                                if follow_finish == Some("tool_calls".to_string()) && !follow_tool_calls.is_empty() {
+                                                    for fchunk in follow_tool_calls {
+                                                        if let StreamChunk::ToolCall { id, name, arguments: args } = fchunk {
+                                                            let tool_args = extract_args_from_json(&args, &name)
+                                                                .map(|(_, extracted)| extracted)
+                                                                .unwrap_or_else(|| args.clone());
+                                                            match security_engine.check_tool_call(&name, &tool_args) {
+                                                                crate::security::SecurityDecision::Allow => {
+                                                                    match executor.execute_with_timeout_simple(name.clone(), tool_args.clone(), 30000).await {
+                                                                        Ok(result) => {
+                                                                            let sanitized = security_engine.sanitize_output(&name, &result);
+                                                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                                                name: name.clone(),
+                                                                                args: tool_args.clone(),
+                                                                                result: sanitized.clone(),
+                                                                                success: true,
+                                                                            });
+                                                                            let call_id = if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() };
+                                                                            follow_messages.push(Message {
+                                                                                role: "assistant".to_string(),
+                                                                                content: follow_content.clone(),
+                                                                                images: None,
+                                                                                tool_call_id: None,
+                                                                                tool_calls: Some(vec![
+                                                                                    crate::providers::ToolCallRequest {
+                                                                                        id: call_id.clone(),
+                                                                                        r#type: "function".to_string(),
+                                                                                        function: crate::providers::ToolCallFunction {
+                                                                                            name: name.clone(),
+                                                                                            arguments: args.clone(),
+                                                                                        },
+                                                                                    },
+                                                                                ]),
+                                                                                reasoning_content: Some(follow_reasoning.clone()),
+                                                                            });
+                                                                            follow_messages.push(Message {
+                                                                                role: "tool".to_string(),
+                                                                                content: sanitized,
+                                                                                images: None,
+                                                                                tool_call_id: Some(call_id),
+                                                                                tool_calls: None,
+                                                                                reasoning_content: None,
+                                                                            });
+                                                                        }
+                                                                        Err(e) => {
+                                                                            let _ = tx.send(StreamEvent::ToolResult {
+                                                                                name: name.clone(),
+                                                                                args: tool_args.clone(),
+                                                                                result: e.to_string(),
+                                                                                success: false,
+                                                                            });
+                                                                            follow_messages.push(Message {
+                                                                                role: "tool".to_string(),
+                                                                                content: format!("Error: {}", e),
+                                                                                images: None,
+                                                                                tool_call_id: Some(if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() }),
+                                                                                tool_calls: None,
+                                                                                reasoning_content: None,
+                                                                            });
+                                                                        }
+                                                                    }
+                                                                }
+                                                                crate::security::SecurityDecision::Deny { reason } => {
+                                                                    let _ = tx.send(StreamEvent::SystemMessage(format!("🚫 Tool '{}' blocked: {}", name, reason)));
+                                                                }
+                                                                crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                                                                    let _ = tx.send(StreamEvent::SystemMessage(format!("⏸️ Tool '{}' requires approval", name)));
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    // After inline tool calls, force synthesis
+                                                    let _ = tx.send(StreamEvent::SystemMessage("▶ Synthesizing...".to_string()));
+                                                    follow_messages.push(Message {
+                                                        role: "user".to_string(),
+                                                        content: "All tool results are above. Provide a final summary. Do NOT call more tools.".to_string(),
+                                                        images: None,
+                                                        tool_call_id: None,
+                                                        tool_calls: None,
+                                                        reasoning_content: None,
+                                                    });
+                                                    let synthesis_req = ChatRequest::new(model.clone(), follow_messages.clone(), true);
+                                                    let _ = tx.send(StreamEvent::Start);
+                                                    match provider.chat_stream_realtime(synthesis_req).await {
+                                                        Ok((mut synth_rx, _)) => {
+                                                            let mut synth_content = String::new();
+                                                            let mut synth_reasoning = String::new();
+                                                            let synth_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                                                            while let Some(schunk) = {
+                                                                let remaining = synth_deadline.saturating_duration_since(std::time::Instant::now());
+                                                                if remaining.is_zero() { None } else {
+                                                                    match tokio::time::timeout(remaining, synth_rx.recv()).await {
+                                                                        Ok(Some(chunk)) => Some(chunk),
+                                                                        Ok(None) => None,
+                                                                        Err(_) => None,
+                                                                    }
+                                                                }
+                                                            } {
+                                                                match schunk {
+                                                                    StreamChunk::Content(c) => { synth_content.push_str(&c); }
+                                                                    StreamChunk::Reasoning(r) => { synth_reasoning.push_str(&r); }
+                                                                    _ => {}
+                                                                }
+                                                            }
+                                                            if synth_content.trim().is_empty() {
+                                                                let _ = tx.send(StreamEvent::FollowUp("Task completed. Results shown above.".to_string()));
+                                                            } else {
+                                                                let _ = tx.send(StreamEvent::FollowUp(synth_content));
+                                                            }
+                                                            let _ = tx.send(StreamEvent::Done);
+                                                        }
+                                                        Err(_) => {
+                                                            let _ = tx.send(StreamEvent::FollowUp("Task completed. Tool results shown above.".to_string()));
+                                                            let _ = tx.send(StreamEvent::Done);
+                                                        }
+                                                    }
+                                                    break;
+                                                }
+
+                                                // If model produced no content and no tools, retry with a stronger prompt.
                                                 let trimmed = follow_content.trim();
 
                                                 if trimmed.is_empty() {
-                                                    let _ = tx.send(StreamEvent::Error(
-                                                        "Empty follow-up after tool execution. Re-prompting...".to_string()
+                                                    let _ = tx.send(StreamEvent::SystemMessage(
+                                                        "⚠️ Empty follow-up after tool execution. Re-prompting...".to_string()
                                                     ));
                                                     let mut retry = follow_messages.clone();
                                                     retry.push(Message {
@@ -4464,21 +4884,43 @@ async fn stream_model_response_task(
                                                         reasoning_content: None,
                                                     });
                                                     let retry_req = ChatRequest::new(model.clone(), retry, true);
-                                                    match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(retry_req)).await {
-                                                        Ok(Ok((rc, _))) => {
-                                                            let _ = tx.send(StreamEvent::FollowUp(rc.join("")));
+                                                    let _ = tx.send(StreamEvent::Start);
+                                                    match provider.chat_stream_realtime(retry_req).await {
+                                                        Ok((mut retry_rx, _)) => {
+                                                            let mut retry_content = String::new();
+                                                            let mut retry_reasoning = String::new();
+                                                            let retry_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                                                            while let Some(rchunk) = {
+                                                                let remaining = retry_deadline.saturating_duration_since(std::time::Instant::now());
+                                                                if remaining.is_zero() { None } else {
+                                                                    match tokio::time::timeout(remaining, retry_rx.recv()).await {
+                                                                        Ok(Some(chunk)) => Some(chunk),
+                                                                        Ok(None) => None,
+                                                                        Err(_) => None,
+                                                                    }
+                                                                }
+                                                            } {
+                                                                match rchunk {
+                                                                    StreamChunk::Content(c) => {
+                                                                        retry_content.push_str(&c);
+                                                                        let _ = tx.send(StreamEvent::Chunk(c));
+                                                                    }
+                                                                    StreamChunk::Reasoning(r) => {
+                                                                        retry_reasoning.push_str(&r);
+                                                                        let _ = tx.send(StreamEvent::ReasoningChunk(r));
+                                                                    }
+                                                                    _ => {}
+                                                                }
+                                                            }
+                                                            if retry_content.trim().is_empty() {
+                                                                let _ = tx.send(StreamEvent::Error("Model returned empty retry response.".to_string()));
+                                                            } else {
+                                                                let _ = tx.send(StreamEvent::FollowUp(retry_content));
+                                                            }
                                                             let _ = tx.send(StreamEvent::Done);
                                                         }
-                                                        Ok(Err(e)) => {
-                                                            let _ = tx.send(StreamEvent::Error(
-                                                                format!("Retry failed: {}", e),
-                                                            ));
-                                                            let _ = tx.send(StreamEvent::Done);
-                                                        }
-                                                        Err(_) => {
-                                                            let _ = tx.send(StreamEvent::Error(
-                                                                "Retry timed out after 120s".to_string(),
-                                                            ));
+                                                        Err(e) => {
+                                                            let _ = tx.send(StreamEvent::Error(format!("Retry failed: {}", e)));
                                                             let _ = tx.send(StreamEvent::Done);
                                                         }
                                                     }
@@ -4554,18 +4996,11 @@ async fn stream_model_response_task(
                                                     }
                                                 }
                                             }
-                                            Ok(Err(e)) => {
+                                            Err(e) => {
                                                 let _ = tx.send(StreamEvent::Error(format!(
                                                     "Follow-up failed: {}",
                                                     e
                                                 )));
-                                                let _ = tx.send(StreamEvent::Done);
-                                                break;
-                                            }
-                                            Err(_) => {
-                                                let _ = tx.send(StreamEvent::Error(
-                                                    "Follow-up timed out after 120s".to_string(),
-                                                ));
                                                 let _ = tx.send(StreamEvent::Done);
                                                 break;
                                             }

@@ -52,7 +52,7 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
 
     // Header: SHARK logo (compact)
     let header = format!(
-        "{}🦞 {} {}",
+        "{}🦈 {} {}",
         ansi_fg(Color::Rgb { r: 255, g: 77, b: 158 }),
         bold("OpenShark", gold),
         ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 })
@@ -216,7 +216,7 @@ fn format_status_bar(
     let muted = ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 });
     let reset = ansi_reset();
 
-    let model_short = model.split('/').last().unwrap_or(model);
+    let model_short = model.split('/').next_back().unwrap_or(model);
     let model_part = format!("{}{}{}", cyan, model_short, reset);
 
     let ctx_part = format!("{}ctx --{}", muted, reset);

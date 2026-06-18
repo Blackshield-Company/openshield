@@ -5,7 +5,7 @@
  \___/| .__/ \___|_| |_|____/|_| |_|\__,_|_|  |_|\_\
       |_|
 
-> 🦞 *Fast. Precise. Hungry.*
+> 🦈 *Fast. Precise. Hungry.*
 
 ![OpenShark Title Screen](openshark.png)
 
