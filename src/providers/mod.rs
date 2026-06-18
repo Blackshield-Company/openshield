@@ -266,10 +266,10 @@ impl Provider {
     ) -> Self {
         let client = reqwest::Client::builder()
             .pool_max_idle_per_host(10)
-            .pool_idle_timeout(std::time::Duration::from_secs(60))
+            .pool_idle_timeout(std::time::Duration::from_secs(120))
             .tcp_keepalive(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(60))
-            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
@@ -293,10 +293,10 @@ impl Provider {
     ) -> Self {
         let client = reqwest::Client::builder()
             .pool_max_idle_per_host(10)
-            .pool_idle_timeout(std::time::Duration::from_secs(60))
+            .pool_idle_timeout(std::time::Duration::from_secs(120))
             .tcp_keepalive(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(60))
-            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
@@ -528,7 +528,7 @@ impl Provider {
                             content,
                             images: None,
                             tool_call_id: None,
-                            tool_calls: tool_calls,
+                            tool_calls,
                             reasoning_content: None,
                         },
                         finish_reason: raw["choices"][0]["finish_reason"]
@@ -701,11 +701,13 @@ impl Provider {
 
     pub async fn chat_stream(&self, request: ChatRequest) -> Result<(Vec<String>, StreamMetrics)> {
         let start_time = Instant::now();
-        let messages_json = serde_json::to_string(&request.model)
-            .with_context(|| "Failed to serialize model for cache key")?;
+        let messages_json = serde_json::to_string(&request.messages)
+            .with_context(|| "Failed to serialize messages for cache key")?;
         let cache_key = compute_cache_key(&request.model, &messages_json);
+        let has_tools = request.tools.is_some();
 
-        if let Some(ref cache) = self.cache
+        if !has_tools
+            && let Some(ref cache) = self.cache
             && let Some(cached) = cache.get(&cache_key)
         {
             let chunks: Vec<String> = serde_json::from_str(&cached.response)
@@ -728,7 +730,7 @@ impl Provider {
         let mut first_token_time: Option<Instant> = None;
         let mut buffer = String::new();
         // FIXED: Use a fixed deadline so empty keepalive chunks don't reset the timer
-        let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
         // Prevent unbounded chunk accumulation for very long responses
         const MAX_CHUNKS: usize = 10_000;
         let mut merged_buffer = String::new();
@@ -736,19 +738,28 @@ impl Provider {
         loop {
             let remaining = stream_deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
-                chunks.push("[⏱ Stream timed out after 60s of inactivity]".to_string());
+                chunks.push("[⏱ Stream timed out after 120s of inactivity]".to_string());
                 break;
             }
             let chunk_result = match tokio::time::timeout(remaining, stream.next()).await {
                 Ok(Some(result)) => result,
                 Ok(None) => break, // stream ended normally
                 Err(_) => {
-                    chunks.push("[⏱ Stream timed out after 60s of inactivity]".to_string());
+                    chunks.push("[⏱ Stream timed out after 120s of inactivity]".to_string());
                     break;
                 }
             };
 
-            let chunk = chunk_result?;
+            // CRITICAL FIX: Don't kill the entire stream on a single chunk decode error.
+            // Log it and continue — the next chunk may be fine. This prevents the harness
+            // from dying on transient network hiccups or malformed SSE boundaries.
+            let chunk = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("SSE chunk decode error (non-realtime): {}", e);
+                    continue;
+                }
+            };
             let text = String::from_utf8_lossy(&chunk);
             buffer.push_str(&text);
 
@@ -955,8 +966,11 @@ impl Provider {
                 let chunk = match tokio::time::timeout(remaining, stream.next()).await {
                     Ok(Some(Ok(c))) => c,
                     Ok(Some(Err(e))) => {
-                        let _ = tx.send(StreamChunk::Content(format!("[stream read error: {}]", e)));
-                        return;
+                        // CRITICAL FIX: Log chunk error and continue instead of killing the stream.
+                        // Transient decode errors (malformed SSE boundaries, network hiccups)
+                        // should not abort the entire response.
+                        tracing::warn!("SSE chunk decode error (realtime): {}", e);
+                        continue;
                     }
                     Ok(None) => break, // stream ended normally
                     Err(_) => {
@@ -992,7 +1006,7 @@ impl Provider {
                                     let reasoning = delta
                                         .and_then(|d| d.get("reasoning_content"))
                                         .and_then(|c| c.as_str());
-                                    let tool_calls = delta
+                                    let _tool_calls = delta
                                         .and_then(|d| d.get("tool_calls"))
                                         .and_then(|t| t.as_array());
                                     let finish_reason = event
@@ -1001,44 +1015,24 @@ impl Provider {
                                         .and_then(|c| c.get("finish_reason"))
                                         .and_then(|f| f.as_str());
 
-                                    // Accumulate tool call fragments by index FIRST
-                                    // (before checking finish_reason, so final chunks aren't lost)
-                                    if let Some(tcs) = tool_calls {
-                                        for tc in tcs {
-                                            let index = tc
-                                                .get("index")
-                                                .and_then(|i| i.as_u64())
-                                                .unwrap_or(0)
-                                                as u32;
-                                            let entry =
-                                                pending_tool_calls.entry(index).or_default();
-
-                                            if let Some(id) = tc.get("id").and_then(|i| i.as_str())
-                                                && !id.is_empty()
-                                                && entry.id.is_empty()
-                                            {
-                                                entry.id = id.to_string();
-                                            }
-                                            if let Some(name) = tc
-                                                .get("function")
-                                                .and_then(|f| f.get("name"))
-                                                .and_then(|n| n.as_str())
-                                                && !name.is_empty()
-                                                && entry.name.is_empty()
-                                            {
-                                                entry.name = name.to_string();
-                                            }
-                                            if let Some(args) = tc
-                                                .get("function")
-                                                .and_then(|f| f.get("arguments"))
-                                                .and_then(|a| a.as_str())
-                                            {
-                                                entry.arguments.push_str(args);
-                                            }
+                                    // Emit content and reasoning FIRST, then Finish.
+                                    // Consumers may break on Finish; if Finish is sent before
+                                    // the final content/reasoning chunks, those chunks are lost.
+                                    if let Some(r) = reasoning
+                                        && !r.is_empty()
+                                    {
+                                        let _ = tx.send(StreamChunk::Reasoning(r.to_string()));
+                                    }
+                                    if let Some(c) = content
+                                        && !c.is_empty()
+                                    {
+                                        if first_token_time.is_none() {
+                                            first_token_time = Some(Instant::now());
                                         }
+                                        let _ = tx.send(StreamChunk::Content(c.to_string()));
                                     }
 
-                                    // Emit finish reason if present
+                                    // Emit finish reason LAST so all delta content is already sent
                                     if let Some(fr) = finish_reason
                                         && !fr.is_empty()
                                     {
@@ -1063,20 +1057,6 @@ impl Provider {
                                             }
                                             let _ = tx.send(StreamChunk::Finish(fr.to_string()));
                                         }
-                                    }
-
-                                    if let Some(r) = reasoning
-                                        && !r.is_empty()
-                                    {
-                                        let _ = tx.send(StreamChunk::Reasoning(r.to_string()));
-                                    }
-                                    if let Some(c) = content
-                                        && !c.is_empty()
-                                    {
-                                        if first_token_time.is_none() {
-                                            first_token_time = Some(Instant::now());
-                                        }
-                                        let _ = tx.send(StreamChunk::Content(c.to_string()));
                                     }
                                 }
                                 ProviderKind::Anthropic => {

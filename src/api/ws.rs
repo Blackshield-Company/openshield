@@ -275,7 +275,7 @@ async fn handle_agent_ws(mut socket: WebSocket) {
 
                 let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
                 let security = match crate::security::SecurityEngine::new(
-                    crate::security::SecurityConfig::default()
+                    crate::security::SecurityConfig::load().unwrap_or_default()
                 ) {
                     Ok(s) => s,
                     Err(e) => {

@@ -278,8 +278,8 @@ pub async fn run_headless(
         }
 
         // ── NATIVE TOOL CALLING PATH ─────────────────────────────────────
-        if let Some(ref tool_calls) = assistant_message.tool_calls {
-            if !tool_calls.is_empty() {
+        if let Some(ref tool_calls) = assistant_message.tool_calls
+            && !tool_calls.is_empty() {
                 // Add assistant message with tool_calls to history
                 messages.push(Message {
                     role: "assistant".to_string(),
@@ -376,7 +376,6 @@ pub async fn run_headless(
                 stall_turns = 0;
                 continue;
             }
-        }
 
         // ── FALLBACK: TEXT-BASED TOOL DETECTION ───────────────────────────
         let suggestions = detect_tool_suggestions(&response_text);
@@ -596,8 +595,8 @@ pub async fn run_headless(
     let duration = start.elapsed().as_secs();
 
     // Write output to file if requested
-    if let Some(ref path) = config.output_file {
-        if let Err(e) = tokio::fs::write(path, &summary).await {
+    if let Some(ref path) = config.output_file
+        && let Err(e) = tokio::fs::write(path, &summary).await {
             let msg = format!("⚠️ Failed to write output to {}: {}", path, e);
             emit(&event_tx, HeadlessEvent::Error {
                 message: msg.clone(),
@@ -607,7 +606,6 @@ pub async fn run_headless(
             summary.push('\n');
             summary.push_str(&msg);
         }
-    }
 
     emit(&event_tx, HeadlessEvent::Complete {
         summary: summary.clone(),
@@ -741,8 +739,7 @@ async fn auto_commit_changes(task: &str) -> anyhow::Result<String> {
     let git = GitTool;
 
     // Check if there are changes
-    let status = git.execute("status")?;
-    if !status.contains("modified") && !status.contains("Untracked") && !status.contains("new file") {
+    if !GitTool::has_changes() {
         return Ok("No changes to commit.".to_string());
     }
 
@@ -793,8 +790,10 @@ mod tests {
 
     #[test]
     fn test_autonomous_mode_flag() {
-        let mut config = HeadlessConfig::default();
-        config.autonomous = true;
+        let config = HeadlessConfig {
+            autonomous: true,
+            ..Default::default()
+        };
         assert!(config.autonomous);
     }
 

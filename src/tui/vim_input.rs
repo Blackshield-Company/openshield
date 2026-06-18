@@ -180,13 +180,12 @@ fn handle_normal_mode(
     cursor: &mut usize,
 ) -> (bool, bool) {
     // Number keys build count prefix
-    if let KeyCode::Char(c) = key.code {
-        if c.is_ascii_digit() && c != '0' {
+    if let KeyCode::Char(c) = key.code
+        && c.is_ascii_digit() && c != '0' {
             let digit = c.to_digit(10).expect("is_ascii_digit guarantees valid digit") as usize;
             vim.count = Some(vim.count.unwrap_or(0) * 10 + digit);
             return (true, false);
         }
-    }
 
     let count = vim.count.take().unwrap_or(1);
 
