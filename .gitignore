@@ -1,0 +1,16 @@
+
+# OpenClaw session data
+.claw/
+.clawd/
+.clawd-todos.json
+*.jsonl
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
