@@ -64,8 +64,10 @@ pub fn draw_unified_feed(
     ));
 
     // ── Messages ────────────────────────────────────────────────────────────
-    for msg in &app.messages {
-        let msg_lines = format_message(msg, inner_width as usize);
+    for (idx, msg) in app.messages.iter().enumerate() {
+        let is_selected =
+            app.mode == crate::tui::AppMode::CopySelect && app.copy_selected_idx == Some(idx);
+        let msg_lines = format_message(msg, inner_width as usize, is_selected);
         all_lines.extend(msg_lines);
         // Thin separator between messages
         all_lines.push(String::new());
@@ -119,7 +121,9 @@ pub fn draw_unified_feed(
 }
 
 /// Format a single chat message into displayable strings with ANSI colors.
-fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
+/// When `is_selected` is true, the message header is highlighted to indicate
+/// it will be copied on Enter.
+fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<String> {
     let mut lines = Vec::new();
 
     let (role_icon, role_color, role_name) = match msg.role.as_str() {
@@ -162,18 +166,38 @@ fn format_message(msg: &ChatMessage, width: usize) -> Vec<String> {
     };
 
     // Role header with icon and name
-    let header = format!(
-        "{}{} {} {}{}",
-        ansi_fg(role_color),
-        role_icon,
-        role_name,
-        ansi_fg(Color::Rgb {
-            r: 140,
-            g: 120,
-            b: 160,
-        }),
-        ansi_reset()
-    );
+    let header = if is_selected {
+        format!(
+            "{}▶ {} {} {}{}{}",
+            ansi_fg(Color::Rgb {
+                r: 255,
+                g: 215,
+                b: 0,
+            }),
+            role_icon,
+            role_name,
+            ansi_fg(Color::Rgb {
+                r: 140,
+                g: 120,
+                b: 160,
+            }),
+            " [COPY]",
+            ansi_reset()
+        )
+    } else {
+        format!(
+            "{}{} {} {}{}",
+            ansi_fg(role_color),
+            role_icon,
+            role_name,
+            ansi_fg(Color::Rgb {
+                r: 140,
+                g: 120,
+                b: 160,
+            }),
+            ansi_reset()
+        )
+    };
     lines.push(header);
 
     // Content lines (word-wrapped)

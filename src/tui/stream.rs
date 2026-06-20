@@ -51,6 +51,13 @@ pub(crate) enum StreamEvent {
     Done,
     /// Batched tool results from multi-tool execution (collapsed display).
     ToolResultsBatch { results: Vec<ToolResultEntry> },
+    /// Assistant message with tool_calls that must be added to model_messages history.
+    /// Sent when the model uses native function calling so the tool_call_id chain is preserved.
+    AssistantToolCall {
+        content: String,
+        reasoning: Option<String>,
+        tool_calls: Vec<crate::providers::ToolCallRequest>,
+    },
 }
 
 /// A single tool result for batched display.
@@ -130,10 +137,10 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             if !embedded_tools.is_empty() {
                 let display_content = strip_think_tags(&strip_tool_lines(&content));
                 if !display_content.trim().is_empty() {
-                    app.add_assistant_message(display_content, reasoning_to_save);
+                    app.add_assistant_message(display_content, reasoning_to_save, None);
                 } else {
                     if let Some(ref r) = reasoning_to_save {
-                        app.add_assistant_message("".to_string(), Some(r.clone()));
+                        app.add_assistant_message("".to_string(), Some(r.clone()), None);
                     }
                 }
                 for (tool_name, args) in &embedded_tools {
@@ -155,6 +162,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     app.add_assistant_message(
                         format!("🔧 Using tool: {} {}", tool_name, args),
                         reasoning_to_save.clone(),
+                        None,
                     );
                     app.model_messages.push(Message {
                         role: "assistant".to_string(),
@@ -167,7 +175,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 }
             } else {
                 let clean_content = strip_think_tags(&content);
-                app.add_assistant_message(clean_content.clone(), reasoning_to_save);
+                app.add_assistant_message(clean_content.clone(), reasoning_to_save, None);
                 if app.should_auto_continue(&clean_content) {
                     app.auto_continue();
                 } else if let Some(suggestion) = detect_high_confidence_suggestion(&content) {
@@ -299,7 +307,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 app.add_system_message(
                     "⚠️ Model output tools in final response. These were not re-executed.".to_string(),
                 );
-                app.add_assistant_message(display_content, None);
+                app.add_assistant_message(display_content, None, None);
                 return;
             }
 
@@ -370,7 +378,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             } else {
                 app.empty_response_count = 0;
                 let clean = strip_think_tags(&content);
-                app.add_assistant_message(clean.clone(), None);
+                app.add_assistant_message(clean.clone(), None, None);
                 if app.should_auto_continue(&clean) {
                     app.auto_continue();
                 }
@@ -436,6 +444,18 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 app.last_progress_msg_idx = None;
                 app.add_system_message(msg);
             }
+        }
+        StreamEvent::AssistantToolCall { content, reasoning, tool_calls } => {
+            // Add the assistant message with tool_calls to model_messages so that
+            // subsequent tool result messages have a matching tool_call_id.
+            app.model_messages.push(Message {
+                role: "assistant".to_string(),
+                content,
+                images: None,
+                tool_call_id: None,
+                tool_calls: Some(tool_calls),
+                reasoning_content: reasoning,
+            });
         }
         StreamEvent::Done => {
             app.is_streaming = false;
