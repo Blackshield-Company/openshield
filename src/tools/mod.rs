@@ -209,20 +209,25 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                 "edit" => json!({
                     "type": "object",
                     "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["read", "write", "replace", "patch"],
+                            "description": "The edit operation: read (view file), write (create/overwrite file), replace (search/replace text), patch (multi-line replacement)"
+                        },
                         "file": {
                             "type": "string",
                             "description": "The file path to edit"
                         },
                         "old_string": {
                             "type": "string",
-                            "description": "The text to find and replace"
+                            "description": "For replace/patch: the exact text to find and replace. Must be empty for write operations."
                         },
                         "new_string": {
                             "type": "string",
-                            "description": "The replacement text"
+                            "description": "For write/replace/patch: the new content or replacement text"
                         }
                     },
-                    "required": ["file", "old_string", "new_string"]
+                    "required": ["operation", "file"]
                 }),
                 "refactor" => json!({
                     "type": "object",
@@ -261,6 +266,388 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                         }
                     },
                     "required": ["command", "file", "line", "column"]
+                }),
+                // Web & Search capabilities
+                "web_search" => json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results",
+                            "default": 5
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                "browser" => json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to visit"
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["visit", "extract", "screenshot"],
+                            "description": "The browser action to perform"
+                        }
+                    },
+                    "required": ["url", "action"]
+                }),
+                "x_search" => json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The X/Twitter search query"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of posts to return",
+                            "default": 10
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                // Media capabilities
+                "vision" => json!({
+                    "type": "object",
+                    "properties": {
+                        "image_path": {
+                            "type": "string",
+                            "description": "Path to the image file to analyze"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "What to look for in the image"
+                        }
+                    },
+                    "required": ["image_path"]
+                }),
+                "image_gen" => json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The image generation prompt"
+                        },
+                        "aspect_ratio": {
+                            "type": "string",
+                            "enum": ["landscape", "portrait", "square"],
+                            "description": "Aspect ratio of the generated image",
+                            "default": "landscape"
+                        }
+                    },
+                    "required": ["prompt"]
+                }),
+                "video" => json!({
+                    "type": "object",
+                    "properties": {
+                        "video_path": {
+                            "type": "string",
+                            "description": "Path to the video file to analyze"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "What to analyze in the video"
+                        }
+                    },
+                    "required": ["video_path"]
+                }),
+                "video_gen" => json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The video generation prompt"
+                        },
+                        "duration": {
+                            "type": "integer",
+                            "description": "Duration in seconds",
+                            "default": 5
+                        }
+                    },
+                    "required": ["prompt"]
+                }),
+                "tts" => json!({
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The text to convert to speech"
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output file path"
+                        }
+                    },
+                    "required": ["text"]
+                }),
+                // Memory & Context capabilities
+                "memory" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["search", "add", "list", "semantic"],
+                            "description": "The memory action to perform"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query or content to add"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum results for search",
+                            "default": 10
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                "session_search" => json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The session search query"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum sessions to return",
+                            "default": 5
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                "context_engine" => json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The context query"
+                        },
+                        "target": {
+                            "type": "string",
+                            "enum": ["session", "project", "global"],
+                            "description": "Which memory layer to query",
+                            "default": "session"
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                // Productivity capabilities
+                "todo" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "add", "complete", "remove"],
+                            "description": "The todo action"
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "The task description (for add)"
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Task ID (for complete/remove)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                "cronjob" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "create", "remove", "run"],
+                            "description": "The cronjob action"
+                        },
+                        "schedule": {
+                            "type": "string",
+                            "description": "Cron schedule expression (for create)"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The prompt or task to schedule (for create)"
+                        },
+                        "job_id": {
+                            "type": "string",
+                            "description": "Job ID (for remove/run)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                "skills" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "reload", "trigger"],
+                            "description": "The skills action"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Query to find triggered skills"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                // Communication capabilities
+                "messaging" => json!({
+                    "type": "object",
+                    "properties": {
+                        "platform": {
+                            "type": "string",
+                            "enum": ["discord", "telegram", "slack", "matrix"],
+                            "description": "The messaging platform"
+                        },
+                        "channel": {
+                            "type": "string",
+                            "description": "The channel or user to message"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "The message content"
+                        }
+                    },
+                    "required": ["platform", "channel", "message"]
+                }),
+                // Smart Home capabilities
+                "home_assistant" => json!({
+                    "type": "object",
+                    "properties": {
+                        "entity": {
+                            "type": "string",
+                            "description": "The Home Assistant entity ID"
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["turn_on", "turn_off", "toggle", "status"],
+                            "description": "The action to perform"
+                        }
+                    },
+                    "required": ["entity", "action"]
+                }),
+                "spotify" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["play", "pause", "next", "previous", "search", "queue"],
+                            "description": "The Spotify action"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query or URI (for play/search/queue)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                // Platform capabilities
+                "yuanbao" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["query", "send"],
+                            "description": "The Yuanbao action"
+                        },
+                        "group": {
+                            "type": "string",
+                            "description": "The group name or ID"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "The message to send"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                "computer_use" => json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["click", "type", "screenshot", "scroll", "key"],
+                            "description": "The computer action"
+                        },
+                        "x": {
+                            "type": "integer",
+                            "description": "X coordinate (for click)"
+                        },
+                        "y": {
+                            "type": "integer",
+                            "description": "Y coordinate (for click)"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type (for type action)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                // Agentic capabilities
+                "moa" => json!({
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string",
+                            "description": "The task for the Mixture of Agents"
+                        },
+                        "agents": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "List of agent roles to use",
+                            "default": ["architect", "implementer", "reviewer"]
+                        }
+                    },
+                    "required": ["task"]
+                }),
+                "delegation" => json!({
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "string",
+                            "enum": ["claw", "opencode", "claude", "codex"],
+                            "description": "The external agent to delegate to"
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "The task to delegate"
+                        }
+                    },
+                    "required": ["agent", "task"]
+                }),
+                "clarify" => json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The clarifying question to ask the user"
+                        }
+                    },
+                    "required": ["question"]
+                }),
+                // Execution capabilities
+                "code_execution" => json!({
+                    "type": "object",
+                    "properties": {
+                        "language": {
+                            "type": "string",
+                            "enum": ["python", "bash", "javascript"],
+                            "description": "The programming language"
+                        },
+                        "code": {
+                            "type": "string",
+                            "description": "The code to execute"
+                        }
+                    },
+                    "required": ["language", "code"]
                 }),
                 _ => json!({
                     "type": "object",
@@ -465,6 +852,186 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
                 Some(args_str)
             } else {
                 get_str("task").map(|task| format!("--add {}", task))
+            }
+        }
+        // Web & Search capabilities
+        "web_search" => {
+            if let Some(query) = get_str("query") {
+                let mut result = query;
+                if let Some(limit) = get_str("limit") {
+                    result.push_str(&format!(" --limit {}", limit));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "browser" => {
+            if let (Some(url), Some(action)) = (get_str("url"), get_str("action")) {
+                Some(format!("{} {}", action, url))
+            } else {
+                None
+            }
+        }
+        "x_search" => {
+            if let Some(query) = get_str("query") {
+                let mut result = query;
+                if let Some(limit) = get_str("limit") {
+                    result.push_str(&format!(" --limit {}", limit));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        // Media capabilities
+        "vision" => {
+            if let Some(image_path) = get_str("image_path") {
+                let mut result = image_path;
+                if let Some(prompt) = get_str("prompt") {
+                    result.push_str(&format!(" {}", prompt));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "image_gen" => {
+            if let Some(prompt) = get_str("prompt") {
+                let mut result = prompt;
+                if let Some(ratio) = get_str("aspect_ratio") {
+                    result.push_str(&format!(" --ratio {}", ratio));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "video" => {
+            if let Some(video_path) = get_str("video_path") {
+                let mut result = video_path;
+                if let Some(prompt) = get_str("prompt") {
+                    result.push_str(&format!(" {}", prompt));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "video_gen" => {
+            if let Some(prompt) = get_str("prompt") {
+                let mut result = prompt;
+                if let Some(duration) = get_str("duration") {
+                    result.push_str(&format!(" --duration {}", duration));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "tts" => {
+            if let Some(text) = get_str("text") {
+                let mut result = text;
+                if let Some(path) = get_str("output_path") {
+                    result.push_str(&format!(" --output {}", path));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "todo" | "cronjob" | "skills" => {
+            if let Some(action) = get_str("action") {
+                let mut result = action;
+                if let Some(task) = get_str("task") {
+                    result.push_str(&format!(" {}", task));
+                }
+                if let Some(id) = get_str("id") {
+                    result.push_str(&format!(" {}", id));
+                }
+                Some(result)
+            } else if let Some(args_str) = get_str("args") {
+                Some(args_str)
+            } else {
+                get_str("task").map(|task| format!("--add {}", task))
+            }
+        }
+        // Communication capabilities
+        "messaging" => {
+            if let (Some(platform), Some(channel), Some(message)) = (
+                get_str("platform"),
+                get_str("channel"),
+                get_str("message"),
+            ) {
+                Some(format!("{} {} {}", platform, channel, message))
+            } else {
+                None
+            }
+        }
+        // Smart Home capabilities
+        "home_assistant" => {
+            if let (Some(entity), Some(action)) = (get_str("entity"), get_str("action")) {
+                Some(format!("{} {}", action, entity))
+            } else {
+                None
+            }
+        }
+        "spotify" => {
+            if let Some(action) = get_str("action") {
+                let mut result = action;
+                if let Some(query) = get_str("query") {
+                    result.push_str(&format!(" {}", query));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        // Platform capabilities
+        "yuanbao" => {
+            if let Some(action) = get_str("action") {
+                let mut result = action;
+                if let Some(group) = get_str("group") {
+                    result.push_str(&format!(" --group {}", group));
+                }
+                if let Some(message) = get_str("message") {
+                    result.push_str(&format!(" {}", message));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        "computer_use" => {
+            if let Some(action) = get_str("action") {
+                let mut result = action;
+                if let (Some(x), Some(y)) = (get_str("x"), get_str("y")) {
+                    result.push_str(&format!(" {} {}", x, y));
+                }
+                if let Some(text) = get_str("text") {
+                    result.push_str(&format!(" {}", text));
+                }
+                Some(result)
+            } else {
+                None
+            }
+        }
+        // Agentic capabilities
+        "moa" => get_str("task").map(|task| task),
+        "delegation" => {
+            if let (Some(agent), Some(task)) = (get_str("agent"), get_str("task")) {
+                Some(format!("{} {}", agent, task))
+            } else {
+                None
+            }
+        }
+        "clarify" => get_str("question").map(|question| question),
+        // Execution capabilities
+        "code_execution" => {
+            if let (Some(language), Some(code)) = (get_str("language"), get_str("code")) {
+                Some(format!("{} {}", language, code))
+            } else {
+                None
             }
         }
         _ => get_str("args"),

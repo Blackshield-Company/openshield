@@ -272,6 +272,8 @@ pub struct SecurityEngine {
     pub profile_registry: Arc<Mutex<ProfileRegistry>>,
     /// Autonomous mode — when true, auto-approves all tools except Critical/sudo/sensitive.
     autonomous_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// YOLO mode — when true, auto-approves ALL tools including Critical (sudo/sensitive still blocked).
+    yolo_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +320,7 @@ impl SecurityEngine {
             identity_manager,
             profile_registry: Arc::new(Mutex::new(ProfileRegistry::new())),
             autonomous_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            yolo_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -326,19 +329,28 @@ impl SecurityEngine {
         self.autonomous_mode.store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Set yolo mode on the security engine.
+    pub fn set_yolo_mode(&self, enabled: bool) {
+        self.yolo_mode.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Main security gate: checks a tool call before execution.
     /// When autonomous_mode is true, elevates auto-approve threshold to High
     /// so the model can curl, redirect output, etc. without blocking.
+    /// When yolo_mode is true, auto-approves ALL tools except sudo/sensitive.
     pub fn check_tool_call(&self, tool_name: &str, args: &str) -> SecurityDecision {
-        self.check_tool_call_with_mode(tool_name, args, self.autonomous_mode.load(std::sync::atomic::Ordering::Relaxed))
+        let autonomous_mode = self.autonomous_mode.load(std::sync::atomic::Ordering::Relaxed);
+        let yolo_mode = self.yolo_mode.load(std::sync::atomic::Ordering::Relaxed);
+        self.check_tool_call_with_mode(tool_name, args, autonomous_mode, yolo_mode)
     }
 
-    /// Check tool call with explicit autonomous mode override.
+    /// Check tool call with explicit mode overrides.
     pub fn check_tool_call_with_mode(
         &self,
         tool_name: &str,
         args: &str,
         autonomous_mode: bool,
+        yolo_mode: bool,
     ) -> SecurityDecision {
         // L1: Check sandbox / working directory restrictions
         if let Err(reason) = self.sandbox.validate_path(tool_name, args) {
@@ -360,17 +372,22 @@ impl SecurityEngine {
             }
         }
 
-        // L3: Check for sudo commands — NEVER bypassed, even in autonomous mode
+        // L3: Check for sudo commands — NEVER bypassed, even in yolo/autonomous mode
         if let Some(sudo_check) = self.check_sudo(tool_name, args) {
             return sudo_check;
         }
 
-        // L4: Check sensitive path access — NEVER bypassed
+        // L4: Check sensitive path access — NEVER bypassed, even in yolo mode
         if let Some(sensitive) = self.check_sensitive_paths(tool_name, args) {
             return sensitive;
         }
 
-        // L5: Assess risk level
+        // L5: YOLO mode — auto-approve everything except sudo/sensitive (already checked above)
+        if yolo_mode {
+            return SecurityDecision::Allow;
+        }
+
+        // L6: Assess risk level
         let risk = self.assess_risk(tool_name, args);
         let threshold = if autonomous_mode {
             RiskLevel::High
@@ -387,7 +404,7 @@ impl SecurityEngine {
             };
         }
 
-        // L6: Check for PII in arguments — still checked in autonomous mode
+        // L7: Check for PII in arguments — still checked in autonomous mode
         if self.config.pii_redaction_enabled {
             let pii_findings = self.pii_detector.scan(args);
             if !pii_findings.is_empty() {

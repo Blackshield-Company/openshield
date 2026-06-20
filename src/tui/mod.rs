@@ -232,6 +232,8 @@ pub(crate) struct App {
     smart_context: crate::context_pinner::SmartContext,
     /// Cached chat area rect for mouse selection coordinate translation.
     chat_area_rect: Option<crate::tui::mouse::Rect>,
+    /// Index of the currently selected message for copy mode.
+    copy_selected_idx: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +252,8 @@ enum AppMode {
     Agent,
     ToolApproval,
     DiffPreview,
+    CopySelect, // Select a message to copy to clipboard
+    Freeze,     // Pause rendering so terminal native selection works
 }
 
 #[derive(Debug, Clone, Default)]
@@ -265,8 +269,19 @@ struct SessionPerformance {
 
 impl SessionPerformance {
     fn record_response(&mut self, metrics: &StreamMetrics) {
+        const MAX_PERF_ENTRIES: usize = 1000;
         self.first_token_ms.push(metrics.first_token_latency_ms);
         self.total_latency_ms.push(metrics.total_latency_ms);
+        // Cap unbounded vectors to prevent RAM growth over long sessions
+        if self.first_token_ms.len() > MAX_PERF_ENTRIES {
+            self.first_token_ms.drain(0..self.first_token_ms.len() - MAX_PERF_ENTRIES);
+        }
+        if self.total_latency_ms.len() > MAX_PERF_ENTRIES {
+            self.total_latency_ms.drain(0..self.total_latency_ms.len() - MAX_PERF_ENTRIES);
+        }
+        if self.tool_exec_ms.len() > MAX_PERF_ENTRIES {
+            self.tool_exec_ms.drain(0..self.tool_exec_ms.len() - MAX_PERF_ENTRIES);
+        }
         self.requests += 1;
     }
 
@@ -580,6 +595,7 @@ impl App {
             },
             smart_context: crate::context_pinner::SmartContext::load(&session_id),
             chat_area_rect: None,
+            copy_selected_idx: None,
         })
     }
 
@@ -822,11 +838,17 @@ impl App {
                 reasoning_content: None,
             });
         }
+        self.truncate_model_messages_if_needed();
 
         self.tokens_used += token_count;
     }
 
-    fn add_assistant_message(&mut self, content: String, reasoning: Option<String>) {
+    fn add_assistant_message(
+        &mut self,
+        content: String,
+        reasoning: Option<String>,
+        tool_calls: Option<Vec<crate::providers::ToolCallRequest>>,
+    ) {
         let token_count = content.split_whitespace().count() as u64;
         let msg = ChatMessage {
             role: "assistant".to_string(),
@@ -854,9 +876,10 @@ impl App {
             content,
             images: None,
             tool_call_id: None,
-            tool_calls: None,
+            tool_calls,
             reasoning_content: reasoning,
         });
+        self.truncate_model_messages_if_needed();
 
         self.tokens_used += token_count;
     }
@@ -909,8 +932,54 @@ impl App {
         self.messages = new_messages;
     }
 
-    fn rebuild_system_prompt(&mut self) {
+    /// Prevent unbounded RAM growth by truncating old model messages (API history).
+    /// This is separate from display message truncation because model_messages
+    /// accumulates tool results, system messages, and assistant responses that
+    /// never get cleaned up otherwise.
+    fn truncate_model_messages_if_needed(&mut self) {
+        const MAX_MODEL_MESSAGES: usize = 100;
+        const KEEP_LAST: usize = 80;
+        if self.model_messages.len() <= MAX_MODEL_MESSAGES {
+            return;
+        }
+        // Find the first non-system message index to preserve system prompts
+        let first_non_system = self.model_messages.iter()
+            .position(|m| m.role != "system")
+            .unwrap_or(0);
+        // Keep system messages (0..first_non_system) + last KEEP_LAST messages
+        let system_count = first_non_system.min(self.model_messages.len());
+        let keep_last = KEEP_LAST.min(self.model_messages.len().saturating_sub(system_count));
+        let mut new_messages = Vec::with_capacity(system_count + keep_last + 1);
+        // Preserve system prompts
+        new_messages.extend(self.model_messages.iter().take(system_count).cloned());
+        // Add truncation notice
+        new_messages.push(Message {
+            role: "system".to_string(),
+            content: format!("[... {} older messages truncated to save memory — context compressed]", self.model_messages.len() - system_count - keep_last),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        });
+        // Keep last N messages
+        new_messages.extend(self.model_messages.iter().rev().take(keep_last).rev().cloned());
+        self.model_messages = new_messages;
+    }
+
+    fn rebuild_system_prompt_with_skills(&mut self, user_query: &str) {
         let soul = crate::agent::soul::load_soul_from_config(&self.config);
+
+        // Inject triggered skills based on user query
+        let skills_block = if let Some(ref registry) = self.skill_registry {
+            let triggered = registry.find_triggered(user_query);
+            if !triggered.is_empty() {
+                crate::skills::format_skills_prompt(&triggered)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
 
         let fs_capabilities = if self.config.filesystem.allowed_paths.is_empty() {
             "You have FULL filesystem access to the entire system. \
@@ -1002,14 +1071,15 @@ impl App {
                   If more tools are needed, invoke them immediately. \
                   If the task is complete, provide a final summary and say TASK_COMPLETE on its own line. \
                   Do NOT ask the user 'should I continue?' or 'just say the word' — just keep working until the task is done. \
-                  No manifesto. No preamble. Just execute.{}{}{}{}",
+                  No manifesto. No preamble. Just execute.{}{}{}{}{}",
                  soul.system_prompt(),
                  fs_capabilities,
                  tool_descriptions,
                  plan_instruction,
                  effort_instruction,
                  context_mode_block,
-                 pinned_context_block
+                 pinned_context_block,
+                 skills_block
             ),
             images: None,
             tool_call_id: None,
@@ -1031,6 +1101,11 @@ impl App {
                 branch.model_messages.push(system_msg);
             }
         }
+    }
+
+    /// Rebuild system prompt without skill injection (backward compatibility).
+    fn rebuild_system_prompt(&mut self) {
+        self.rebuild_system_prompt_with_skills("");
     }
 
     /// Compact conversation context by summarizing and truncating history.
@@ -1868,6 +1943,61 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     }
 
+    // CopySelect mode: navigate messages and copy to clipboard
+    if app.mode == AppMode::CopySelect {
+        match key.code {
+            KeyCode::Esc => {
+                app.mode = AppMode::Normal;
+                app.copy_selected_idx = None;
+                app.add_system_message("📋 Copy mode cancelled".to_string());
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = app.copy_selected_idx {
+                    if let Some(msg) = app.messages.get(idx) {
+                        let text = if msg.content.starts_with("<think>") {
+                            strip_think_tags(&msg.content)
+                        } else {
+                            msg.content.clone()
+                        };
+                        let text_len = text.len();
+                        use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+                        let b64 = BASE64.encode(text.as_bytes());
+                        print!("\x1b]52;c;{}\x07", b64);
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        app.add_system_message(format!(
+                            "📋 Copied {} message ({} chars)",
+                            msg.role, text_len
+                        ));
+                    }
+                }
+                app.mode = AppMode::Normal;
+                app.copy_selected_idx = None;
+            }
+            KeyCode::Up => {
+                if let Some(idx) = app.copy_selected_idx {
+                    app.copy_selected_idx = Some(idx.saturating_sub(1));
+                }
+            }
+            KeyCode::Down => {
+                if let Some(idx) = app.copy_selected_idx {
+                    let max = app.messages.len().saturating_sub(1);
+                    app.copy_selected_idx = Some((idx + 1).min(max));
+                }
+            }
+            _ => {}
+        }
+        crate::tui::render::request_redraw();
+        return Ok(false);
+    }
+
+    // Freeze mode: any key exits freeze mode
+    if app.mode == AppMode::Freeze {
+        app.mode = AppMode::Normal;
+        app.add_system_message("🧊 Freeze mode ended — resumed normal operation.".to_string());
+        crate::tui::render::request_redraw();
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
             if app.show_comparison {
@@ -1943,6 +2073,13 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             ));
             app.add_system_message(format!(
                 "  Ctrl+Y  — Copy last response {}",
+                kb.copy_last
+                    .as_ref()
+                    .map(|s| format!("[custom: {}]", s))
+                    .unwrap_or_default()
+            ));
+            app.add_system_message(format!(
+                "  Ctrl+Shift+Y — Copy any message (select mode) {}",
                 kb.copy_last
                     .as_ref()
                     .map(|s| format!("[custom: {}]", s))
@@ -2070,6 +2207,32 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.add_system_message("📋 No assistant message to copy".to_string());
             }
         }
+        KeyCode::Char('y')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            // Enter copy-select mode: navigate messages with ↑/↓, Enter to copy, Esc to cancel
+            if app.messages.is_empty() {
+                app.add_system_message("📋 No messages to copy".to_string());
+            } else {
+                app.mode = AppMode::CopySelect;
+                // Start from the last message
+                app.copy_selected_idx = Some(app.messages.len().saturating_sub(1));
+                app.add_system_message(
+                    "📋 Copy mode: ↑/↓ to select, Enter to copy, Esc to cancel".to_string(),
+                );
+            }
+        }
+        KeyCode::Char('f')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            // Freeze mode: pause rendering so terminal native selection works
+            app.mode = AppMode::Freeze;
+            app.add_system_message(
+                "🧊 Freeze mode: rendering paused. Select text with your terminal, then press any key to resume.".to_string(),
+            );
+        }
         KeyCode::Enter => {
             if key.modifiers.contains(KeyModifiers::SHIFT) {
                 // Insert newline for multi-line input
@@ -2082,8 +2245,12 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             } else {
                 let input = app.input.trim().to_string();
                 if !input.is_empty() {
-                    // Save to history
+                    // Save to history, capping to prevent unbounded growth
+                    const MAX_HISTORY: usize = 500;
                     app.input_history.push(input.clone());
+                    if app.input_history.len() > MAX_HISTORY {
+                        app.input_history.drain(0..app.input_history.len() - MAX_HISTORY);
+                    }
                     app.history_index = None;
                     app.history_draft = None;
                     let _ = std::fs::write(&app.history_file, app.input_history.join("\n"));
@@ -2429,6 +2596,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             \n\
             Keybindings:\n\
             • Ctrl+C            — Copy / Quit (double-tap)\n\
+            • Ctrl+Y            — Copy last assistant response\n\
+            • Ctrl+Shift+Y      — Copy any message (select mode)\n\
             • Ctrl+L            — Clear chat\n\
             • Ctrl+B            — (unused, no sidebar)\n\
             • Ctrl+P            — Model selector\n\
@@ -3248,6 +3417,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/yolo" {
         app.yolo_mode = !app.yolo_mode;
+        app.security_engine.set_yolo_mode(app.yolo_mode);
+        app.security_engine.set_autonomous_mode(app.yolo_mode || app.autonomous_mode);
         let status = if app.yolo_mode { "ON ✅" } else { "OFF ❌" };
         app.add_system_message(format!(
             "🤘 YOLO mode is {} — tool calls will {}be auto-approved.",
@@ -3530,7 +3701,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                                 step.iterations
                             ));
                         }
-                        app.add_assistant_message(response, None);
+                        app.add_assistant_message(response, None, None);
                     }
                     Err(e) => app.add_system_message(format!("Agent error: {}", e)),
                 }
@@ -4148,13 +4319,11 @@ async fn stream_model_response_task(
         let sensible_max = (model_config.context_length as u32 / 4).clamp(256, 4096);
         request.max_tokens = Some(sensible_max);
     }
-    // Native tool calling is DISABLED because the Kimi coding endpoint (via proxy)
-    // does not fully support the OpenAI function calling format in the way we construct
-    // follow-up messages (tool_call_id mismatch errors). The model still sees all tool
-    // definitions in the system prompt and uses them via the legacy `TOOL:` text format.
-    // To re-enable: uncomment the next line and fix the tool_call_id / content: null
-    // handling in the follow-up path.
-    // request.tools = Some(crate::tools::get_openai_tool_definitions());
+    // Native tool calling is now ENABLED. The tool_call_id handling in the follow-up
+    // path has been fixed. Both native function calling and legacy TOOL: syntax are supported.
+    // Models that support OpenAI function calling format will use native tool calls.
+    // Models that don't support it will fall back to TOOL: syntax via the system prompt.
+    request.tools = Some(crate::tools::get_openai_tool_definitions());
 
     let _secondary_providers: Vec<(String, Provider)> = if is_multi_model {
         config
@@ -4262,8 +4431,24 @@ async fn stream_model_response_task(
                                         } else {
                                             id.clone()
                                         };
-                                        // Assistant message MUST include tool_calls array with the id
-                                        // Reasoning is kept ephemeral — not stored in persistent history
+                                        // Send the assistant tool call back to the main TUI loop
+                                        // so model_messages is updated with the tool_calls array.
+                                        let _ = tx.send(StreamEvent::AssistantToolCall {
+                                            content: full_content.clone(),
+                                            reasoning: Some(accumulated_reasoning.clone()),
+                                            tool_calls: vec![
+                                                crate::providers::ToolCallRequest {
+                                                    id: call_id.clone(),
+                                                    r#type: "function".to_string(),
+                                                    function: crate::providers::ToolCallFunction {
+                                                        name: name.clone(),
+                                                        arguments: args.clone(),
+                                                    },
+                                                },
+                                            ],
+                                        });
+                                        // Also push the assistant message into follow_messages so the
+                                        // follow-up request has the complete tool_call context.
                                         follow_messages.push(Message {
                                             role: "assistant".to_string(),
                                             content: full_content.clone(),
@@ -4480,9 +4665,8 @@ async fn stream_model_response_task(
                                                         }
 
                                                         // Send another follow-up request to handle more tool calls
-                                                        let next_follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
-                                                        // Native tool calling disabled in follow-ups — see main request.tools above
-                                                        // next_follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
+                                                        let mut next_follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
+                                                        next_follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
                                                         let _ = tx.send(StreamEvent::Start);
                                                         match provider.chat_stream_realtime(next_follow_up).await {
                                                             Ok((new_rx, _)) => {
@@ -6045,7 +6229,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                     for chunk in chunks {
                         follow_content.push_str(&chunk);
                     }
-                    app.add_assistant_message(follow_content, None);
+                    app.add_assistant_message(follow_content, None, None);
                 }
                 Err(e) => app.add_system_message(format!("Follow-up failed: {}", e)),
             }

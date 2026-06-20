@@ -146,7 +146,7 @@ pub(crate) fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<
             "search" => &["query", "path"],
             "grep" => &["pattern", "path"],
             "terminal" => &["command"],
-            "edit" => &["file", "old_string", "new_string"],
+            "edit" => &["operation", "file", "old_string", "new_string"],
             "test" => &["path", "framework"],
             "refactor" => &["operation", "file", "line", "column", "new_name"],
             "lsp" => &["command", "file", "line", "column"],
@@ -169,19 +169,39 @@ pub(crate) fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<
         }
 
         if tool_name == "edit" && !parts.is_empty() {
-            let file = parts.first().cloned().unwrap_or_default();
+            let has_operation = parts.len() >= 4;
+            let operation = if has_operation {
+                parts[0].clone()
+            } else {
+                String::new()
+            };
+            let file_idx = if has_operation { 1 } else { 0 };
+            let old_idx = if has_operation { 2 } else { 1 };
+            let new_idx = if has_operation { 3 } else { 2 };
+            
+            let file = parts.get(file_idx).cloned().unwrap_or_default();
             if file.is_empty() {
                 return None;
             }
-            let old_str = parts.get(1).cloned().unwrap_or_default();
-            let new_str = parts.get(2).cloned().unwrap_or_default();
-            if !old_str.is_empty() {
-                return Some((
-                    tool_name.to_string(),
-                    format!("replace {}\n{}\n---\n{}", file, old_str, new_str),
-                ));
+            let old_str = parts.get(old_idx).cloned().unwrap_or_default();
+            let new_str = parts.get(new_idx).cloned().unwrap_or_default();
+            
+            let op = if !operation.is_empty() {
+                operation
+            } else if old_str.is_empty() && !new_str.is_empty() {
+                "write".to_string()
+            } else if !old_str.is_empty() {
+                "replace".to_string()
+            } else {
+                "read".to_string()
+            };
+            
+            match op.as_str() {
+                "write" => return Some((tool_name.to_string(), format!("write {} {}", file, new_str))),
+                "replace" => return Some((tool_name.to_string(), format!("replace {} {} ||| {}", file, old_str, new_str))),
+                "patch" => return Some((tool_name.to_string(), format!("patch {} {} ||| {}", file, old_str, new_str))),
+                _ => return Some((tool_name.to_string(), format!("read {}", file))),
             }
-            return Some((tool_name.to_string(), format!("read {}", file)));
         }
         if tool_name == "test" && !parts.is_empty() {
             let mut reordered = vec!["run".to_string()];
