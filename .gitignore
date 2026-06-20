@@ -1,26 +1,16 @@
-/target
-/config.toml
-*.db
-*.db-journal
+
+# OpenClaw session data
+.claw/
+.clawd/
+.clawd-todos.json
+*.jsonl
+
+# Environment variables
 .env
 .env.local
 .env.production
-*.key
-*.pem
-secrets/
-.cache/
-.openshark/
-.claw/
-.clawd/
-
-# AI session artifacts
-.sandbox-home/
-.omo/
-.clawd-todos.json
 
 # Python
 __pycache__/
 *.pyc
 .pytest_cache/
-
-*.jsonl
