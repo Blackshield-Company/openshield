@@ -357,9 +357,13 @@ impl Provider {
                         true
                     })
                     .map(|m| {
-                        // For assistant messages with tool_calls, the API requires content to be null
-                        // (not empty string or whitespace). Force null whenever tool_calls is present.
-                        let content = if m.role == "assistant" && m.tool_calls.is_some() {
+                        // For assistant messages with tool_calls, only force content to null
+                        // if the content is actually empty. If the model output text before the
+                        // tool call, preserve it so the API receives the full context.
+                        let content = if m.role == "assistant"
+                            && m.tool_calls.is_some()
+                            && m.content.trim().is_empty()
+                        {
                             serde_json::Value::Null
                         } else {
                             m.to_openai_content()
@@ -1006,7 +1010,7 @@ impl Provider {
                                     let reasoning = delta
                                         .and_then(|d| d.get("reasoning_content"))
                                         .and_then(|c| c.as_str());
-                                    let _tool_calls = delta
+                                    let tool_calls = delta
                                         .and_then(|d| d.get("tool_calls"))
                                         .and_then(|t| t.as_array());
                                     let finish_reason = event
@@ -1014,6 +1018,46 @@ impl Provider {
                                         .and_then(|c| c.get(0))
                                         .and_then(|c| c.get("finish_reason"))
                                         .and_then(|f| f.as_str());
+
+                                    // Accumulate tool call fragments from streaming deltas.
+                                    // OpenAI sends tool_calls across multiple SSE events with
+                                    // an `index` field; each chunk may contain partial id, name,
+                                    // or arguments that must be concatenated.
+                                    if let Some(tcs) = tool_calls {
+                                        for tc in tcs {
+                                            if let Some(idx) = tc.get("index").and_then(|i| i.as_u64()) {
+                                                let idx_u32 = idx as u32;
+                                                let entry = pending_tool_calls.entry(idx_u32).or_insert_with(|| AccumulatedToolCall {
+                                                    id: String::new(),
+                                                    name: String::new(),
+                                                    arguments: String::new(),
+                                                });
+                                                if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                                    entry.id.push_str(id);
+                                                }
+                                                if let Some(name) = tc.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+                                                    entry.name.push_str(name);
+                                                }
+                                                if let Some(args) = tc.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
+                                                    entry.arguments.push_str(args);
+                                                }
+                                            } else if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                                // Fallback for providers that omit index
+                                                let entry = pending_tool_calls.entry(0).or_insert_with(|| AccumulatedToolCall {
+                                                    id: String::new(),
+                                                    name: String::new(),
+                                                    arguments: String::new(),
+                                                });
+                                                entry.id.push_str(id);
+                                                if let Some(name) = tc.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+                                                    entry.name.push_str(name);
+                                                }
+                                                if let Some(args) = tc.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
+                                                    entry.arguments.push_str(args);
+                                                }
+                                            }
+                                        }
+                                    }
 
                                     // Emit content and reasoning FIRST, then Finish.
                                     // Consumers may break on Finish; if Finish is sent before

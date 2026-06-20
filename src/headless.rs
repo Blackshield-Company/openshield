@@ -358,7 +358,12 @@ pub async fn run_headless(
                     }
 
                     // Execute the tool
-                    let (result, success) = execute_tool_call(tool_name, args, &security, &event_tx, turn).await;
+                    // Convert JSON arguments to the tool's expected string format
+                    let tool_args = crate::tui::extract_args_from_json(args, tool_name)
+                        .map(|(_, extracted)| extracted)
+                        .unwrap_or_else(|| args.clone());
+
+                    let (result, success) = execute_tool_call(tool_name, &tool_args, &security, &event_tx, turn).await;
 
                     recent_tool_calls.push((tool_name.clone(), args.clone(), turn, success));
                     tool_results.push_str(&format!("{}\n", result));

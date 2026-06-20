@@ -20,6 +20,7 @@ mod doctor;
 mod evolution;
 mod gateway;
 mod guardian;
+mod harness;
 mod headless;
 mod image_utils;
 mod integrations;
@@ -897,10 +898,10 @@ async fn main() -> anyhow::Result<()> {
 
                 let request =
                     providers::ChatRequest::new(model_name.to_string(), messages, true);
-                // Native tool calling disabled — the Kimi coding endpoint (via proxy) does not
-                // fully support the OpenAI function calling format. The model still sees all
-                // tool definitions in the system prompt and uses them via the legacy `TOOL:` format.
-                // request.tools = Some(tools::get_openai_tool_definitions());
+                // Native tool calling is NOT enabled in direct mode because chat_stream
+                // (the non-realtime streaming method) does not parse StreamChunk::ToolCall
+                // from SSE deltas. The direct mode relies on text-based TOOL: detection.
+                // For native tool calling, use the TUI or headless modes.
 
                 match provider.chat_stream(request).await {
                     Ok((chunks, metrics)) => {
@@ -1367,7 +1368,7 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
-            let security = match crate::security::SecurityEngine::new(
+            let mut security = match crate::security::SecurityEngine::new(
                 crate::security::SecurityConfig::default()
             ) {
                 Ok(s) => s,
@@ -1376,6 +1377,9 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
+            if autonomous {
+                security.set_autonomous_mode(true);
+            }
             if let Err(e) =
                 crate::headless::run_headless(headless_config, provider, cfg.default_model, security, None)
                     .await

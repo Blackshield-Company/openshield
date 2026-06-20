@@ -39,6 +39,11 @@ pub fn draw_ui(app: &mut App) -> io::Result<()> {
     let mut out = stdout();
     let (term_width, term_height) = size()?;
 
+    // Freeze mode: don't redraw so terminal native selection works
+    if app.mode == AppMode::Freeze {
+        return Ok(());
+    }
+
     if app.mode == AppMode::Splash {
         return splash::draw_splash_screen(app, term_width, term_height);
     }

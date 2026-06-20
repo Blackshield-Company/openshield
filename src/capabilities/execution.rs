@@ -48,6 +48,26 @@ impl Tool for CodeExecutionTool {
             code = before.trim();
         }
 
+        // Strip markdown code block wrappers if present
+        // Handles ```python, ```, ~~~python, etc.
+        let code = if code.starts_with("```") || code.starts_with("~~~") {
+            let mut lines: Vec<&str> = code.lines().collect();
+            // Remove first line if it's a code fence with optional language
+            if !lines.is_empty() && (lines[0].starts_with("```") || lines[0].starts_with("~~~")) {
+                lines.remove(0);
+            }
+            // Remove last line if it's a code fence
+            if !lines.is_empty() && (lines[lines.len() - 1].trim() == "```" || lines[lines.len() - 1].trim() == "~~~") {
+                lines.pop();
+            }
+            lines.join("\n")
+        } else if code.starts_with("python") || code.starts_with("Python") {
+            // Strip leading "python" or "Python" language identifier
+            code.strip_prefix("python").unwrap_or(code).strip_prefix("Python").unwrap_or(code).trim().to_string()
+        } else {
+            code.to_string()
+        };
+
         if code.is_empty() {
             return Ok("No Python code provided.".to_string());
         }
@@ -56,7 +76,7 @@ impl Tool for CodeExecutionTool {
         let tmp_dir = std::env::temp_dir();
         let tmp_file = tmp_dir.join(format!("openshark_exec_{}.py", uuid::Uuid::new_v4()));
 
-        std::fs::write(&tmp_file, code)
+        std::fs::write(&tmp_file, &code)
             .with_context(|| format!("Failed to write temp file: {:?}", tmp_file))?;
 
         let output = std::process::Command::new("python3")
