@@ -14,6 +14,7 @@ pub struct ToolBatch {
 }
 
 impl ToolBatch {
+    #[allow(dead_code)]
     pub fn new(suggestions: Vec<ToolSuggestion>) -> Self {
         let len = suggestions.len();
         Self {

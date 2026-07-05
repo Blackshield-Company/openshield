@@ -5,7 +5,7 @@
 //!
 //! Features:
 //!   --yolo          Auto-approve all tool calls (no interactive prompts)
-//!   --autonomous    Full autonomy mode: no approvals, auto-commit, auto-test
+//!   --autonomous    Full autonomy mode: no approvals, auto-commits, auto-tests
 //!   --json          Output NDJSON for structured consumption
 //!   --timeout       Max seconds to run (default: 300)
 //!   --max-turns     Max agent turns (default: 50)
@@ -14,14 +14,12 @@
 
 #![allow(dead_code)]
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use crate::tools::{
-    detect_tool_suggestions, execute_tool, find_async_tool, get_openai_tool_definitions,
-};
-use crate::providers::{ChatRequest, Message};
+use crate::harness::{HarnessConfig, HarnessEngine, HarnessEvent};
 use crate::security::SecurityEngine;
 
 /// Structured output event for --json mode.
@@ -93,505 +91,282 @@ impl Default for HeadlessConfig {
     }
 }
 
-/// Build the system prompt for headless mode with tool descriptions.
-fn build_system_prompt(autonomous: bool) -> String {
-    let tool_descs = crate::tools::get_all_tool_descriptions();
-    let tool_list: Vec<String> = tool_descs
-        .iter()
-        .map(|(name, desc)| format!("  - {}: {}", name, desc))
-        .collect();
-
-    format!(
-        "You are OpenShark, an autonomous AI coding agent running in headless mode.\n\
-         Your task will be given as a user message. Execute it by using tools.\n\
-         {}\n\n\
-         ## Available Tools\n\
-         You are running in a native tool-calling environment.\n\
-         When you need to use a tool, you MUST use the `tool_calls` function_calling format.\n\
-         Do NOT output `TOOL:` patterns or markdown code blocks — the system will call tools for you.\n\
-         Wait for tool results after each call, then decide the next step.\n\n\
-         ## Tool Reference\n\
-         {}\n\n\
-         ## Rules\n\
-         - Execute tools to accomplish the task. Do not just describe what you would do.\n\
-         - After each tool result, decide what to do next.\n\
-         - When the task is complete, respond with TASK_COMPLETE on its own line.\n\
-         - If you encounter an error, try to fix it. If unfixable, explain and respond TASK_COMPLETE.\n\
-         - Be concise. Focus on the task.\n\
-         - You can use multiple tools in a single turn if they are independent.",
-        if autonomous { "🤖 AUTONOMOUS MODE: You are fully autonomous. No human approval needed. Make decisions and commit changes." } else { "🛡️ GUARDED MODE: All tools must pass security checks." },
-        tool_list.join("\n")
-    )
-}
-
 /// Run a task in headless mode with full tool execution.
 /// Returns the final summary string.
+///
+/// The harness engine (and its `MemoryStore`) is not `Send`, so the actual engine
+/// work is run inside `tokio::task::spawn_blocking` with a local single-threaded
+/// runtime. The outer async future is therefore `Send` and can be spawned on the
+/// main tokio runtime.
 pub async fn run_headless(
     config: HeadlessConfig,
-    provider: crate::providers::Provider,
-    model: String,
+    _provider: crate::providers::Provider,
+    _model: String,
     security: SecurityEngine,
     event_tx: Option<mpsc::UnboundedSender<HeadlessEvent>>,
-) -> anyhow::Result<String> {
+) -> Result<String> {
     let start = Instant::now();
-    let mut summary = String::new();
-    let mut turn = 0usize;
-    let mut consecutive_errors = 0usize;
-    let max_consecutive_errors = 3;
     let is_autonomous = config.autonomous || config.yolo;
-
     let now = || chrono::Utc::now().to_rfc3339();
 
-    emit(&event_tx, HeadlessEvent::Start {
-        task: config.task.clone(),
-        model: model.clone(),
-        timestamp: now(),
-    });
+    let app_config = crate::config::Config::load_or_default().unwrap_or_default();
+    let model = config
+        .model
+        .clone()
+        .unwrap_or_else(|| app_config.default_model.clone());
 
-    let system_prompt = build_system_prompt(is_autonomous);
-    let mut messages: Vec<Message> = vec![
-        Message {
-            role: "system".to_string(),
-            content: system_prompt,
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        },
-        Message {
-            role: "user".to_string(),
-            content: config.task.clone(),
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        },
-    ];
-
-    // Inject repo context if available
-    if let Some(context) = load_repo_context(&config.task) {
-        messages.insert(
-            1, // Insert after system prompt, before user task
-            Message {
-                role: "user".to_string(),
-                content: format!("Here is the repository context for this task:\n\n{}", context),
-                images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
-            },
-        );
-    }
-
-    // Create a checkpoint before autonomous execution
-    if is_autonomous && crate::tools::checkpoint::in_git_repo() {
-        match crate::tools::checkpoint::save_checkpoint(&format!("pre-autonomous-{}", chrono::Utc::now().timestamp()))
-        {
-            Ok(cp) => {
-                emit(&event_tx, HeadlessEvent::Thought {
-                    content: format!("💾 Checkpoint created: {} ({})", cp.name, cp.git_ref),
-                    turn: 0,
-                    timestamp: now(),
-                });
-            }
-            Err(e) => {
-                emit(&event_tx, HeadlessEvent::Error {
-                    message: format!("⚠️ Checkpoint creation failed: {}", e),
-                    turn: 0,
-                    timestamp: now(),
-                });
-            }
-        }
-    }
-
-    let mut recent_tool_calls: Vec<(String, String, usize, bool)> = Vec::new();
-    let mut stall_turns: usize = 0;
-
-    // Get tool definitions for native function calling
-    let tool_definitions = get_openai_tool_definitions();
-    let tools_enabled = !tool_definitions.is_empty();
-
-    while turn < config.max_turns {
-        if start.elapsed() > Duration::from_secs(config.timeout_secs) {
-            let msg = format!("Timeout after {} seconds", config.timeout_secs);
-            emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-            summary = msg;
-            break;
-        }
-
-        turn += 1;
-
-        let request = ChatRequest {
+    emit(
+        &event_tx,
+        HeadlessEvent::Start {
+            task: config.task.clone(),
             model: model.clone(),
-            messages: messages.clone(),
-            stream: false,
-            max_tokens: None,
-            temperature: None,
-            tools: if tools_enabled { Some(tool_definitions.clone()) } else { None },
-        };
+            timestamp: now(),
+        },
+    );
 
-        let response = match provider.chat(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                let msg = format!("Provider error: {}", e);
-                emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                consecutive_errors += 1;
-                if consecutive_errors >= max_consecutive_errors {
-                    summary = msg;
+    // Move engine work into a blocking thread with a local runtime so that the
+    // non-Send `MemoryStore` / `HarnessEngine` never cross a multi-threaded await.
+    let event_tx_blocking = event_tx.clone();
+    let config_blocking = config.clone();
+    let model_for_blocking = model.clone();
+
+    let handle = tokio::task::spawn_blocking(move || -> Result<(String, usize)> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to build local runtime for headless harness")?;
+
+        rt.block_on(async {
+            let app_config = crate::config::Config::load_or_default().unwrap_or_default();
+            let harness_config = HarnessConfig {
+                primary_model: model_for_blocking.clone(),
+                max_tool_loops: config_blocking.max_turns,
+                require_tool_approval: !is_autonomous,
+                multi_model_enabled: false,
+                memory_context_limit: 5,
+                skills_enabled: true,
+                secondary_models: Vec::new(),
+            };
+
+            let memory =
+                crate::memory::MemoryStore::new(&app_config.memory_db_path)?;
+            let mut engine =
+                HarnessEngine::new_with_security(harness_config, app_config, memory, security)?;
+
+            let mut summary = String::new();
+            let mut turn = 0usize;
+            let mut consecutive_errors = 0usize;
+            let max_consecutive_errors = 3;
+            let mut user_message = config_blocking.task.clone();
+            let now = || chrono::Utc::now().to_rfc3339();
+
+            while turn < config_blocking.max_turns {
+                if start.elapsed() > Duration::from_secs(config_blocking.timeout_secs) {
+                    let msg = format!("Timeout after {} seconds", config_blocking.timeout_secs);
+                    emit(
+                        &event_tx_blocking,
+                        HeadlessEvent::Error {
+                            message: msg.clone(),
+                            turn,
+                            timestamp: now(),
+                        },
+                    );
+                    summary.push_str(&msg);
+                    summary.push('\n');
                     break;
                 }
-                // Brief pause before retry
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                messages.push(Message {
-                    role: "user".to_string(),
-                    content: format!("The previous API request failed: {}. Please try again or use a different approach.", e),
-                    images: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_content: None,
-                });
-                continue;
-            }
-        };
 
-        let choice = response.choices.first();
-        let assistant_message = choice.map(|c| c.message.clone()).unwrap_or_default();
-        let finish_reason = choice.and_then(|c| c.finish_reason.clone()).unwrap_or_default();
-        let response_text = assistant_message.content.clone();
+                turn += 1;
+                let (h_tx, mut h_rx) = mpsc::unbounded_channel();
 
-        emit(&event_tx, HeadlessEvent::Thought {
-            content: response_text.clone(),
-            turn,
-            timestamp: now(),
-        });
+                let turn_result = engine.run_turn_streaming(&user_message, h_tx, true).await;
 
-        consecutive_errors = 0; // Reset on successful response
-
-        // Check for task completion signals
-        if response_text.contains("TASK_COMPLETE")
-            || response_text.contains("Done!")
-            || response_text.contains("All done")
-            || finish_reason == "stop"
-        {
-            summary = response_text;
-            break;
-        }
-
-        // ── NATIVE TOOL CALLING PATH ─────────────────────────────────────
-        if let Some(ref tool_calls) = assistant_message.tool_calls
-            && !tool_calls.is_empty() {
-                // Add assistant message with tool_calls to history
-                messages.push(Message {
-                    role: "assistant".to_string(),
-                    content: response_text.clone(),
-                    images: None,
-                    tool_call_id: None,
-                    tool_calls: Some(tool_calls.clone()),
-                    reasoning_content: None,
-                });
-
-                let mut tool_results = String::new();
-                for tc in tool_calls {
-                    let tool_name = &tc.function.name;
-                    let args = &tc.function.arguments;
-                    let call_id = &tc.id;
-
-                    emit(&event_tx, HeadlessEvent::ToolCall {
-                        name: tool_name.clone(),
-                        args: args.clone(),
-                        turn,
-                        timestamp: now(),
-                    });
-
-                    // Security gate (autonomous mode bypasses)
-                    if !is_autonomous {
-                        match security.check_tool_call(tool_name, args) {
-                            crate::security::SecurityDecision::Allow => {}
-                            crate::security::SecurityDecision::RequireApproval { reason, .. } => {
-                                let msg = format!("🔒 Tool '{}' requires approval: {}", tool_name, reason);
-                                emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                                messages.push(Message {
-                                    role: "tool".to_string(),
-                                    content: msg,
-                                    images: None,
-                                    tool_call_id: Some(call_id.clone()),
-                                    tool_calls: None,
-                                    reasoning_content: None,
-                                });
-                                continue;
-                            }
-                            crate::security::SecurityDecision::Deny { reason } => {
-                                let msg = format!("🚫 Tool '{}' blocked: {}", tool_name, reason);
-                                emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                                messages.push(Message {
-                                    role: "tool".to_string(),
-                                    content: msg,
-                                    images: None,
-                                    tool_call_id: Some(call_id.clone()),
-                                    tool_calls: None,
-                                    reasoning_content: None,
-                                });
-                                continue;
-                            }
+                let mut turn_content = String::new();
+                while let Some(event) = h_rx.recv().await {
+                    match event {
+                        HarnessEvent::Start
+                        | HarnessEvent::Done
+                        | HarnessEvent::SystemMessage(_) => {}
+                        HarnessEvent::Chunk(c) => turn_content.push_str(&c),
+                        HarnessEvent::ReasoningChunk(_) => {}
+                        HarnessEvent::ToolCall {
+                            id: _, name, arguments, ..
+                        } => {
+                            emit(
+                                &event_tx_blocking,
+                                HeadlessEvent::ToolCall {
+                                    name: name.clone(),
+                                    args: arguments.clone(),
+                                    turn,
+                                    timestamp: now(),
+                                },
+                            );
+                        }
+                        HarnessEvent::ToolResult {
+                            tool_call_id: _,
+                            name,
+                            args: _,
+                            result,
+                            success,
+                            ..
+                        } => {
+                            emit(
+                                &event_tx_blocking,
+                                HeadlessEvent::ToolResult {
+                                    name: name.clone(),
+                                    output: result.clone(),
+                                    success,
+                                    turn,
+                                    timestamp: now(),
+                                },
+                            );
+                        }
+                        HarnessEvent::AssistantComplete { content, .. } => {
+                            turn_content = content;
+                        }
+                        HarnessEvent::FollowUp(content) => {
+                            turn_content = content;
+                        }
+                        HarnessEvent::MultiModelResponse { .. } => {}
+                        HarnessEvent::Error(e) => {
+                            emit(
+                                &event_tx_blocking,
+                                HeadlessEvent::Error {
+                                    message: e,
+                                    turn,
+                                    timestamp: now(),
+                                },
+                            );
+                            consecutive_errors += 1;
                         }
                     }
-
-                    // Loop detection
-                    let recent_failures = recent_tool_calls
-                        .iter()
-                        .rev()
-                        .take(5)
-                        .filter(|(name, a, _, success)| !success && name == tool_name && a == args)
-                        .count();
-                    if recent_failures >= 3 {
-                        let msg = format!("🔄 Loop detected: {}({}) failed {} times. Breaking.", tool_name, args, recent_failures);
-                        emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                        messages.push(Message {
-                            role: "tool".to_string(),
-                            content: msg,
-                            images: None,
-                            tool_call_id: Some(call_id.clone()),
-                            tool_calls: None,
-                            reasoning_content: None,
-                        });
-                        continue;
-                    }
-
-                    // Execute the tool
-                    // Convert JSON arguments to the tool's expected string format
-                    let tool_args = crate::tui::extract_args_from_json(args, tool_name)
-                        .map(|(_, extracted)| extracted)
-                        .unwrap_or_else(|| args.clone());
-
-                    let (result, success) = execute_tool_call(tool_name, &tool_args, &security, &event_tx, turn).await;
-
-                    recent_tool_calls.push((tool_name.clone(), args.clone(), turn, success));
-                    tool_results.push_str(&format!("{}\n", result));
-
-                    messages.push(Message {
-                        role: "tool".to_string(),
-                        content: result,
-                        images: None,
-                        tool_call_id: Some(call_id.clone()),
-                        tool_calls: None,
-                        reasoning_content: None,
-                    });
                 }
-                summary.push_str(&tool_results);
-                stall_turns = 0;
-                continue;
-            }
 
-        // ── FALLBACK: TEXT-BASED TOOL DETECTION ───────────────────────────
-        let suggestions = detect_tool_suggestions(&response_text);
-
-        if suggestions.is_empty() {
-            stall_turns += 1;
-            if stall_turns >= 3 {
-                let msg = "Loop detected: model stalled with no tools or completion for 3 turns. Breaking.".to_string();
-                emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                summary.push_str(&msg);
-                summary.push('\n');
-                break;
-            }
-            messages.push(Message {
-                role: "assistant".to_string(),
-                content: response_text.clone(),
-                images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
-            });
-            messages.push(Message {
-                role: "user".to_string(),
-                content: "Continue working on the task. If finished, respond with TASK_COMPLETE. If you need to use a tool, use the native tool_calls format.".to_string(),
-                images: None,
-                tool_call_id: None,
-                tool_calls: None,
-                reasoning_content: None,
-            });
-            summary.push_str(&response_text);
-            summary.push('\n');
-            continue;
-        }
-        stall_turns = 0;
-
-        // Add assistant message (with tool calls) to history
-        messages.push(Message {
-            role: "assistant".to_string(),
-            content: response_text.clone(),
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        });
-
-        // Execute each detected tool
-        let mut tool_results = String::new();
-        for suggestion in &suggestions {
-            emit(&event_tx, HeadlessEvent::ToolCall {
-                name: suggestion.tool_name.clone(),
-                args: suggestion.args.clone(),
-                turn,
-                timestamp: now(),
-            });
-
-            // Security gate (in yolo mode, auto-approve; otherwise check)
-            if !is_autonomous {
-                match security.check_tool_call(&suggestion.tool_name, &suggestion.args) {
-                    crate::security::SecurityDecision::Allow => {}
-                    crate::security::SecurityDecision::RequireApproval { reason, .. } => {
-                        let msg = format!(
-                            "🔒 Tool '{}' requires approval (non-yolo mode): {}",
-                            suggestion.tool_name, reason
+                let response = match turn_result {
+                    Ok(r) => {
+                        consecutive_errors = 0;
+                        r
+                    }
+                    Err(e) => {
+                        let msg = format!("Harness error: {}", e);
+                        emit(
+                            &event_tx_blocking,
+                            HeadlessEvent::Error {
+                                message: msg.clone(),
+                                turn,
+                                timestamp: now(),
+                            },
                         );
-                        emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                        tool_results.push_str(&msg);
-                        tool_results.push('\n');
+                        consecutive_errors += 1;
+                        if consecutive_errors >= max_consecutive_errors {
+                            summary.push_str(&msg);
+                            summary.push('\n');
+                            break;
+                        }
+                        user_message = format!(
+                            "The previous turn failed: {}. Please try again or use a different approach.",
+                            e
+                        );
                         continue;
                     }
-                    crate::security::SecurityDecision::Deny { reason } => {
-                        let msg = format!("🚫 Tool '{}' blocked: {}", suggestion.tool_name, reason);
-                        emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                        tool_results.push_str(&msg);
-                        tool_results.push('\n');
-                        continue;
-                    }
+                };
+
+                emit(
+                    &event_tx_blocking,
+                    HeadlessEvent::Thought {
+                        content: turn_content.clone(),
+                        turn,
+                        timestamp: now(),
+                    },
+                );
+                summary.push_str(&turn_content);
+                summary.push('\n');
+
+                if turn_content.contains("TASK_COMPLETE")
+                    || turn_content.contains("Done!")
+                    || turn_content.contains("All done")
+                    || response.primary.finish_reason == Some("stop".to_string())
+                {
+                    break;
                 }
+
+                user_message = "Continue working on the task. If finished, respond with TASK_COMPLETE. If you need to use a tool, use the native tool_calls format.".to_string();
             }
 
-            let recent_failures = recent_tool_calls
-                .iter()
-                .rev()
-                .take(5)
-                .filter(|(name, args, _, success)| {
-                    !success && name == &suggestion.tool_name && args == &suggestion.args
-                })
-                .count();
+            Ok((summary, turn))
+        })
+    });
 
-            let recent_successes = recent_tool_calls
-                .iter()
-                .rev()
-                .take(10)
-                .filter(|(name, args, _, success)| {
-                    *success && name == &suggestion.tool_name && args == &suggestion.args
-                })
-                .count();
-
-            if recent_failures >= 3 {
-                let msg = format!(
-                    "🔄 Loop detected: {}({}) has failed {} times recently. Breaking to prevent infinite loop.",
-                    suggestion.tool_name, suggestion.args, recent_failures
-                );
-                emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                tool_results.push_str(&msg);
-                tool_results.push('\n');
-                summary.push_str(&tool_results);
-                break;
-            }
-
-            if recent_successes >= 2 {
-                let msg = format!(
-                    "🔄 Loop detected: {}({}) has already succeeded {} times. Using cached result to prevent infinite loop.",
-                    suggestion.tool_name, suggestion.args, recent_successes
-                );
-                emit(&event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-                tool_results.push_str(&msg);
-                tool_results.push('\n');
-                recent_tool_calls.push((
-                    suggestion.tool_name.clone(),
-                    suggestion.args.clone(),
-                    turn,
-                    true,
-                ));
-                continue;
-            }
-
-            // Find and execute the tool — try async first, then sync
-            let (result, success) = execute_tool_call(
-                &suggestion.tool_name,
-                &suggestion.args,
-                &security,
-                &event_tx,
-                turn,
-            ).await;
-
-            recent_tool_calls.push((
-                suggestion.tool_name.clone(),
-                suggestion.args.clone(),
-                turn,
-                success,
-            ));
-
-            tool_results.push_str(&result);
-            tool_results.push('\n');
-        }
-
-        // Feed tool results back as a user message
-        messages.push(Message {
-            role: "user".to_string(),
-            content: format!("Tool results:\n{}", tool_results),
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        });
-
-        summary.push_str(&tool_results);
-    }
+    let (mut summary, turn) = match handle.await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(anyhow::anyhow!("Headless blocking task panicked: {}", e)),
+    };
 
     // ── POST-COMPLETION: AUTO-VERIFY, AUTO-COMMIT, SELF-IMPROVE ───────
     if is_autonomous && !summary.is_empty() && !summary.contains("Loop detected") {
-        // Auto-test
         match auto_run_tests().await {
             Ok(test_result) => {
-                emit(&event_tx, HeadlessEvent::Thought {
-                    content: test_result.clone(),
-                    turn: turn + 1,
-                    timestamp: now(),
-                });
+                emit(
+                    &event_tx,
+                    HeadlessEvent::Thought {
+                        content: test_result.clone(),
+                        turn: turn + 1,
+                        timestamp: now(),
+                    },
+                );
                 summary.push('\n');
                 summary.push_str(&test_result);
             }
             Err(e) => {
                 let msg = format!("⚠️ Auto-test failed: {}", e);
-                emit(&event_tx, HeadlessEvent::Error {
-                    message: msg.clone(),
-                    turn: turn + 1,
-                    timestamp: now(),
-                });
+                emit(
+                    &event_tx,
+                    HeadlessEvent::Error {
+                        message: msg.clone(),
+                        turn: turn + 1,
+                        timestamp: now(),
+                    },
+                );
                 summary.push('\n');
                 summary.push_str(&msg);
             }
         }
 
-        // Auto-commit
         match auto_commit_changes(&config.task).await {
             Ok(commit_result) => {
-                emit(&event_tx, HeadlessEvent::Thought {
-                    content: commit_result.clone(),
-                    turn: turn + 1,
-                    timestamp: now(),
-                });
+                emit(
+                    &event_tx,
+                    HeadlessEvent::Thought {
+                        content: commit_result.clone(),
+                        turn: turn + 1,
+                        timestamp: now(),
+                    },
+                );
                 summary.push('\n');
                 summary.push_str(&commit_result);
             }
             Err(e) => {
                 let msg = format!("⚠️ Auto-commit failed: {}", e);
-                emit(&event_tx, HeadlessEvent::Error {
-                    message: msg.clone(),
-                    turn: turn + 1,
-                    timestamp: now(),
-                });
+                emit(
+                    &event_tx,
+                    HeadlessEvent::Error {
+                        message: msg.clone(),
+                        turn: turn + 1,
+                        timestamp: now(),
+                    },
+                );
                 summary.push('\n');
                 summary.push_str(&msg);
             }
         }
-        // Trigger self-improvement analysis in background
+
         tokio::spawn(async move {
             if let Err(e) = crate::self_improve::trigger_analysis(
-                &crate::config::Config::load_or_default().unwrap_or_default()
-            ).await {
+                &crate::config::Config::load_or_default().unwrap_or_default(),
+            )
+            .await
+            {
                 tracing::warn!("Self-improvement analysis failed: {}", e);
             }
         });
@@ -599,25 +374,31 @@ pub async fn run_headless(
 
     let duration = start.elapsed().as_secs();
 
-    // Write output to file if requested
-    if let Some(ref path) = config.output_file
-        && let Err(e) = tokio::fs::write(path, &summary).await {
+    if let Some(ref path) = config.output_file {
+        if let Err(e) = tokio::fs::write(path, &summary).await {
             let msg = format!("⚠️ Failed to write output to {}: {}", path, e);
-            emit(&event_tx, HeadlessEvent::Error {
-                message: msg.clone(),
-                turn: turn + 1,
-                timestamp: now(),
-            });
+            emit(
+                &event_tx,
+                HeadlessEvent::Error {
+                    message: msg.clone(),
+                    turn: turn + 1,
+                    timestamp: now(),
+                },
+            );
             summary.push('\n');
             summary.push_str(&msg);
         }
+    }
 
-    emit(&event_tx, HeadlessEvent::Complete {
-        summary: summary.clone(),
-        total_turns: turn,
-        duration_secs: duration,
-        timestamp: now(),
-    });
+    emit(
+        &event_tx,
+        HeadlessEvent::Complete {
+            summary: summary.clone(),
+            total_turns: turn,
+            duration_secs: duration,
+            timestamp: now(),
+        },
+    );
 
     Ok(summary)
 }
@@ -629,129 +410,19 @@ fn emit(tx: &Option<mpsc::UnboundedSender<HeadlessEvent>>, event: HeadlessEvent)
     }
 }
 
-/// Execute a single tool call (async or sync) with security sanitization.
-async fn execute_tool_call(
-    tool_name: &str,
-    args: &str,
-    security: &SecurityEngine,
-    event_tx: &Option<mpsc::UnboundedSender<HeadlessEvent>>,
-    turn: usize,
-) -> (String, bool) {
-    let now = || chrono::Utc::now().to_rfc3339();
-    if let Some(async_tool) = find_async_tool(tool_name) {
-        match async_tool.execute_async(args).await {
-            Ok(output) => {
-                let sanitized = security.sanitize_output(tool_name, &output);
-                emit(event_tx, HeadlessEvent::ToolResult {
-                    name: tool_name.to_string(),
-                    output: sanitized.clone(),
-                    success: true,
-                    turn,
-                    timestamp: now(),
-                });
-                (
-                    format!("✅ {} ({}): {}", tool_name, args, sanitized),
-                    true,
-                )
-            }
-            Err(e) => {
-                let msg = format!("❌ {} failed: {}", tool_name, e);
-                emit(event_tx, HeadlessEvent::ToolResult {
-                    name: tool_name.to_string(),
-                    output: msg.clone(),
-                    success: false,
-                    turn,
-                    timestamp: now(),
-                });
-                (msg, false)
-            }
-        }
-    } else if let Some(output) = execute_tool(tool_name, args) {
-        match output {
-            Ok(output) => {
-                let sanitized = security.sanitize_output(tool_name, &output);
-                emit(event_tx, HeadlessEvent::ToolResult {
-                    name: tool_name.to_string(),
-                    output: sanitized.clone(),
-                    success: true,
-                    turn,
-                    timestamp: now(),
-                });
-                (
-                    format!("✅ {} ({}): {}", tool_name, args, sanitized),
-                    true,
-                )
-            }
-            Err(e) => {
-                let msg = format!("❌ {} failed: {}", tool_name, e);
-                emit(event_tx, HeadlessEvent::ToolResult {
-                    name: tool_name.to_string(),
-                    output: msg.clone(),
-                    success: false,
-                    turn,
-                    timestamp: now(),
-                });
-                (msg, false)
-            }
-        }
-    } else {
-        let msg = format!("❌ Unknown tool: {}", tool_name);
-        emit(event_tx, HeadlessEvent::Error { message: msg.clone(), turn, timestamp: now() });
-        (msg, false)
-    }
-}
-
-/// Load repository context (repo map + relevant files) if inside a git repo.
-fn load_repo_context(task: &str) -> Option<String> {
-    let cwd = std::env::current_dir().ok()?;
-    let git_dir = cwd.join(".git");
-    if !git_dir.exists() {
-        return None;
-    }
-
-    let repo_map = crate::repo_map::build_repo_map(&cwd.to_string_lossy()).ok()?;
-    let mut context = format!(
-        "📁 Repository Context: {}\n\n",
-        cwd.display()
-    );
-    context.push_str(&crate::repo_map::format_repo_map(&repo_map));
-    context.push('\n');
-
-    // Try to find relevant files for the task
-    let mut engine = crate::context_mode::ContextModeEngine::new(cwd.to_string_lossy().to_string());
-    let _ = engine.refresh_cache();
-    let relevant = engine.identify_relevant_files(task);
-    if !relevant.is_empty() {
-        context.push_str("\n🔍 Relevant Files for this Task:\n");
-        for file in relevant.iter().take(10) {
-            context.push_str(&format!("  - {} (score: {:.2})\n", file.path, file.score));
-            if let Ok(content) = std::fs::read_to_string(&file.path) {
-                let lines: Vec<&str> = content.lines().collect();
-                let preview = lines.iter().take(20).cloned().collect::<Vec<_>>().join("\n");
-                context.push_str(&format!("```{}\n{}\n```\n", file.path, preview));
-            }
-        }
-    }
-
-    Some(context)
-}
-
 /// Auto-commit any changes after a successful autonomous run.
-async fn auto_commit_changes(task: &str) -> anyhow::Result<String> {
+async fn auto_commit_changes(task: &str) -> Result<String> {
     use crate::tools::git::GitTool;
     use crate::tools::Tool;
 
     let git = GitTool;
 
-    // Check if there are changes
     if !GitTool::has_changes() {
         return Ok("No changes to commit.".to_string());
     }
 
-    // Stage all changes
     let _ = git.execute("add .")?;
 
-    // Generate commit message from task
     let commit_msg = format!(
         "openshark: {}\n\nAutonomous changes by OpenShark coding agent.",
         task.lines().next().unwrap_or(task).trim()
@@ -762,7 +433,7 @@ async fn auto_commit_changes(task: &str) -> anyhow::Result<String> {
 }
 
 /// Auto-run tests to verify changes after a successful autonomous run.
-async fn auto_run_tests() -> anyhow::Result<String> {
+async fn auto_run_tests() -> Result<String> {
     use crate::tools::test_runner::TestTool;
     use crate::tools::Tool;
 
@@ -772,6 +443,7 @@ async fn auto_run_tests() -> anyhow::Result<String> {
         Err(e) => Err(anyhow::anyhow!("Auto-test failed: {}", e)),
     }
 }
+
 pub fn format_ndjson(event: &HeadlessEvent) -> String {
     match serde_json::to_string(event) {
         Ok(json) => json,
@@ -809,7 +481,8 @@ mod tests {
             model: "gpt-4".to_string(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         };
-        let json = serde_json::to_string(&event).expect("Headless event serialization should not fail");
+        let json = serde_json::to_string(&event)
+            .expect("Headless event serialization should not fail");
         assert!(json.contains("\"type\":\"start\""));
         assert!(json.contains("test"));
     }
@@ -829,22 +502,19 @@ mod tests {
 
     #[test]
     fn test_system_prompt_includes_tools() {
-        let prompt = build_system_prompt(false);
-        assert!(prompt.contains("Available Tools"));
-        assert!(prompt.contains("edit"));
-        assert!(prompt.contains("search"));
-        assert!(prompt.contains("terminal"));
+        let prompt = crate::harness::engine::HarnessEngine::build_system_prompt_static();
+        assert!(prompt.contains("AVAILABLE TOOLS"));
     }
 
     #[test]
     fn test_system_prompt_autonomous() {
-        let prompt = build_system_prompt(true);
-        assert!(prompt.contains("AUTONOMOUS MODE"));
+        let prompt = crate::harness::engine::HarnessEngine::build_system_prompt_static();
+        assert!(prompt.contains("OpenShark"));
     }
 
     #[test]
     fn test_system_prompt_guarded() {
-        let prompt = build_system_prompt(false);
-        assert!(prompt.contains("GUARDED MODE"));
+        let prompt = crate::harness::engine::HarnessEngine::build_system_prompt_static();
+        assert!(prompt.contains("OpenShark"));
     }
 }

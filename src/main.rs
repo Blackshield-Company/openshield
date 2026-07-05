@@ -1368,7 +1368,7 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
-            let mut security = match crate::security::SecurityEngine::new(
+            let security = match crate::security::SecurityEngine::new(
                 crate::security::SecurityConfig::default()
             ) {
                 Ok(s) => s,
