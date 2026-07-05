@@ -265,7 +265,7 @@ mod tests {
         let dir = temp_git_repo();
         let tool = GitTool;
         let result = tool.execute(&format!("branch {}", dir)).unwrap();
-        assert!(result.contains("master") || result.contains("main") || result.is_empty());
+        assert!(result.lines().any(|l| l.starts_with("* ")) || result.is_empty());
         cleanup(&dir);
     }
 

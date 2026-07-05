@@ -42,6 +42,7 @@ pub(crate) enum StreamEvent {
     #[allow(dead_code)]
     SetPendingSuggestion(ToolSuggestion),
     /// Multi-file edit batch pending approval.
+    #[allow(dead_code)]
     SetPendingBatch(crate::tools::ToolBatch),
     /// An error occurred.
     Error(String),
@@ -53,6 +54,7 @@ pub(crate) enum StreamEvent {
     ToolResultsBatch { results: Vec<ToolResultEntry> },
     /// Assistant message with tool_calls that must be added to model_messages history.
     /// Sent when the model uses native function calling so the tool_call_id chain is preserved.
+    #[allow(dead_code)]
     AssistantToolCall {
         content: String,
         reasoning: Option<String>,
@@ -361,6 +363,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     let is_multi_model = app.multi_model_mode;
                     let config = app.config.clone();
                     let security_engine = app.security_engine.clone();
+                    let session_id = app.session_id.clone();
                     tokio::spawn(async move {
                         let _ = stream_model_response_task(
                             tx,
@@ -371,6 +374,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                             is_multi_model,
                             config,
                             security_engine,
+                            session_id,
                         )
                         .await;
                     });
