@@ -940,22 +940,6 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
                 None
             }
         }
-        "todo" | "cronjob" | "skills" => {
-            if let Some(action) = get_str("action") {
-                let mut result = action;
-                if let Some(task) = get_str("task") {
-                    result.push_str(&format!(" {}", task));
-                }
-                if let Some(id) = get_str("id") {
-                    result.push_str(&format!(" {}", id));
-                }
-                Some(result)
-            } else if let Some(args_str) = get_str("args") {
-                Some(args_str)
-            } else {
-                get_str("task").map(|task| format!("--add {}", task))
-            }
-        }
         // Communication capabilities
         "messaging" => {
             if let (Some(platform), Some(channel), Some(message)) = (

@@ -13,7 +13,7 @@ use crate::providers::{ChatRequest, Message, Provider, StreamChunk, StreamMetric
 use crate::session::{ExportBranch, ExportMessage, SessionExport, export_to_default, list_exports};
 use crate::skills::SkillRegistry;
 use crate::tools::{AsyncToolExecutor, Tool, ToolSuggestion, get_tools};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -1356,6 +1356,7 @@ impl App {
         let is_multi_model = self.multi_model_mode;
         let config = self.config.clone();
         let security_engine = self.security_engine.clone();
+        let session_id = self.session_id.clone();
         tokio::spawn(async move {
             let _ = stream_model_response_task(
                 tx,
@@ -1366,6 +1367,7 @@ impl App {
                 is_multi_model,
                 config,
                 security_engine,
+                session_id,
             )
             .await;
         });
@@ -3541,6 +3543,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     let is_multi_model = app.multi_model_mode;
                     let config = app.config.clone();
                     let security_engine = app.security_engine.clone();
+                    let session_id = app.session_id.clone();
                     tokio::spawn(async move {
                         let _ = stream_model_response_task(
                             tx,
@@ -3551,6 +3554,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                             is_multi_model,
                             config,
                             security_engine,
+                            session_id,
                         )
                         .await;
                     });
@@ -3791,6 +3795,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     let is_multi_model = app.multi_model_mode;
     let config = app.config.clone();
     let security_engine = app.security_engine.clone();
+    let session_id = app.session_id.clone();
 
     tokio::spawn(async move {
         let _ = stream_model_response_task(
@@ -3802,6 +3807,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             is_multi_model,
             config,
             security_engine,
+            session_id,
         )
         .await;
     });
@@ -4300,7 +4306,7 @@ async fn execute_tool_chain(
     Ok(())
 }
 
-/// Background task: call the model API and send events back to the TUI loop.
+/// Background task: run a harness-engine streaming turn and send events back to the TUI loop.
 #[allow(clippy::too_many_arguments)]
 async fn stream_model_response_task(
     tx: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
@@ -4311,933 +4317,153 @@ async fn stream_model_response_task(
     is_multi_model: bool,
     config: Config,
     security_engine: crate::security::SecurityEngine,
+    session_id: String,
 ) -> Result<()> {
     let _ = tx.send(StreamEvent::Start);
+    let _provider = provider;
+    let _model_config = model_config;
+    let _is_multi_model = is_multi_model;
 
-    let mut request = ChatRequest::new(model.clone(), model_messages.clone(), true);
-    if let Some(ref model_config) = model_config {
-        let sensible_max = (model_config.context_length as u32 / 4).clamp(256, 4096);
-        request.max_tokens = Some(sensible_max);
-    }
-    // Native tool calling is now ENABLED. The tool_call_id handling in the follow-up
-    // path has been fixed. Both native function calling and legacy TOOL: syntax are supported.
-    // Models that support OpenAI function calling format will use native tool calls.
-    // Models that don't support it will fall back to TOOL: syntax via the system prompt.
-    request.tools = Some(crate::tools::get_openai_tool_definitions());
-
-    let _secondary_providers: Vec<(String, Provider)> = if is_multi_model {
-        config
-            .providers
-            .iter()
-            .filter(|(name, _)| **name != "kimi")
-            .map(|(name, provider_cfg)| {
-                (
-                    name.clone(),
-                    Provider::new(
-                        name.clone(),
-                        provider_cfg.base_url.clone(),
-                        provider_cfg.api_key.clone(),
-                        provider_cfg.kind.clone(),
-                        provider_cfg.headers.clone(),
-                    ),
-                )
-            })
-            .collect()
+    // Extract the last user message as the turn input and pass the rest as history.
+    let mut history = model_messages.clone();
+    let user_message = if let Some(pos) = history.iter().rposition(|m| m.role == "user") {
+        let msg = history.remove(pos);
+        msg.content
     } else {
-        Vec::new()
+        "continue".to_string()
     };
 
-    match provider.chat_stream_realtime(request).await {
-        Ok((mut chunk_rx, mut metrics)) => {
-            let mut full_content = String::new();
-            let mut accumulated_reasoning = String::new();
-            let stream_start = std::time::Instant::now();
-            let mut first_token_time: Option<std::time::Instant> = None;
-            let mut token_count: u32 = 0;
-            
+    let model_for_blocking = model.clone();
+    let config_for_blocking = config.clone();
+    let security_engine_for_blocking = security_engine.clone();
+    let session_id_for_blocking = session_id.clone();
+    let tx_for_blocking = tx.clone();
+    let history_for_blocking = history;
 
-            // Read chunks from the provider in real-time and forward to TUI
-            let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-            while let Some(chunk) = {
-                let remaining = stream_deadline.saturating_duration_since(std::time::Instant::now());
-                if remaining.is_zero() {
-                    let _ = tx.send(StreamEvent::Error("[⏱ Stream timed out after 120s of inactivity]".to_string()));
-                    None
-                } else {
-                    match tokio::time::timeout(remaining, chunk_rx.recv()).await {
-                        Ok(Some(chunk)) => Some(chunk),
-                        Ok(None) => None,
-                        Err(_) => {
-                            let _ = tx.send(StreamEvent::Error("[⏱ Stream timed out after 120s of inactivity]".to_string()));
-                            None
-                        }
-                    }
-                }
-            } {
-                match chunk {
-                    StreamChunk::Reasoning(r) => {
-                        accumulated_reasoning.push_str(&r);
-                        let _ = tx.send(StreamEvent::ReasoningChunk(r));
-                    }
-                    StreamChunk::Content(c) => {
-                        if first_token_time.is_none() {
-                            first_token_time = Some(std::time::Instant::now());
-                        }
-                        full_content.push_str(&c);
-                        token_count += 1;
-                        let _ = tx.send(StreamEvent::Chunk(c));
-                    }
-                    StreamChunk::ToolCall {
-                        id,
-                        name,
-                        arguments: args,
-                    } => {
-                        // Native tool call from the model — execute it directly
-                        let _ = tx.send(StreamEvent::SystemMessage(format!(
-                            "🔧 Tool call: {} {}",
-                            name, args
-                        )));
+    let handle = tokio::task::spawn_blocking(move || -> Result<()> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to build local runtime for harness streaming")?;
+        rt.block_on(async {
+            let harness_config = crate::harness::HarnessConfig {
+                primary_model: model_for_blocking,
+                max_tool_loops: 10,
+                require_tool_approval: false,
+                multi_model_enabled: false,
+                memory_context_limit: 5,
+                skills_enabled: true,
+                secondary_models: Vec::new(),
+            };
+            let memory = crate::memory::MemoryStore::new(&config_for_blocking.memory_db_path)?;
+            let mut engine = crate::harness::HarnessEngine::new_with_history_and_security(
+                harness_config,
+                config_for_blocking,
+                memory,
+                session_id_for_blocking,
+                history_for_blocking,
+                security_engine_for_blocking,
+            )?;
 
-                        let tool_args = extract_args_from_json(&args, &name)
-                            .map(|(_, extracted)| extracted)
-                            .unwrap_or_else(|| args.clone());
+            let (h_tx, mut h_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::harness::HarnessEvent>();
+            let tx2 = tx_for_blocking.clone();
 
-                        match security_engine.check_tool_call(&name, &tool_args) {
-                            crate::security::SecurityDecision::Allow => {
-                                let executor = AsyncToolExecutor::new();
-                                match executor
-                                    .execute_with_timeout_simple(
-                                        name.clone(),
-                                        tool_args.clone(),
-                                        30000,
-                                    )
-                                    .await
-                                {
-                                    Ok(result) => {
-                                        let sanitized =
-                                            security_engine.sanitize_output(&name, &result);
-                                        let _ = tx.send(StreamEvent::ToolResult {
-                                            name: name.clone(),
-                                            args: tool_args.clone(),
-                                            result: sanitized.clone(),
-                                            success: true,
-                                        });
-
-                                        // Build follow-up messages with tool result
-                                        let mut follow_messages = model_messages.clone();
-                                        // Ensure we have a valid tool_call_id — Kimi streams may omit it
-                                        let call_id = if id.is_empty() {
-                                            Uuid::new_v4().to_string()
-                                        } else {
-                                            id.clone()
-                                        };
-                                        // Send the assistant tool call back to the main TUI loop
-                                        // so model_messages is updated with the tool_calls array.
-                                        let _ = tx.send(StreamEvent::AssistantToolCall {
-                                            content: full_content.clone(),
-                                            reasoning: Some(accumulated_reasoning.clone()),
-                                            tool_calls: vec![
-                                                crate::providers::ToolCallRequest {
-                                                    id: call_id.clone(),
-                                                    r#type: "function".to_string(),
-                                                    function: crate::providers::ToolCallFunction {
-                                                        name: name.clone(),
-                                                        arguments: args.clone(),
-                                                    },
-                                                },
-                                            ],
-                                        });
-                                        // Also push the assistant message into follow_messages so the
-                                        // follow-up request has the complete tool_call context.
-                                        follow_messages.push(Message {
-                                            role: "assistant".to_string(),
-                                            content: full_content.clone(),
-                                            images: None,
-                                            tool_call_id: None,
-                                            tool_calls: Some(vec![
-                                                crate::providers::ToolCallRequest {
-                                                    id: call_id.clone(),
-                                                    r#type: "function".to_string(),
-                                                    function: crate::providers::ToolCallFunction {
-                                                        name: name.clone(),
-                                                        arguments: args.clone(),
-                                                    },
-                                                },
-                                            ]),
-                                            reasoning_content: Some(accumulated_reasoning.clone()),
-                                        });
-                                        // Tool result message MUST include tool_call_id matching the assistant's tool_calls
-                                        follow_messages.push(Message {
-                                            role: "tool".to_string(),
-                                            content: sanitized,
-                                            images: None,
-                                            tool_call_id: Some(call_id.clone()),
-                                            tool_calls: None,
-                                            reasoning_content: None,
-                                        });
-
-                                        // Truncate to prevent RAM explosion before follow-up
-                                        if follow_messages.len() > 20 {
-                                            let system_msg = follow_messages.first().cloned();
-                                            let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
-                                            follow_messages.clear();
-                                            if let Some(sys) = system_msg {
-                                                follow_messages.push(sys);
-                                            }
-                                            for msg in tail.into_iter().rev() {
-                                                follow_messages.push(msg);
-                                            }
-                                            follow_messages.push(Message {
-                                                role: "system".to_string(),
-                                                content: "[Context truncated due to length. Only recent messages shown.]".to_string(),
-                                                images: None,
-                                                tool_call_id: None,
-                                                tool_calls: None,
-                                                reasoning_content: None,
-                                            });
-                                        }
-
-                                        let mut follow_up = ChatRequest::new(
-                                            model.clone(),
-                                            follow_messages.clone(),
-                                            true,
-                                        );
-                                        follow_up.tools =
-                                            Some(crate::tools::get_openai_tool_definitions());
-                                        follow_up.max_tokens = Some(512);
-
-                                        let _ = tx.send(StreamEvent::Start);
-                                        match provider.chat_stream_realtime(follow_up).await {
-                                            Ok((mut follow_rx, _)) => {
-                                                let mut follow_turn = 0;
-                                                const MAX_FOLLOW_TURNS: usize = 20;
-
-                                                while follow_turn < MAX_FOLLOW_TURNS {
-                                                    follow_turn += 1;
-                                                    let mut follow_content = String::new();
-                                                    let mut follow_reasoning = String::new();
-                                                    let mut follow_tool_calls: Vec<StreamChunk> = Vec::new();
-                                                    let mut follow_finish: Option<String> = None;
-
-                                                    // Safety net: fixed deadline so empty keepalive chunks don't stall us
-                                                    let follow_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-                                                    while let Some(fchunk) = {
-                                                        let remaining = follow_deadline.saturating_duration_since(std::time::Instant::now());
-                                                        if remaining.is_zero() {
-                                                            let _ = tx.send(StreamEvent::Error("[⏱ Follow-up stream timed out after 120s]".to_string()));
-                                                            None
-                                                        } else {
-                                                            match tokio::time::timeout(remaining, follow_rx.recv()).await {
-                                                                Ok(Some(chunk)) => Some(chunk),
-                                                                Ok(None) => None,
-                                                                Err(_) => {
-                                                                    let _ = tx.send(StreamEvent::Error("[⏱ Follow-up stream timed out after 120s]".to_string()));
-                                                                    None
-                                                                }
-                                                            }
-                                                        }
-                                                    } {
-                                                        match fchunk {
-                                                            StreamChunk::Content(c) => {
-                                                                follow_content.push_str(&c);
-                                                                let _ = tx.send(StreamEvent::Chunk(c));
-                                                            }
-                                                            StreamChunk::Reasoning(r) => {
-                                                                follow_reasoning.push_str(&r);
-                                                                let _ = tx.send(StreamEvent::ReasoningChunk(r));
-                                                            }
-                                                            StreamChunk::ToolCall { .. } => {
-                                                                follow_tool_calls.push(fchunk);
-                                                            }
-                                                            StreamChunk::Finish(fr) => {
-                                                                follow_finish = Some(fr);
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-
-                                                    if follow_finish == Some("tool_calls".to_string()) && !follow_tool_calls.is_empty() {
-                                                        // Handle additional tool calls in the follow-up
-                                                        for fchunk in follow_tool_calls {
-                                                            if let StreamChunk::ToolCall { id, name, arguments: args } = fchunk {
-                                                                let tool_args = extract_args_from_json(&args, &name)
-                                                                    .map(|(_, extracted)| extracted)
-                                                                    .unwrap_or_else(|| args.clone());
-
-                                                                match security_engine.check_tool_call(&name, &tool_args) {
-                                                                    crate::security::SecurityDecision::Allow => {
-                                                                        let executor = AsyncToolExecutor::new();
-                                                                        match executor.execute_with_timeout_simple(name.clone(), tool_args.clone(), 30000).await {
-                                                                            Ok(result) => {
-                                                                                let sanitized = security_engine.sanitize_output(&name, &result);
-                                                                                let _ = tx.send(StreamEvent::ToolResult {
-                                                                                    name: name.clone(),
-                                                                                    args: tool_args.clone(),
-                                                                                    result: sanitized.clone(),
-                                                                                    success: true,
-                                                                                });
-
-                                                                                let call_id = if id.is_empty() {
-                                                                                    Uuid::new_v4().to_string()
-                                                                                } else {
-                                                                                    id.clone()
-                                                                                };
-                                                                                follow_messages.push(Message {
-                                                                                    role: "assistant".to_string(),
-                                                                                    content: follow_content.clone(),
-                                                                                    images: None,
-                                                                                    tool_call_id: None,
-                                                                                    tool_calls: Some(vec![
-                                                                                        crate::providers::ToolCallRequest {
-                                                                                            id: call_id.clone(),
-                                                                                            r#type: "function".to_string(),
-                                                                                            function: crate::providers::ToolCallFunction {
-                                                                                                name: name.clone(),
-                                                                                                arguments: args.clone(),
-                                                                                            },
-                                                                                        },
-                                                                                    ]),
-                                                                                    reasoning_content: Some(follow_reasoning.clone()),
-                                                                                });
-                                                                                follow_messages.push(Message {
-                                                                                    role: "tool".to_string(),
-                                                                                    content: sanitized,
-                                                                                    images: None,
-                                                                                    tool_call_id: Some(call_id),
-                                                                                    tool_calls: None,
-                                                                                    reasoning_content: None,
-                                                                                });
-                                                                                // Prevent RAM explosion: truncate after 20 messages
-                                                                                if follow_messages.len() > 20 {
-                                                                                    let system_msg = follow_messages.first().cloned();
-                                                                                    let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
-                                                                                    follow_messages.clear();
-                                                                                    if let Some(sys) = system_msg {
-                                                                                        follow_messages.push(sys);
-                                                                                    }
-                                                                                    for msg in tail.into_iter().rev() {
-                                                                                        follow_messages.push(msg);
-                                                                                    }
-                                                                                    follow_messages.push(Message {
-                                                                                        role: "system".to_string(),
-                                                                                        content: "[Context truncated due to length. Only recent messages shown.]".to_string(),
-                                                                                        images: None,
-                                                                                        tool_call_id: None,
-                                                                                        tool_calls: None,
-                                                                                        reasoning_content: None,
-                                                                                    });
-                                                                                }
-                                                                            }
-                                                                            Err(e) => {
-                                                                                let _ = tx.send(StreamEvent::ToolResult {
-                                                                                    name: name.clone(),
-                                                                                    args: tool_args.clone(),
-                                                                                    result: e.to_string(),
-                                                                                    success: false,
-                                                                                });
-                                                                                follow_messages.push(Message {
-                                                                                    role: "tool".to_string(),
-                                                                                    content: format!("Error: {}", e),
-                                                                                    images: None,
-                                                                                    tool_call_id: Some(if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() }),
-                                                                                    tool_calls: None,
-                                                                                    reasoning_content: None,
-                                                                                });
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    crate::security::SecurityDecision::Deny { reason } => {
-                                                                        let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                                                            "🚫 Tool '{}' blocked: {}",
-                                                                            name, reason
-                                                                        )));
-                                                                        continue;
-                                                                    }
-                                                                    crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
-                                                                        let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                                                            "⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)",
-                                                                            name
-                                                                        )));
-                                                                        continue;
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-
-                                                        // Send another follow-up request to handle more tool calls
-                                                        let mut next_follow_up = ChatRequest::new(model.clone(), follow_messages.clone(), true);
-                                                        next_follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
-                                                        let _ = tx.send(StreamEvent::Start);
-                                                        match provider.chat_stream_realtime(next_follow_up).await {
-                                                            Ok((new_rx, _)) => {
-                                                                follow_rx = new_rx;
-                                                                continue;
-                                                            }
-                                                            Err(e) => {
-                                                                let _ = tx.send(StreamEvent::Error(format!("Follow-up failed: {}", e)));
-                                                                let _ = tx.send(StreamEvent::Done);
-                                                                break;
-                                                            }
-                                                        }
-                                                    } else {
-                                                        // No more tool calls — send final response
-                                                        let _ = tx.send(StreamEvent::FollowUp(follow_content));
-                                                        let _ = tx.send(StreamEvent::Done);
-                                                        break;
-                                                    }
-                                                }
-
-                                                if follow_turn >= MAX_FOLLOW_TURNS {
-                                                    let _ = tx.send(StreamEvent::FollowUp(
-                                                        "Max follow-up turns reached. Task may be incomplete.".to_string(),
-                                                    ));
-                                                    let _ = tx.send(StreamEvent::Done);
-                                                }
-                                                return Ok(());
-                                            }
-                                            Err(e) => {
-                                                let _ = tx.send(StreamEvent::Error(format!(
-                                                    "Follow-up failed: {}",
-                                                    e
-                                                )));
-                                                let _ = tx.send(StreamEvent::Done);
-                                                return Ok(());
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(StreamEvent::ToolResult {
-                                            name,
-                                            args: tool_args,
-                                            result: e.to_string(),
-                                            success: false,
-                                        });
-                                        let _ = tx.send(StreamEvent::Done);
-                                        return Ok(());
-                                    }
+            let local = tokio::task::LocalSet::new();
+            let result = local
+                .run_until(async {
+                    let forwarder = tokio::task::spawn_local(async move {
+                        let mut final_content = String::new();
+                        let mut final_metrics: Option<crate::providers::StreamMetrics> = None;
+                        while let Some(event) = h_rx.recv().await {
+                            match event {
+                                crate::harness::HarnessEvent::Start => {}
+                                crate::harness::HarnessEvent::Chunk(c) => {
+                                    final_content.push_str(&c);
+                                    let _ = tx2.send(StreamEvent::Chunk(c));
                                 }
-                            }
-                            crate::security::SecurityDecision::Deny { reason } => {
-                                let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                    "🚫 Tool '{}' blocked: {}",
-                                    name, reason
-                                )));
-                                let _ = tx.send(StreamEvent::Done);
-                                return Ok(());
-                            }
-                            crate::security::SecurityDecision::RequireApproval {
-                                reason: _,
-                                risk_level: _,
-                            } => {
-                                let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                    "⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)",
-                                    name
-                                )));
-                                let _ = tx.send(StreamEvent::Done);
-                                return Ok(());
+                                crate::harness::HarnessEvent::ReasoningChunk(c) => {
+                                    let _ = tx2.send(StreamEvent::ReasoningChunk(c));
+                                }
+                                crate::harness::HarnessEvent::ToolCall { .. } => {}
+                                crate::harness::HarnessEvent::ToolResult {
+                                    name,
+                                    args,
+                                    result,
+                                    success,
+                                    ..
+                                } => {
+                                    let _ = tx2.send(StreamEvent::ToolResult {
+                                        name,
+                                        args,
+                                        result,
+                                        success,
+                                    });
+                                }
+                                crate::harness::HarnessEvent::AssistantComplete {
+                                    content,
+                                    metrics,
+                                    ..
+                                } => {
+                                    final_content = content;
+                                    final_metrics = Some(metrics);
+                                }
+                                crate::harness::HarnessEvent::FollowUp(content) => {
+                                    final_content = content;
+                                }
+                                crate::harness::HarnessEvent::MultiModelResponse {
+                                    name,
+                                    content,
+                                    metrics,
+                                } => {
+                                    let _ = tx2.send(StreamEvent::MultiModelResponse {
+                                        name,
+                                        content,
+                                        metrics,
+                                    });
+                                }
+                                crate::harness::HarnessEvent::Error(e) => {
+                                    let _ = tx2.send(StreamEvent::Error(e));
+                                }
+                                crate::harness::HarnessEvent::SystemMessage(s) => {
+                                    let _ = tx2.send(StreamEvent::SystemMessage(s));
+                                }
+                                crate::harness::HarnessEvent::Done => break,
                             }
                         }
-                    }
-                    StreamChunk::Finish(fr) => {
-                        if fr == "stop" || fr == "length" || fr == "content_filter" {
-                            // Normal completion — fall through to existing tool detection
-                            break;
+                        if let Some(metrics) = final_metrics {
+                            let _ = tx2.send(StreamEvent::ResponseComplete {
+                                content: final_content,
+                                metrics,
+                            });
                         }
-                    }
-                }
-            }
+                        let _ = tx2.send(StreamEvent::Done);
+                    });
 
-            // Compute actual metrics now that streaming is done
-            let total_latency = stream_start.elapsed();
-            let first_token_latency = first_token_time
-                .map(|t| t.duration_since(stream_start))
-                .unwrap_or_default();
-            metrics.first_token_latency_ms = first_token_latency.as_millis() as u64;
-            metrics.total_latency_ms = total_latency.as_millis() as u64;
-            metrics.tokens_generated = token_count;
-
-            let _ = tx.send(StreamEvent::ResponseComplete {
-                content: full_content.clone(),
-                metrics,
-            });
-
-            // Handle tool invocation + follow-up using the accumulated full_content
-            let embedded_tools = parse_embedded_tools(&full_content);
-            if !embedded_tools.is_empty() {
-                let _ = execute_tool_chain(
-                    &tx,
-                    &provider,
-                    &model,
-                    &model_messages,
-                    &security_engine,
-                    &embedded_tools,
-                    &full_content,
-                )
+                    let run = engine.run_turn_streaming(&user_message, h_tx, false);
+                    let (run_result, _forwarder_result) = tokio::join!(run, forwarder);
+                    run_result.map(|_| ())
+                })
                 .await;
-            } else {
-                let suggestions = crate::tools::detect_tool_suggestions(&full_content);
-                let high_conf: Vec<_> = suggestions
-                    .into_iter()
-                    .filter(|s| s.confidence >= 0.6)
-                    .collect();
-                if high_conf.len() > 1 {
-                    // Multi-file edit batch — send to UI for approval
-                    let _ = tx.send(StreamEvent::SystemMessage(format!(
-                        "🔧 Batch of {} tool suggestions detected. Review and approve.",
-                        high_conf.len()
-                    )));
-                    let _ = tx.send(StreamEvent::SetPendingBatch(crate::tools::ToolBatch::new(
-                        high_conf,
-                    )));
-                } else if let Some(suggestion) = high_conf.into_iter().next() {
-                    match security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
-                        crate::security::SecurityDecision::Allow => {
-                            let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                "🔧 Auto-executing: {} {} (low risk)",
-                                suggestion.tool_name, suggestion.args
-                            )));
+            result
+        })
+    });
 
-                            let executor = AsyncToolExecutor::new();
-                            match executor
-                                .execute_with_timeout_simple(
-                                    suggestion.tool_name.clone(),
-                                    suggestion.args.clone(),
-                                    30000,
-                                )
-                                .await
-                            {
-                                Ok(result) => {
-                                    let sanitized = security_engine
-                                        .sanitize_output(&suggestion.tool_name, &result);
-                                    let _ = tx.send(StreamEvent::ToolResult {
-                                        name: suggestion.tool_name.clone(),
-                                        args: suggestion.args.clone(),
-                                        result: sanitized.clone(),
-                                        success: true,
-                                    });
-
-                                    // CRITICAL FIX: Keep the assistant's response in context
-                                    // so the model knows it already made the plan. Don't remove it.
-                                    let mut follow_messages = model_messages.clone();
-                                    // Add the assistant's original response to history
-                                    // (reconstruct from the suggestion since we don't have full content here)
-                                    follow_messages.push(Message {
-                                        role: "assistant".to_string(),
-                                        content: format!("I should use {} to {}", suggestion.tool_name, suggestion.args),
-                                        images: None,
-                                        tool_call_id: None,
-                                        tool_calls: None,
-                                        reasoning_content: None,
-                                    });
-                                    // Add the tool result as a user message
-                                    follow_messages.push(Message {
-                                        role: "user".to_string(),
-                                        content: format!("Tool result: {}", sanitized),
-                                        images: None,
-                                        tool_call_id: None,
-                                        tool_calls: None,
-                                        reasoning_content: None,
-                                    });
-
-                                    // Autonomous loop for single-tool path
-                                    let mut turn = 0;
-                                    const MAX_TURNS: usize = 20;
-
-                                    while turn < MAX_TURNS {
-                                        turn += 1;
-
-                                        // CRITICAL FIX: The old prompt forced the model to ALWAYS output a TOOL: line,
-                                        // causing infinite loops. Now we ask it to analyze and EITHER synthesize OR call more tools.
-                                        follow_messages.push(Message {
-                                            role: "user".to_string(),
-                                            content: "Tool results are above. Analyze the results and decide:\n1. If the task is complete, provide a final summary and say TASK_COMPLETE.\n2. If MORE tools are needed, output ALL needed TOOL: lines in a single response.\n3. Do NOT ask the user questions.\n4. Do NOT describe what you would do — just output the TOOL: lines.".to_string(),
-                                            images: None,
-                                            tool_call_id: None,
-                                            tool_calls: None,
-                                            reasoning_content: None,
-                                        });
-
-                                        let mut follow_up = ChatRequest::new(
-                                            model.clone(),
-                                            follow_messages.clone(),
-                                            true,
-                                        );
-                                        follow_up.max_tokens = Some(1024);
-                                        // Truncate to prevent RAM explosion before follow-up
-                                        if follow_messages.len() > 20 {
-                                            let system_msg = follow_messages.first().cloned();
-                                            let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
-                                            follow_messages.clear();
-                                            if let Some(sys) = system_msg {
-                                                follow_messages.push(sys);
-                                            }
-                                            for msg in tail.into_iter().rev() {
-                                                follow_messages.push(msg);
-                                            }
-                                            follow_messages.push(Message {
-                                                role: "system".to_string(),
-                                                content: "[Context truncated due to length. Only recent messages shown.]".to_string(),
-                                                images: None,
-                                                tool_call_id: None,
-                                                tool_calls: None,
-                                                reasoning_content: None,
-                                            });
-                                        }
-
-                                        // CRITICAL FIX: Use realtime streaming so native tool_calls are parsed.
-                                        // Non-realtime chat_stream drops delta.tool_calls, causing empty responses.
-                                        follow_up.tools = Some(crate::tools::get_openai_tool_definitions());
-                                        let _ = tx.send(StreamEvent::Start);
-                                        match provider.chat_stream_realtime(follow_up).await {
-                                            Ok((mut follow_rx, _)) => {
-                                                let mut follow_content = String::new();
-                                                let mut follow_reasoning = String::new();
-                                                let mut follow_tool_calls: Vec<StreamChunk> = Vec::new();
-                                                let mut follow_finish: Option<String> = None;
-
-                                                let follow_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-                                                while let Some(fchunk) = {
-                                                    let remaining = follow_deadline.saturating_duration_since(std::time::Instant::now());
-                                                    if remaining.is_zero() {
-                                                        let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
-                                                        None
-                                                    } else {
-                                                        match tokio::time::timeout(remaining, follow_rx.recv()).await {
-                                                            Ok(Some(chunk)) => Some(chunk),
-                                                            Ok(None) => None,
-                                                            Err(_) => {
-                                                                let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
-                                                                None
-                                                            }
-                                                        }
-                                                    }
-                                                } {
-                                                    match fchunk {
-                                                        StreamChunk::Content(c) => {
-                                                            follow_content.push_str(&c);
-                                                            let _ = tx.send(StreamEvent::Chunk(c));
-                                                        }
-                                                        StreamChunk::Reasoning(r) => {
-                                                            follow_reasoning.push_str(&r);
-                                                            let _ = tx.send(StreamEvent::ReasoningChunk(r));
-                                                        }
-                                                        StreamChunk::ToolCall { .. } => {
-                                                            follow_tool_calls.push(fchunk);
-                                                        }
-                                                        StreamChunk::Finish(fr) => {
-                                                            follow_finish = Some(fr);
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-
-                                                // If model finished with tool_calls, execute them inline
-                                                if follow_finish == Some("tool_calls".to_string()) && !follow_tool_calls.is_empty() {
-                                                    for fchunk in follow_tool_calls {
-                                                        if let StreamChunk::ToolCall { id, name, arguments: args } = fchunk {
-                                                            let tool_args = extract_args_from_json(&args, &name)
-                                                                .map(|(_, extracted)| extracted)
-                                                                .unwrap_or_else(|| args.clone());
-                                                            match security_engine.check_tool_call(&name, &tool_args) {
-                                                                crate::security::SecurityDecision::Allow => {
-                                                                    match executor.execute_with_timeout_simple(name.clone(), tool_args.clone(), 30000).await {
-                                                                        Ok(result) => {
-                                                                            let sanitized = security_engine.sanitize_output(&name, &result);
-                                                                            let _ = tx.send(StreamEvent::ToolResult {
-                                                                                name: name.clone(),
-                                                                                args: tool_args.clone(),
-                                                                                result: sanitized.clone(),
-                                                                                success: true,
-                                                                            });
-                                                                            let call_id = if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() };
-                                                                            follow_messages.push(Message {
-                                                                                role: "assistant".to_string(),
-                                                                                content: follow_content.clone(),
-                                                                                images: None,
-                                                                                tool_call_id: None,
-                                                                                tool_calls: Some(vec![
-                                                                                    crate::providers::ToolCallRequest {
-                                                                                        id: call_id.clone(),
-                                                                                        r#type: "function".to_string(),
-                                                                                        function: crate::providers::ToolCallFunction {
-                                                                                            name: name.clone(),
-                                                                                            arguments: args.clone(),
-                                                                                        },
-                                                                                    },
-                                                                                ]),
-                                                                                reasoning_content: Some(follow_reasoning.clone()),
-                                                                            });
-                                                                            follow_messages.push(Message {
-                                                                                role: "tool".to_string(),
-                                                                                content: sanitized,
-                                                                                images: None,
-                                                                                tool_call_id: Some(call_id),
-                                                                                tool_calls: None,
-                                                                                reasoning_content: None,
-                                                                            });
-                                                                        }
-                                                                        Err(e) => {
-                                                                            let _ = tx.send(StreamEvent::ToolResult {
-                                                                                name: name.clone(),
-                                                                                args: tool_args.clone(),
-                                                                                result: e.to_string(),
-                                                                                success: false,
-                                                                            });
-                                                                            follow_messages.push(Message {
-                                                                                role: "tool".to_string(),
-                                                                                content: format!("Error: {}", e),
-                                                                                images: None,
-                                                                                tool_call_id: Some(if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() }),
-                                                                                tool_calls: None,
-                                                                                reasoning_content: None,
-                                                                            });
-                                                                        }
-                                                                    }
-                                                                }
-                                                                crate::security::SecurityDecision::Deny { reason } => {
-                                                                    let _ = tx.send(StreamEvent::SystemMessage(format!("🚫 Tool '{}' blocked: {}", name, reason)));
-                                                                }
-                                                                crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
-                                                                    let _ = tx.send(StreamEvent::SystemMessage(format!("⏸️ Tool '{}' requires approval", name)));
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    // After inline tool calls, force synthesis
-                                                    let _ = tx.send(StreamEvent::SystemMessage("▶ Synthesizing...".to_string()));
-                                                    follow_messages.push(Message {
-                                                        role: "user".to_string(),
-                                                        content: "All tool results are above. Provide a final summary. Do NOT call more tools.".to_string(),
-                                                        images: None,
-                                                        tool_call_id: None,
-                                                        tool_calls: None,
-                                                        reasoning_content: None,
-                                                    });
-                                                    let synthesis_req = ChatRequest::new(model.clone(), follow_messages.clone(), true);
-                                                    let _ = tx.send(StreamEvent::Start);
-                                                    match provider.chat_stream_realtime(synthesis_req).await {
-                                                        Ok((mut synth_rx, _)) => {
-                                                            let mut synth_content = String::new();
-                                                            let mut synth_reasoning = String::new();
-                                                            let synth_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-                                                            while let Some(schunk) = {
-                                                                let remaining = synth_deadline.saturating_duration_since(std::time::Instant::now());
-                                                                if remaining.is_zero() { None } else {
-                                                                    match tokio::time::timeout(remaining, synth_rx.recv()).await {
-                                                                        Ok(Some(chunk)) => Some(chunk),
-                                                                        Ok(None) => None,
-                                                                        Err(_) => None,
-                                                                    }
-                                                                }
-                                                            } {
-                                                                match schunk {
-                                                                    StreamChunk::Content(c) => { synth_content.push_str(&c); }
-                                                                    StreamChunk::Reasoning(r) => { synth_reasoning.push_str(&r); }
-                                                                    _ => {}
-                                                                }
-                                                            }
-                                                            if synth_content.trim().is_empty() {
-                                                                let _ = tx.send(StreamEvent::FollowUp("Task completed. Results shown above.".to_string()));
-                                                            } else {
-                                                                let _ = tx.send(StreamEvent::FollowUp(synth_content));
-                                                            }
-                                                            let _ = tx.send(StreamEvent::Done);
-                                                        }
-                                                        Err(_) => {
-                                                            let _ = tx.send(StreamEvent::FollowUp("Task completed. Tool results shown above.".to_string()));
-                                                            let _ = tx.send(StreamEvent::Done);
-                                                        }
-                                                    }
-                                                    break;
-                                                }
-
-                                                // If model produced no content and no tools, retry with a stronger prompt.
-                                                let trimmed = follow_content.trim();
-
-                                                if trimmed.is_empty() {
-                                                    let _ = tx.send(StreamEvent::SystemMessage(
-                                                        "⚠️ Empty follow-up after tool execution. Re-prompting...".to_string()
-                                                    ));
-                                                    let mut retry = follow_messages.clone();
-                                                    retry.push(Message {
-                                                        role: "user".to_string(),
-                                                        content: "Your previous response was empty. Using the tool result already provided above, write a complete response explaining what was found, what it means, and the next step.".to_string(),
-                                                        images: None,
-                                                        tool_call_id: None,
-                                                        tool_calls: None,
-                                                        reasoning_content: None,
-                                                    });
-                                                    let retry_req = ChatRequest::new(model.clone(), retry, true);
-                                                    let _ = tx.send(StreamEvent::Start);
-                                                    match provider.chat_stream_realtime(retry_req).await {
-                                                        Ok((mut retry_rx, _)) => {
-                                                            let mut retry_content = String::new();
-                                                            let mut retry_reasoning = String::new();
-                                                            let retry_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-                                                            while let Some(rchunk) = {
-                                                                let remaining = retry_deadline.saturating_duration_since(std::time::Instant::now());
-                                                                if remaining.is_zero() { None } else {
-                                                                    match tokio::time::timeout(remaining, retry_rx.recv()).await {
-                                                                        Ok(Some(chunk)) => Some(chunk),
-                                                                        Ok(None) => None,
-                                                                        Err(_) => None,
-                                                                    }
-                                                                }
-                                                            } {
-                                                                match rchunk {
-                                                                    StreamChunk::Content(c) => {
-                                                                        retry_content.push_str(&c);
-                                                                        let _ = tx.send(StreamEvent::Chunk(c));
-                                                                    }
-                                                                    StreamChunk::Reasoning(r) => {
-                                                                        retry_reasoning.push_str(&r);
-                                                                        let _ = tx.send(StreamEvent::ReasoningChunk(r));
-                                                                    }
-                                                                    _ => {}
-                                                                }
-                                                            }
-                                                            if retry_content.trim().is_empty() {
-                                                                let _ = tx.send(StreamEvent::Error("Model returned empty retry response.".to_string()));
-                                                            } else {
-                                                                let _ = tx.send(StreamEvent::FollowUp(retry_content));
-                                                            }
-                                                            let _ = tx.send(StreamEvent::Done);
-                                                        }
-                                                        Err(e) => {
-                                                            let _ = tx.send(StreamEvent::Error(format!("Retry failed: {}", e)));
-                                                            let _ = tx.send(StreamEvent::Done);
-                                                        }
-                                                    }
-                                                    break;
-                                                }
-
-                                                if follow_content.contains("TASK_COMPLETE") {
-                                                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
-                                                    let _ = tx.send(StreamEvent::Done);
-                                                    break;
-                                                }
-
-                                                let new_tools = parse_embedded_tools(&follow_content);
-                                                if new_tools.is_empty() {
-                                                    let _ = tx.send(StreamEvent::FollowUp(follow_content));
-                                                    let _ = tx.send(StreamEvent::Done);
-                                                    break;
-                                                }
-
-                                                follow_messages.push(Message {
-                                                    role: "assistant".to_string(),
-                                                    content: follow_content.clone(),
-                                                    images: None,
-                                                    tool_call_id: None,
-                                                    tool_calls: None,
-                                                    reasoning_content: None,
-                                                });
-
-                                                for (tool_name, args) in &new_tools {
-                                                    follow_messages.push(Message {
-                                                        role: "assistant".to_string(),
-                                                        content: format!("TOOL:{} {}", tool_name, args),
-                                                        images: None,
-                                                        tool_call_id: None,
-                                                        tool_calls: None,
-                                                        reasoning_content: None,
-                                                    });
-
-                                                    match executor.execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000).await {
-                                                        Ok(result) => {
-                                                            let sanitized = security_engine.sanitize_output(tool_name, &result);
-                                                            let _ = tx.send(StreamEvent::ToolResult {
-                                                                name: tool_name.clone(),
-                                                                args: args.clone(),
-                                                                result: sanitized.clone(),
-                                                                success: true,
-                                                            });
-                                                            follow_messages.push(Message {
-                                                                role: "user".to_string(),
-                                                                content: format!("Tool result: {}", sanitized),
-                                                                images: None,
-                                                                tool_call_id: None,
-                                                                tool_calls: None,
-                                                                reasoning_content: None,
-                                                            });
-                                                        }
-                                                        Err(e) => {
-                                                            let _ = tx.send(StreamEvent::ToolResult {
-                                                                name: tool_name.clone(),
-                                                                args: args.clone(),
-                                                                result: e.to_string(),
-                                                                success: false,
-                                                            });
-                                                            follow_messages.push(Message {
-                                                                role: "user".to_string(),
-                                                                content: format!("Tool error: {}", e),
-                                                                images: None,
-                                                                tool_call_id: None,
-                                                                tool_calls: None,
-                                                                reasoning_content: None,
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let _ = tx.send(StreamEvent::Error(format!(
-                                                    "Follow-up failed: {}",
-                                                    e
-                                                )));
-                                                let _ = tx.send(StreamEvent::Done);
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if turn >= MAX_TURNS {
-                                        let _ = tx.send(StreamEvent::FollowUp(
-                                            "Max tool execution turns reached. Task may be incomplete.".to_string(),
-                                        ));
-                                        let _ = tx.send(StreamEvent::Done);
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(StreamEvent::ToolResult {
-                                        name: suggestion.tool_name,
-                                        args: suggestion.args,
-                                        result: e.to_string(),
-                                        success: false,
-                                    });
-                                    let _ = tx.send(StreamEvent::Done);
-                                }
-                            }
-                        }
-                        crate::security::SecurityDecision::Deny { reason } => {
-                            let _ = tx.send(StreamEvent::SystemMessage(format!(
-                                "🚫 Tool '{}' blocked: {}",
-                                suggestion.tool_name, reason
-                            )));
-                            let _ = tx.send(StreamEvent::Done);
-                        }
-                        crate::security::SecurityDecision::RequireApproval {
-                            reason: _,
-                            risk_level: _,
-                        } => {
-                            let _ = tx.send(StreamEvent::SetPendingSuggestion(suggestion));
-                            let _ = tx.send(StreamEvent::Done);
-                        }
-                    }
-                } else {
-                    let _ = tx.send(StreamEvent::Done);
-                }
-            }
+    match handle.await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            let _ = tx.send(StreamEvent::Error(format!("Harness error: {}", e)));
+            let _ = tx.send(StreamEvent::Done);
+            Err(e)
         }
         Err(e) => {
-            let _ = tx.send(StreamEvent::Error(format!("Stream error: {}", e)));
+            let _ = tx.send(StreamEvent::Error(format!("Harness task panicked: {}", e)));
             let _ = tx.send(StreamEvent::Done);
-            return Ok(());
+            Err(anyhow::anyhow!("Harness task panicked: {}", e))
         }
     }
-
-    Ok(())
 }
+
 
 #[allow(dead_code)]
 async fn stream_model_response_task_legacy(

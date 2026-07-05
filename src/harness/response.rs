@@ -2,13 +2,11 @@
 //!
 //! Defines the output types for the harness engine.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 use crate::providers::StreamMetrics;
 
 /// Result of executing a single tool call.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ToolExecutionResult {
     pub tool_call_id: String,
     pub tool_name: String,
@@ -20,6 +18,7 @@ pub struct ToolExecutionResult {
 
 /// A response from a single model.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ModelResponse {
     pub model_name: String,
     pub provider_name: String,
@@ -32,6 +31,7 @@ pub struct ModelResponse {
 
 /// The complete harness response after one turn.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct HarnessResponse {
     /// Primary model response (drives the conversation).
     pub primary: ModelResponse,
@@ -49,6 +49,7 @@ pub struct HarnessResponse {
 
 /// State of an ongoing harness conversation.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct HarnessState {
     pub session_id: String,
     pub messages: Vec<crate::providers::Message>,
