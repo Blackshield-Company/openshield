@@ -1507,6 +1507,11 @@ async fn run_app(
                             app.mouse_state.selection_start = Some((x, y));
                             app.mouse_state.selection_end = Some((x, y));
                         }
+                        mouse::MouseAction::SelectMove { x, y } => {
+                            if app.mouse_state.selecting {
+                                app.mouse_state.selection_end = Some((x, y));
+                            }
+                        }
                         mouse::MouseAction::DragEnd { x, y } => {
                             if app.mouse_state.selecting {
                                 app.mouse_state.selection_end = Some((x, y));
@@ -1516,26 +1521,35 @@ async fn run_app(
                                     app.mouse_state.selection_start,
                                     app.mouse_state.selection_end,
                                 ) {
-                                    let start_row = start.1.min(end.1) as usize;
-                                    let end_row = start.1.max(end.1) as usize;
-                                    if end_row > start_row {
-                                        // Use chat area inner width for accurate wrapping
-                                        let chat_width = app
+                                    let (start_col, start_row) = (start.0 as usize, start.1 as usize);
+                                    let (end_col, end_row) = (end.0 as usize, end.1 as usize);
+                                    if (end_row as isize - start_row as isize).abs() > 0
+                                        || (end_col as isize - start_col as isize).abs() > 0
+                                    {
+                                        let chat_rect = app
                                             .chat_area_rect
-                                            .map(|r| r.width.saturating_sub(2) as usize)
-                                            .unwrap_or(80);
-                                        // Convert absolute terminal rows to content-relative
-                                        let content_top =
-                                            app.chat_area_rect.map(|r| r.y + 1).unwrap_or(0)
-                                                as usize;
-                                        let rel_start = start_row.saturating_sub(content_top);
-                                        let rel_end = end_row.saturating_sub(content_top);
-                                        let text = mouse::extract_selection_text_wrapped(
-                                            &app.messages,
-                                            app.scroll,
-                                            rel_start,
-                                            rel_end,
-                                            chat_width,
+                                            .unwrap_or(crate::tui::mouse::Rect {
+                                                x: 0,
+                                                y: 1,
+                                                width: 80,
+                                                height: 24,
+                                            });
+                                        let chat_width = chat_rect.width.saturating_sub(2) as usize;
+                                        let content_top = chat_rect.y.saturating_add(1) as usize;
+                                        let rel_start_row = start_row.saturating_sub(content_top);
+                                        let rel_end_row = end_row.saturating_sub(content_top);
+                                        let (all_lines, scroll) =
+                                            mouse::build_rendered_lines(app, chat_width + 2);
+                                        let visible_scroll = scroll.min(
+                                            all_lines.len().saturating_sub(chat_rect.height as usize),
+                                        );
+                                        let text = mouse::extract_rectangular_text(
+                                            &all_lines,
+                                            start_col,
+                                            rel_start_row + visible_scroll,
+                                            end_col,
+                                            rel_end_row + visible_scroll,
+                                            chat_rect.x.saturating_add(1) as usize,
                                         );
                                         if !text.is_empty() {
                                             let _ = mouse::copy_to_clipboard(&text);
