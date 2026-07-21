@@ -4,6 +4,8 @@ pub mod commands;
 #[cfg(feature = "discord")]
 pub mod discord;
 pub mod events;
+#[cfg(feature = "web-api")]
+pub mod http;
 pub mod matrix;
 pub mod message_router;
 pub mod platform;
