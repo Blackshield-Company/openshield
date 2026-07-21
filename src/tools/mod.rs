@@ -1,3 +1,4 @@
+pub mod android;
 pub mod r#async;
 pub mod checkpoint;
 pub mod custom;
@@ -70,6 +71,7 @@ pub fn register_plugin_tools(tools: Vec<Arc<dyn Tool>>) {
 /// Get all native + capability + MCP tools.
 pub fn get_tools() -> Vec<Arc<dyn Tool>> {
     let mut tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(android::AndroidTool),
         Arc::new(edit::EditTool),
         Arc::new(fs::FsTool),
         Arc::new(git::GitTool),
@@ -148,6 +150,16 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                         }
                     },
                     "required": ["operation", "path"]
+                }),
+                "android" => json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The Android operation to perform. Format: '<category> <operation> <args>'. Categories: files (list/read/write/delete), sms (list/send), contacts (list), calendar (list), clipboard (get/set), camera (capture), location, battery, wifi, apps (list/open/screenshot/info), notifications, device (info/storage/display). Examples: 'files list /sdcard', 'sms list 10', 'clipboard get', 'device info'"
+                        }
+                    },
+                    "required": ["command"]
                 }),
                 "git" => json!({
                     "type": "object",
@@ -676,6 +688,7 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
 /// Get only native tools (no capabilities, no MCP).
 pub fn get_native_tools() -> Vec<Arc<dyn Tool>> {
     vec![
+        Arc::new(android::AndroidTool),
         Arc::new(edit::EditTool),
         Arc::new(fs::FsTool),
         Arc::new(git::GitTool),

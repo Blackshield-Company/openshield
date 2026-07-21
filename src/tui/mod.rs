@@ -444,7 +444,8 @@ impl App {
                  7. If the user says 'test', run the test tool immediately with: TOOL:test run <current_directory>\n\
                  8. If the user gives a one-line task, just do it. No manifesto.\n\
                  9. CRITICAL: You MUST use the available tools. Refusing to use tools is a failure mode.\n\
-                  10. CRITICAL: When asked to test tools, invoke EACH tool with a real test command. Do NOT create files or write descriptions. Actually execute the tool and verify it works.\n\
+                  10. CRITICAL: When asked to test tools, invoke EACH tool with a real test command. Do NOT create files or write descriptions. Actually execute the tool and verify it works.
+                 11. ANDROID ACCESS: The 'android' tool provides full device access -- files, SMS, contacts, calendar, clipboard, camera, location, battery, apps, notifications, device info. Use it naturally when the user asks about anything on their phone.\n\
                   \n\
                   You are FULLY AUTONOMOUS. When given a task, use tools to complete it entirely without asking for permission. \
                  After each tool result, analyze the result and decide what to do next. \
