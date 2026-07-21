@@ -245,6 +245,16 @@ enum Commands {
         #[arg(short, long, default_value = "127.0.0.1:8080")]
         addr: String,
     },
+    /// Start HTTP server for mobile app connectivity
+    #[cfg(feature = "web-api")]
+    Server {
+        /// Port to bind on (default: 9876)
+        #[arg(short, long, default_value_t = 9876)]
+        port: u16,
+        /// Bind address (default: 127.0.0.1)
+        #[arg(short, long, default_value = "127.0.0.1")]
+        bind: String,
+    },
 }
 
 #[tokio::main]
@@ -1560,6 +1570,14 @@ async fn main() -> anyhow::Result<()> {
             };
             if let Err(e) = crate::api::serve(state, &addr).await {
                 eprintln!("❌ API server error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        #[cfg(feature = "web-api")]
+        Some(Commands::Server { port, bind }) => {
+            info!("Starting OpenShark HTTP server on {}:{}", bind, port);
+            if let Err(e) = crate::gateway::http::start_server(config, bind, port).await {
+                eprintln!("❌ HTTP server error: {}", e);
                 std::process::exit(1);
             }
         }

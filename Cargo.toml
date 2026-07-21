@@ -15,7 +15,7 @@ name = "openshark"
 path = "src/main.rs"
 
 [features]
-default = ["discord", "telegram", "slack", "matrix"]
+default = ["discord", "telegram", "slack", "matrix", "web-api"]
 discord = ["serenity"]
 telegram = ["teloxide"]
 slack = ["slack-morphism"]
@@ -60,6 +60,8 @@ base64 = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shellexpand = "3.1.2"
+async-stream = "0.3"
+tower = "0.5"
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"], optional = true }
 async-trait = "0.1"
 teloxide = { version = "0.17", features = ["macros"], optional = true }

@@ -413,6 +413,35 @@ impl SlashRegistry {
                 },
             },
             SlashCommand {
+                name: "agent",
+                aliases: &["persona", "identity"],
+                description: "Switch agent persona or list available agents",
+                usage: "/agent [name]",
+                category: SlashCategory::Agent,
+                requires_args: false,
+                handler: |args| {
+                    if args.is_empty() {
+                        SlashResult::Prompt("List all available agent personas: OpenShark (🦈), synthclaw (🦞), The Architect (🏗️), The Debugger (🐛). Show which one is currently active and describe each briefly.".to_string())
+                    } else {
+                        SlashResult::Prompt(format!(
+                            "Switch to the '{}' agent persona. Adopt their voice, style, and perspective immediately. Confirm the switch.",
+                            args
+                        ))
+                    }
+                },
+            },
+            SlashCommand {
+                name: "soul",
+                aliases: &["whoami", "persona"],
+                description: "Display current agent's full identity and persona",
+                usage: "/soul",
+                category: SlashCategory::Agent,
+                requires_args: false,
+                handler: |_args| {
+                    SlashResult::Prompt("Display your full identity, soul, and system prompt. Show your name, role, origin, purpose, tone, style, catchphrases, and behavioral rules. Be thorough.".to_string())
+                },
+            },
+            SlashCommand {
                 name: "help",
                 aliases: &["h", "?"],
                 description: "Show available slash commands",
