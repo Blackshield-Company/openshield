@@ -91,6 +91,16 @@ impl CommandPalette {
                 shortcut: None,
             },
             CommandEntry {
+                name: "/agent".to_string(),
+                description: "Switch agent persona".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/soul".to_string(),
+                description: "Display current agent's full persona".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
                 name: "/theme".to_string(),
                 description: "Change TUI theme".to_string(),
                 shortcut: None,
