@@ -96,6 +96,16 @@ impl CommandPalette {
                 shortcut: None,
             },
             CommandEntry {
+                name: "/agentlist".to_string(),
+                description: "List all agent personas".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
+                name: "/soul".to_string(),
+                description: "Display current agent's full persona".to_string(),
+                shortcut: None,
+            },
+            CommandEntry {
                 name: "/soul".to_string(),
                 description: "Display current agent's full persona".to_string(),
                 shortcut: None,

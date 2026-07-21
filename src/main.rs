@@ -466,6 +466,17 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            #[cfg(feature = "web-api")]
+            {
+                let server_config = config.clone();
+                tokio::spawn(async move {
+                    info!("Starting OpenShark HTTP server on 127.0.0.1:9876 (mobile app connectivity)");
+                    if let Err(e) = crate::gateway::http::start_server(server_config, "127.0.0.1".to_string(), 9876).await {
+                        tracing::warn!("HTTP server exited: {}", e);
+                    }
+                });
+            }
+
             tui::run(config).await?;
         }
         Some(Commands::Setup) => {

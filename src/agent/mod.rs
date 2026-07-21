@@ -11,6 +11,7 @@ use crate::router::{RoutingDecision, route_task};
 use crate::tools::{find_tool, get_tools};
 
 pub mod coding;
+pub mod persona;
 pub mod soul;
 
 pub const MAX_ITERATIONS: usize = 84;

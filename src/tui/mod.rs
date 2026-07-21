@@ -124,6 +124,8 @@ pub(crate) struct App {
     tool_calls_count: usize,
     /// Config reference.
     config: Config,
+    /// Agent persona registry for runtime switching.
+    persona_registry: crate::agent::persona::PersonaRegistry,
     /// Project path.
     #[allow(dead_code)]
     project_path: String,
@@ -401,7 +403,8 @@ impl App {
             memory.create_session_with_project(&session_id, &model, "general", &project_path)?;
         }
 
-        let soul = crate::agent::soul::load_soul_from_config(&config);
+        let persona_registry = crate::agent::persona::PersonaRegistry::new();
+        let soul_prompt = persona_registry.active_system_prompt();
 
         // Build filesystem capabilities description
         let fs_capabilities = if config.filesystem.allowed_paths.is_empty() {
@@ -449,7 +452,7 @@ impl App {
                  If the task is complete, provide a final summary and say TASK_COMPLETE on its own line. \
                  Do NOT ask the user 'should I continue?' or 'just say the word' — just keep working until the task is done. \
                  No manifesto. No preamble. Just execute.",
-                 soul.system_prompt(),
+                 soul_prompt,
                  fs_capabilities,
                  tool_descriptions
              ),
@@ -489,6 +492,7 @@ impl App {
             tokens_used: 0,
             tool_calls_count: 0,
             config: config.clone(),
+            persona_registry,
             project_path,
             focused_pane: 1,
             branches: vec![SessionBranch {
@@ -967,7 +971,7 @@ impl App {
     }
 
     fn rebuild_system_prompt_with_skills(&mut self, user_query: &str) {
-        let soul = crate::agent::soul::load_soul_from_config(&self.config);
+        let soul_prompt = self.persona_registry.active_system_prompt();
 
         // Inject triggered skills based on user query
         let skills_block = if let Some(ref registry) = self.skill_registry {
@@ -1072,7 +1076,7 @@ impl App {
                   If the task is complete, provide a final summary and say TASK_COMPLETE on its own line. \
                   Do NOT ask the user 'should I continue?' or 'just say the word' — just keep working until the task is done. \
                   No manifesto. No preamble. Just execute.{}{}{}{}{}",
-                 soul.system_prompt(),
+                 soul_prompt,
                  fs_capabilities,
                  tool_descriptions,
                  plan_instruction,
@@ -5347,6 +5351,39 @@ async fn handle_slash_result(
                 }
             }
             Ok(false) // Fall through for now
+        }
+        SlashResult::SwitchAgent(name) => {
+            if name.is_empty() {
+                // List all personas
+                let list = app.persona_registry.format_list();
+                app.add_system_message(format!("**Agent Personas**\n{}\n\nUse `/agent <name>` to switch.", list));
+            } else {
+                match app.persona_registry.switch_to(&name) {
+                    Some(persona) => {
+                        app.rebuild_system_prompt();
+                        app.add_system_message(format!("{} Switched to **{}**\n_{}_", persona.emoji, persona.display_name, persona.tagline));
+                    }
+                    None => {
+                        app.add_system_message(format!("❌ Agent `{}` not found. Use `/agentlist` to see available agents.", name));
+                    }
+                }
+            }
+            Ok(true)
+        }
+        SlashResult::ShowSoul => {
+            let persona = app.persona_registry.active();
+            let mut lines = vec![
+                format!("{} **{}**", persona.emoji, persona.display_name),
+                format!("_{}_", persona.tagline),
+                String::new(),
+                format!("**Voice:** {}", persona.voice),
+                format!("**Soul:** {}", persona.soul),
+                String::new(),
+                "**System Prompt:**".to_string(),
+                persona.system_prompt.clone(),
+            ];
+            app.add_system_message(lines.join("\n"));
+            Ok(true)
         }
         SlashResult::Error(e) => {
             app.add_system_message(format!("❌ {}", e));

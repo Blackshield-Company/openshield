@@ -79,6 +79,10 @@ pub enum SlashResult {
     Toggle { setting: String, value: bool },
     /// Switch to a different mode.
     SwitchMode(String),
+    /// Switch to a different agent persona.
+    SwitchAgent(String),
+    /// Show the current agent's soul/persona.
+    ShowSoul,
     /// No-op / handled internally.
     Handled,
     /// Error.
@@ -420,14 +424,18 @@ impl SlashRegistry {
                 category: SlashCategory::Agent,
                 requires_args: false,
                 handler: |args| {
-                    if args.is_empty() {
-                        SlashResult::Prompt("List all available agent personas: OpenShark (🦈), synthclaw (🦞), The Architect (🏗️), The Debugger (🐛). Show which one is currently active and describe each briefly.".to_string())
-                    } else {
-                        SlashResult::Prompt(format!(
-                            "Switch to the '{}' agent persona. Adopt their voice, style, and perspective immediately. Confirm the switch.",
-                            args
-                        ))
-                    }
+                    SlashResult::SwitchAgent(args.to_string())
+                },
+            },
+            SlashCommand {
+                name: "agentlist",
+                aliases: &["agents", "personas"],
+                description: "List all available agent personas",
+                usage: "/agentlist",
+                category: SlashCategory::Agent,
+                requires_args: false,
+                handler: |_args| {
+                    SlashResult::SwitchAgent(String::new())
                 },
             },
             SlashCommand {
@@ -438,7 +446,7 @@ impl SlashRegistry {
                 category: SlashCategory::Agent,
                 requires_args: false,
                 handler: |_args| {
-                    SlashResult::Prompt("Display your full identity, soul, and system prompt. Show your name, role, origin, purpose, tone, style, catchphrases, and behavioral rules. Be thorough.".to_string())
+                    SlashResult::ShowSoul
                 },
             },
             SlashCommand {
