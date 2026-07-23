@@ -1,5 +1,3 @@
-use crate::config::AgentIdentity;
-
 /// A built-in agent persona that can be switched at runtime.
 #[derive(Debug, Clone)]
 pub struct Persona {
