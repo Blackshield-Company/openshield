@@ -3140,6 +3140,7 @@ version = "1.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "async-stream",
  "async-trait",
  "axum",
  "base64",
@@ -3166,6 +3167,7 @@ dependencies = [
  "tokio-test",
  "tokio-util",
  "toml 0.8.23",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "tungstenite 0.29.0",
