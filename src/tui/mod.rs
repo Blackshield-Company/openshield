@@ -5359,10 +5359,14 @@ async fn handle_slash_result(
                 let list = app.persona_registry.format_list();
                 app.add_system_message(format!("**Agent Personas**\n{}\n\nUse `/agent <name>` to switch.", list));
             } else {
-                match app.persona_registry.switch_to(&name) {
-                    Some(persona) => {
+                let switched = app
+                    .persona_registry
+                    .switch_to(&name)
+                    .map(|p| (p.emoji.clone(), p.display_name.clone(), p.tagline.clone()));
+                match switched {
+                    Some((emoji, display_name, tagline)) => {
                         app.rebuild_system_prompt();
-                        app.add_system_message(format!("{} Switched to **{}**\n_{}_", persona.emoji, persona.display_name, persona.tagline));
+                        app.add_system_message(format!("{} Switched to **{}**\n_{}_", emoji, display_name, tagline));
                     }
                     None => {
                         app.add_system_message(format!("❌ Agent `{}` not found. Use `/agentlist` to see available agents.", name));
@@ -5373,7 +5377,7 @@ async fn handle_slash_result(
         }
         SlashResult::ShowSoul => {
             let persona = app.persona_registry.active();
-            let mut lines = vec![
+            let lines = vec![
                 format!("{} **{}**", persona.emoji, persona.display_name),
                 format!("_{}_", persona.tagline),
                 String::new(),

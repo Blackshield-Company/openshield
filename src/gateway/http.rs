@@ -13,8 +13,8 @@ use axum::{
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::config::Config;
@@ -25,8 +25,8 @@ use crate::providers::{ChatRequest, Message, Provider};
 /// Shared application state.
 pub struct AppState {
     pub config: Config,
-    pub router: RwLock<MessageRouter>,
-    pub memory: MemoryStore,
+    pub router: Mutex<MessageRouter>,
+    pub memory: Mutex<MemoryStore>,
 }
 
 impl AppState {
@@ -36,8 +36,8 @@ impl AppState {
 
         Ok(Arc::new(Self {
             config,
-            router: RwLock::new(router),
-            memory,
+            router: Mutex::new(router),
+            memory: Mutex::new(memory),
         }))
     }
 }
@@ -208,22 +208,21 @@ async fn process_chat(
     let mut messages = vec![];
 
     // Add system prompt if configured.
-    if let Some(agent) = &state.config.agent {
-        messages.push(Message {
-            role: "system".to_string(),
-            content: format!(
-                "You are {}. {} {}",
-                agent.display_name, agent.purpose, agent.tagline
-            ),
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        });
-    }
+    let agent = &state.config.agent;
+    messages.push(Message {
+        role: "system".to_string(),
+        content: format!(
+            "You are {}. {} {}",
+            agent.display_name, agent.purpose, agent.tagline
+        ),
+        images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
+    });
 
     // Fetch recent memory context.
-    match state.memory.search_messages(&content, 5) {
+    match state.memory.lock().unwrap().search_messages(&content, 5) {
         Ok(memories) if !memories.is_empty() => {
             let context = memories
                 .iter()
@@ -253,7 +252,7 @@ async fn process_chat(
     });
 
     // Save user message to memory.
-    let _ = state.memory.save_message(&MemoryMessage {
+    let _ = state.memory.lock().unwrap().save_message(&MemoryMessage {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.clone(),
         role: "user".to_string(),
@@ -270,8 +269,9 @@ async fn process_chat(
             let full_response = chunks.join("");
 
             // Stream each chunk.
-            for chunk in chunks {
-                let is_done = chunk == chunks.last().unwrap_or(&String::new());
+            let chunk_count = chunks.len();
+            for (i, chunk) in chunks.into_iter().enumerate() {
+                let is_done = i + 1 == chunk_count;
                 let _ = tx.send(ChatResponseChunk {
                     chunk,
                     done: is_done,
@@ -281,7 +281,7 @@ async fn process_chat(
             }
 
             // Save assistant response to memory.
-            let _ = state.memory.save_message(&MemoryMessage {
+            let _ = state.memory.lock().unwrap().save_message(&MemoryMessage {
                 id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
                 role: "assistant".to_string(),
@@ -334,6 +334,8 @@ async fn handle_memory_search(
     let results = if params.semantic {
         state
             .memory
+            .lock()
+            .unwrap()
             .semantic_search(&params.query, params.limit)
             .unwrap_or_default()
             .into_iter()
@@ -342,6 +344,8 @@ async fn handle_memory_search(
     } else {
         state
             .memory
+            .lock()
+            .unwrap()
             .search_messages(&params.query, params.limit)
             .unwrap_or_default()
     };
@@ -356,7 +360,7 @@ async fn handle_memory_save(
 ) -> Json<serde_json::Value> {
     let session_id = body.session_id.unwrap_or_else(|| "mobile-default".to_string());
 
-    match state.memory.save_message(&MemoryMessage {
+    match state.memory.lock().unwrap().save_message(&MemoryMessage {
         id: uuid::Uuid::new_v4().to_string(),
         session_id,
         role: "user".to_string(),
