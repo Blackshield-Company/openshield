@@ -262,9 +262,12 @@ async fn check_memory_db() -> CheckResult {
     }
 
     match rusqlite::Connection::open(&db_path) {
-        Ok(conn) => match conn.execute("PRAGMA integrity_check;", []) {
-            Ok(_) => {
+        Ok(conn) => match conn.query_row("PRAGMA integrity_check;", [], |row| row.get::<_, String>(0)) {
+            Ok(result) if result == "ok" => {
                 CheckResult::healthy("Memory DB", format!("Database OK at {}", db_path.display()))
+            }
+            Ok(result) => {
+                CheckResult::critical("Memory DB", format!("Integrity check failed: {}", result), true)
             }
             Err(e) => {
                 CheckResult::critical("Memory DB", format!("Corruption detected: {}", e), true)
@@ -395,20 +398,10 @@ async fn try_fix(component: &str) -> Result<String> {
                 .join("openshark");
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("memory.db");
-            let conn =
-                rusqlite::Connection::open(&db_path).context("Failed to create memory database")?;
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )",
-                [],
-            )?;
+            crate::memory::MemoryStore::new(&db_path)
+                .context("Failed to initialize memory database")?;
             Ok(format!(
-                "Recreated memory database at {}",
+                "Initialized memory database at {}",
                 db_path.display()
             ))
         }
