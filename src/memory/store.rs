@@ -134,6 +134,40 @@ impl MemoryStore {
             )
             .context("Failed to create tables")?;
 
+        // Legacy DBs (created by old doctor fixer) have a messages table without
+        // tokens_used and with INTEGER id — incompatible with TEXT uuid inserts.
+        // Rename aside and recreate; old rows stay readable in messages_legacy.
+        let has_tokens_used = {
+            let mut stmt = self.conn.prepare("PRAGMA table_info(messages)")?;
+            let names = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .filter_map(|n| n.ok())
+                .collect::<Vec<_>>();
+            names.iter().any(|n| n == "tokens_used")
+        };
+        if !has_tokens_used {
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE messages RENAME TO messages_legacy;
+                     CREATE TABLE IF NOT EXISTS messages (
+                        id TEXT PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        tokens_used INTEGER,
+                        FOREIGN KEY (session_id) REFERENCES sessions(id)
+                     );
+                     DROP TABLE IF EXISTS message_embeddings;
+                     CREATE TABLE message_embeddings (
+                        message_id TEXT PRIMARY KEY,
+                        embedding_json TEXT NOT NULL,
+                        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+                     );",
+                )
+                .context("Failed to migrate legacy messages table")?;
+        }
+
         Ok(())
     }
 

@@ -1401,10 +1401,71 @@ async fn main() -> anyhow::Result<()> {
             if autonomous {
                 security.set_autonomous_mode(true);
             }
-            if let Err(e) =
-                crate::headless::run_headless(headless_config, provider, cfg.default_model, security, None)
-                    .await
-            {
+
+            // Wire the event channel to stdout — without this, headless mode
+            // emits nothing (events dropped) and the summary is discarded.
+            let (event_tx, mut event_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::headless::HeadlessEvent>();
+            let json_mode = json;
+            let printer = tokio::spawn(async move {
+                use crate::headless::HeadlessEvent;
+                while let Some(ev) = event_rx.recv().await {
+                    if json_mode {
+                        if let Ok(line) = serde_json::to_string(&ev) {
+                            println!("{}", line);
+                        }
+                        continue;
+                    }
+                    match ev {
+                        HeadlessEvent::Start { task, model, .. } => {
+                            println!("🦈 Task: {} (model: {})", task, model);
+                        }
+                        HeadlessEvent::Thought { content, .. } => {
+                            if !content.trim().is_empty() {
+                                println!("{}", content);
+                            }
+                        }
+                        HeadlessEvent::ToolCall { name, args, turn, .. } => {
+                            println!("🔧 [turn {}] {} {}", turn, name, args);
+                        }
+                        HeadlessEvent::ToolResult {
+                            name,
+                            output,
+                            success,
+                            ..
+                        } => {
+                            let preview: String = output.chars().take(200).collect();
+                            println!(
+                                "   {} {}: {}",
+                                if success { "✅" } else { "❌" },
+                                name,
+                                preview
+                            );
+                        }
+                        HeadlessEvent::Error { message, turn, .. } => {
+                            eprintln!("❌ [turn {}] {}", turn, message);
+                        }
+                        HeadlessEvent::Complete {
+                            total_turns,
+                            duration_secs,
+                            ..
+                        } => {
+                            println!("\n🏁 Done in {}s ({} turns)", duration_secs, total_turns);
+                        }
+                    }
+                }
+            });
+
+            let result = crate::headless::run_headless(
+                headless_config,
+                provider,
+                cfg.default_model,
+                security,
+                Some(event_tx),
+            )
+            .await;
+            let _ = printer.await;
+            if let Err(e) = result {
                 eprintln!("❌ Headless run failed: {}", e);
                 std::process::exit(1);
             }
