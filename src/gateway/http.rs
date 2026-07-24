@@ -18,25 +18,21 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::config::Config;
-use crate::gateway::message_router::MessageRouter;
 use crate::memory::{MemoryStore, Message as MemoryMessage};
 use crate::providers::{ChatRequest, Message, Provider};
 
 /// Shared application state.
 pub struct AppState {
     pub config: Config,
-    pub router: Mutex<MessageRouter>,
     pub memory: Mutex<MemoryStore>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> anyhow::Result<Arc<Self>> {
-        let router = MessageRouter::new(config.clone())?;
         let memory = MemoryStore::new(&config.memory_db_path)?;
 
         Ok(Arc::new(Self {
             config,
-            router: Mutex::new(router),
             memory: Mutex::new(memory),
         }))
     }
@@ -48,16 +44,10 @@ pub struct ChatRequestBody {
     pub message: String,
     #[serde(default)]
     pub model: Option<String>,
-    #[serde(default = "default_stream")]
-    pub stream: bool,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
     pub system_prompt: Option<String>,
-}
-
-fn default_stream() -> bool {
-    true
 }
 
 /// Chat response chunk (SSE).

@@ -17,7 +17,6 @@ pub enum AgentVoice {
     Warm,
     Direct,
     Measured,
-    Playful,
     Stern,
 }
 
@@ -27,7 +26,6 @@ impl std::fmt::Display for AgentVoice {
             AgentVoice::Warm => write!(f, "warm"),
             AgentVoice::Direct => write!(f, "direct"),
             AgentVoice::Measured => write!(f, "measured"),
-            AgentVoice::Playful => write!(f, "playful"),
             AgentVoice::Stern => write!(f, "stern"),
         }
     }
@@ -98,11 +96,6 @@ impl PersonaRegistry {
             personas,
             active_idx: 0, // OpenShark default
         }
-    }
-
-    /// Get all available personas.
-    pub fn list(&self) -> &[Persona] {
-        &self.personas
     }
 
     /// Get the currently active persona.
