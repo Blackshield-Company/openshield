@@ -14,3 +14,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Rust build artifacts
+/target
