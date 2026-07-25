@@ -177,7 +177,16 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 }
             } else {
                 let clean_content = strip_think_tags(&content);
-                app.add_assistant_message(clean_content.clone(), reasoning_to_save, None);
+                if clean_content.trim().is_empty() {
+                    // Never persist an empty assistant message — in the transcript
+                    // it reads as a silent mid-turn death. Surface it instead.
+                    app.add_system_message(
+                        "⚠️ Model returned an empty response. The turn ended without a reply — try re-sending."
+                            .to_string(),
+                    );
+                } else {
+                    app.add_assistant_message(clean_content.clone(), reasoning_to_save, None);
+                }
                 if app.should_auto_continue(&clean_content) {
                     app.auto_continue();
                 } else if let Some(suggestion) = detect_high_confidence_suggestion(&content) {
