@@ -547,77 +547,111 @@ impl HarnessEngine {
 
                 tool_results.extend(batch_results);
 
-                // Re-query the model with tool results
-                let follow_up_request = ChatRequest {
-                    model: self.config.primary_model.clone(),
-                    messages: current_messages.clone(),
-                    stream: true,
-                    max_tokens: None,
-                    temperature: None,
-                    tools: Some(tools.clone()),
-                };
+                // Re-query the model with tool results. If the model returns an
+                // empty response (no content, no tool calls), re-prompt once with a
+                // nudge — silently ending the turn on an empty follow-up makes the
+                // TUI look like it died mid-task.
+                let mut empty_retry_used = false;
+                let (follow_content, follow_reasoning, follow_tool_calls) = loop {
+                    let follow_up_request = ChatRequest {
+                        model: self.config.primary_model.clone(),
+                        messages: current_messages.clone(),
+                        stream: true,
+                        max_tokens: None,
+                        temperature: None,
+                        tools: Some(tools.clone()),
+                    };
 
-                let (mut follow_rx, _follow_metrics) = self.primary_provider.chat_stream_realtime(follow_up_request).await?;
-                let mut follow_content = String::new();
-                let mut follow_reasoning = String::new();
-                let mut follow_tool_calls: Vec<ToolCallRequest> = Vec::new();
-                let mut _follow_finish: Option<String> = None;
-                let mut follow_acc: Option<AccumulatedToolCall> = None;
+                    let (mut follow_rx, _follow_metrics) = self.primary_provider.chat_stream_realtime(follow_up_request).await?;
+                    let mut follow_content = String::new();
+                    let mut follow_reasoning = String::new();
+                    let mut follow_tool_calls: Vec<ToolCallRequest> = Vec::new();
+                    let mut _follow_finish: Option<String> = None;
+                    let mut follow_acc: Option<AccumulatedToolCall> = None;
 
-                while let Some(chunk) = follow_rx.recv().await {
-                    match chunk {
-                        StreamChunk::Reasoning(r) => {
-                            follow_reasoning.push_str(&r);
-                            let _ = tx.send(HarnessEvent::ReasoningChunk(r));
-                        }
-                        StreamChunk::Content(c) => {
-                            follow_content.push_str(&c);
-                            let _ = tx.send(HarnessEvent::Chunk(c));
-                        }
-                        StreamChunk::ToolCall { id, name, arguments } => {
-                            if let Some(prev) = follow_acc.take() {
-                                follow_tool_calls.push(ToolCallRequest {
-                                    id: prev.id,
-                                    r#type: "function".to_string(),
-                                    function: crate::providers::ToolCallFunction {
-                                        name: prev.name,
-                                        arguments: prev.arguments,
-                                    },
-                                });
+                    while let Some(chunk) = follow_rx.recv().await {
+                        match chunk {
+                            StreamChunk::Reasoning(r) => {
+                                follow_reasoning.push_str(&r);
+                                let _ = tx.send(HarnessEvent::ReasoningChunk(r));
                             }
-                            follow_acc = Some(AccumulatedToolCall { id, name, arguments });
-                        }
-                        StreamChunk::Finish(fr) => {
-                            _follow_finish = Some(fr.clone());
-                            if fr == "tool_calls" {
-                                break;
+                            StreamChunk::Content(c) => {
+                                follow_content.push_str(&c);
+                                let _ = tx.send(HarnessEvent::Chunk(c));
+                            }
+                            StreamChunk::ToolCall { id, name, arguments } => {
+                                if let Some(prev) = follow_acc.take() {
+                                    follow_tool_calls.push(ToolCallRequest {
+                                        id: prev.id,
+                                        r#type: "function".to_string(),
+                                        function: crate::providers::ToolCallFunction {
+                                            name: prev.name,
+                                            arguments: prev.arguments,
+                                        },
+                                    });
+                                }
+                                follow_acc = Some(AccumulatedToolCall { id, name, arguments });
+                            }
+                            StreamChunk::Finish(fr) => {
+                                _follow_finish = Some(fr.clone());
+                                if fr == "tool_calls" {
+                                    break;
+                                }
                             }
                         }
                     }
-                }
 
-                if let Some(prev) = follow_acc.take() {
-                    follow_tool_calls.push(ToolCallRequest {
-                        id: prev.id,
-                        r#type: "function".to_string(),
-                        function: crate::providers::ToolCallFunction {
-                            name: prev.name,
-                            arguments: prev.arguments,
-                        },
+                    if let Some(prev) = follow_acc.take() {
+                        follow_tool_calls.push(ToolCallRequest {
+                            id: prev.id,
+                            r#type: "function".to_string(),
+                            function: crate::providers::ToolCallFunction {
+                                name: prev.name,
+                                arguments: prev.arguments,
+                            },
+                        });
+                    }
+
+                    if !follow_tool_calls.is_empty()
+                        || !follow_content.trim().is_empty()
+                        || empty_retry_used
+                    {
+                        break (follow_content, follow_reasoning, follow_tool_calls);
+                    }
+
+                    empty_retry_used = true;
+                    crate::debug_log(
+                        "harness: empty follow-up after tool execution; re-prompting once",
+                    );
+                    let _ = tx.send(HarnessEvent::SystemMessage(
+                        "⚠️ Model returned empty follow-up after tool execution. Re-prompting..."
+                            .to_string(),
+                    ));
+                    current_messages.push(Message {
+                        role: "user".to_string(),
+                        content: "Your previous response was empty. Using the tool results already provided above, write a complete response explaining what was found, what it means, and the next step. Do not skip this.".to_string(),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
                     });
-                }
+                };
 
                 final_content = follow_content.clone();
                 let final_reasoning = if follow_reasoning.is_empty() { None } else { Some(follow_reasoning.clone()) };
 
-                current_messages.push(Message {
-                    role: "assistant".to_string(),
-                    content: follow_content.clone(),
-                    images: None,
-                    tool_call_id: None,
-                    tool_calls: if follow_tool_calls.is_empty() { None } else { Some(follow_tool_calls.clone()) },
-                    reasoning_content: final_reasoning.clone(),
-                });
+                // Skip pushing an empty assistant message with no tool calls —
+                // empty-string content in history can make providers 400 the next turn.
+                if !follow_content.trim().is_empty() || !follow_tool_calls.is_empty() {
+                    current_messages.push(Message {
+                        role: "assistant".to_string(),
+                        content: follow_content.clone(),
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: if follow_tool_calls.is_empty() { None } else { Some(follow_tool_calls.clone()) },
+                        reasoning_content: final_reasoning.clone(),
+                    });
+                }
 
                 if follow_tool_calls.is_empty() {
                     break;
