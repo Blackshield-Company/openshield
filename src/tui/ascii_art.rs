@@ -35,9 +35,20 @@ const C_FG: Color = Color::Rgb { r: 220, g: 220, b: 220 }; // #DCDCDC
 
 // ── Main Banner (Hermes/Claw-Code Style) ────────────────────────────────────
 
+/// Live session info displayed on the splash banner.
+/// Populated from the running `App` state so the banner never goes stale.
+pub struct SplashInfo {
+    pub model: String,
+    pub provider: String,
+    pub permissions: String,
+    pub branch: String,
+    pub directory: String,
+    pub session: String,
+}
+
 /// The full OpenShark splash screen in Hermes/Claw-Code layout style.
 /// Returns a string with embedded ANSI color codes.
-pub fn banner(term_width: usize) -> String {
+pub fn banner(term_width: usize, info: &SplashInfo) -> String {
     let mut lines = Vec::new();
 
     // Top padding
@@ -54,19 +65,19 @@ pub fn banner(term_width: usize) -> String {
 
     // Version info (Hermes style: small centered text)
     lines.push(center_line(
-        version_line(env!("CARGO_PKG_VERSION"), "2026.6.16", "c9523d0"),
+        version_line(env!("CARGO_PKG_VERSION"), env!("OS_BUILD_DATE"), env!("OS_GIT_HASH")),
         term_width,
     ));
 
     lines.push(String::new());
 
-    // Two-column system info panel (like Claw-Code)
+    // Two-column system info panel (like Claw-Code) — populated from live App state
     let info_lines = system_info_panel(
-        "kimi-k2.7-code",
-        "danger-full-access",
-        "main",
-        "/home/synth",
-        "session-1781637801812-0",
+        &info.model,
+        &info.permissions,
+        &info.branch,
+        &info.directory,
+        &info.session,
     );
     for line in info_lines {
         lines.push(center_line(line, term_width));
@@ -76,7 +87,7 @@ pub fn banner(term_width: usize) -> String {
 
     // Connection status line
     lines.push(center_line(
-        connection_status("kimi-k2.7-code", "openai"),
+        connection_status(&info.model, &info.provider),
         term_width,
     ));
 
