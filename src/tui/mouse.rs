@@ -92,12 +92,16 @@ pub fn translate_mouse_event(event: MouseEvent, _app: &crate::tui::App) -> Mouse
 
     match event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            // Heuristic: top ~3 rows are title, bottom ~3 are input, rest is chat
+            // Start a potential text selection. If the button is released
+            // without any drag movement, the event loop falls back to the
+            // old click-to-scroll behavior.
             if row <= 2 {
                 MouseAction::None
             } else {
-                // Assume chat area; y as usize for scroll
-                MouseAction::ChatClick { y: row as usize }
+                MouseAction::DragStart {
+                    x: event.column,
+                    y: event.row,
+                }
             }
         }
         MouseEventKind::ScrollUp => MouseAction::ScrollUp,
@@ -438,6 +442,79 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     clipboard
         .set_text(text)
         .map_err(|e| anyhow::anyhow!("Clipboard write failed: {}", e))?;
+    Ok(())
+}
+
+/// Draw the drag-selection highlight over the chat feed. Uses the same
+/// coordinate math as the copy-on-release extraction so the visible
+/// highlight always matches what lands in the clipboard.
+pub fn draw_selection_overlay(out: &mut impl std::io::Write, app: &crate::tui::App) -> std::io::Result<()> {
+    use crossterm::{
+        cursor::MoveTo,
+        queue,
+        style::{Print, ResetColor, SetBackgroundColor},
+    };
+
+    let state = &app.mouse_state;
+    if !state.selecting {
+        return Ok(());
+    }
+    let (Some(start), Some(end)) = (state.selection_start, state.selection_end) else {
+        return Ok(());
+    };
+
+    let chat_rect = app.chat_area_rect.unwrap_or(Rect {
+        x: 0,
+        y: 1,
+        width: 80,
+        height: 24,
+    });
+    let content_top = chat_rect.y.saturating_add(1);
+    let content_bottom = chat_rect.y.saturating_add(chat_rect.height).saturating_sub(1);
+    let content_left = chat_rect.x.saturating_add(1);
+    let content_right = chat_rect.x.saturating_add(chat_rect.width).saturating_sub(1);
+    let left_pad = content_left as usize;
+    let chat_width = chat_rect.width.saturating_sub(2) as usize;
+
+    let (top, bottom) = (start.1.min(end.1), start.1.max(end.1));
+    let (left, right) = (start.0.min(end.0), start.0.max(end.0));
+    let (l, r) = (left.max(content_left).min(content_right), right.max(content_left).min(content_right));
+    if l >= r {
+        return Ok(());
+    }
+
+    let (all_lines, scroll) = build_rendered_lines(app, chat_width + 2);
+    let visible_scroll = scroll.min(all_lines.len().saturating_sub(chat_rect.height as usize));
+    let bg = crate::tui::theme::current_theme().selection;
+
+    for row in top..=bottom {
+        if row < content_top || row >= content_bottom {
+            continue;
+        }
+        let abs_row = (row - content_top) as usize + visible_scroll;
+        let Some(raw) = all_lines.get(abs_row) else {
+            continue;
+        };
+        let clean = strip_ansi(raw);
+        let line_len = clean.chars().count();
+        let seg_start = (l as usize).saturating_sub(left_pad);
+        if seg_start >= line_len {
+            continue;
+        }
+        let seg_end = ((r as usize).saturating_sub(left_pad)).min(line_len);
+        let segment: String = clean
+            .chars()
+            .skip(seg_start)
+            .take(seg_end.saturating_sub(seg_start).max(1))
+            .collect();
+        queue!(
+            out,
+            MoveTo(l, row),
+            SetBackgroundColor(bg),
+            Print(segment),
+            ResetColor
+        )?;
+    }
     Ok(())
 }
 

@@ -53,6 +53,8 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
     match found_tool.execute(args) {
         Ok(result) => {
             let sanitized = app.security_engine.sanitize_output(tool_name, &result);
+            // Tools report usage/parse failures as Ok(String) — detect them.
+            let ok = !crate::tools::tool_output_indicates_failure(&sanitized);
             app.add_system_message(format!(
                 "Result: {}",
                 &sanitized[..sanitized.len().min(500)]
@@ -64,17 +66,19 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
                 tool_name: tool_name.to_string(),
                 args: args.to_string(),
                 result: sanitized.clone(),
-                success: true,
+                success: ok,
                 created_at: Utc::now(),
             };
             let _ = app.memory.save_tool_call(&tool_call);
-            app.tool_calls_count += 1;
+            if ok {
+                app.tool_calls_count += 1;
+            }
             app.security_engine.audit(
                 tool_name,
                 args,
-                true,
+                ok,
                 crate::security::RiskLevel::Low,
-                "approved",
+                if ok { "approved" } else { "tool-reported-failure" },
             );
 
             app.model_messages.push(Message {

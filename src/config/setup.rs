@@ -130,8 +130,8 @@ pub async fn run() -> Result<()> {
     println!("───────────────────────────");
     println!();
 
-    // Kimi via proxy
-    if prompt_bool("Enable Kimi K2.6 via local proxy (port 8699)", true)? {
+    // Kimi for Coding — direct connection, no local proxy needed
+    if prompt_bool("Enable Kimi K3 (direct, api.kimi.com/coding)", true)? {
         let kimi_key = prompt(
             "Kimi API key (or leave blank to use ~/.config/openshark/kimi.env):",
             None,
@@ -143,8 +143,8 @@ pub async fn run() -> Result<()> {
             kimi_provider.api_key = kimi_key;
         }
         config.providers.insert("kimi".to_string(), kimi_provider);
-        config.default_model = "kimi-k2.6".to_string();
-        println!("✅ Kimi configured via proxy at http://127.0.0.1:8699/v1");
+        config.default_model = "k3".to_string();
+        println!("✅ Kimi configured (direct, https://api.kimi.com/coding/v1)");
     } else {
         config.providers.remove("kimi");
     }
@@ -161,7 +161,7 @@ pub async fn run() -> Result<()> {
         {
             provider.api_key = openai_key;
         }
-        if config.default_model != "kimi-k2.6" {
+        if config.default_model != "k3" {
             config.default_model = "gpt-4o".to_string();
         }
         println!("✅ OpenAI configured");

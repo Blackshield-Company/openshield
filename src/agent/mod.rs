@@ -32,7 +32,7 @@ impl Default for AgentConfig {
         Self {
             max_iterations: MAX_ITERATIONS,
             require_approval: true,
-            default_model: "kimi-k2.6".to_string(),
+            default_model: "k3".to_string(),
         }
     }
 }
