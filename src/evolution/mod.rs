@@ -480,12 +480,12 @@ mod tests {
         let config = Config::default();
         let engine = EvolutionEngine::new(&config).unwrap();
 
-        engine.track_model_performance("kimi-k2.6", "code", true);
-        engine.track_model_performance("kimi-k2.6", "code", true);
-        engine.track_model_performance("kimi-k2.6", "code", true);
+        engine.track_model_performance("k3", "code", true);
+        engine.track_model_performance("k3", "code", true);
+        engine.track_model_performance("k3", "code", true);
 
         let state = engine.adaptive_state.lock().unwrap();
-        let bias = state.model_bias.get("kimi-k2.6:code").copied().unwrap();
+        let bias = state.model_bias.get("k3:code").copied().unwrap();
         assert!(bias > 1.0, "Success should increase bias, got {}", bias);
     }
 

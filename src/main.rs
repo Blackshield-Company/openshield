@@ -261,6 +261,14 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
+    // Panics in background tasks are invisible inside the TUI's alternate
+    // screen — route them to a persistent log so silent deaths are debuggable.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        debug_log(&format!("PANIC: {}", info));
+        default_hook(info);
+    }));
+
     let cli = Cli::parse();
     let config = Config::load_or_default()?;
 
@@ -828,7 +836,7 @@ async fn main() -> anyhow::Result<()> {
             if message.is_empty() && file.is_none() {
                 println!("🦈 One-shot Chat");
                 println!("Usage: openshark chat 'your message here'");
-                println!("       openshark chat 'hello' --model kimi-k2.6");
+                println!("       openshark chat 'hello' --model k3");
                 println!("       openshark chat 'review this' --file src/main.rs");
             } else {
                 let model_name = model.as_deref().unwrap_or(&config.default_model);
@@ -1656,4 +1664,26 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Append a line to the persistent debug log at
+/// ~/.local/share/openshark/openshark.log. The TUI runs in an alternate
+/// screen, so stderr output (panics, background task errors) is invisible —
+/// this log is the only way to see what killed a background task.
+pub fn debug_log(msg: &str) {
+    let path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("openshark")
+        .join("openshark.log");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "[{}] {}", chrono::Utc::now().to_rfc3339(), msg);
+    }
 }

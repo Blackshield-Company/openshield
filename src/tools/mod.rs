@@ -171,6 +171,10 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                         "args": {
                             "type": "string",
                             "description": "Additional arguments for the git command"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Path to the repository to run against. REQUIRED whenever the target repo is not the current working directory."
                         }
                     },
                     "required": ["command"]
@@ -798,7 +802,12 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
         }
         "git" => {
             if let Some(command) = get_str("command") {
-                let mut result = command;
+                let mut result = String::new();
+                // Repo targeting: {"command":"status","repo":"/path/to/repo"}
+                if let Some(repo) = get_str("repo").or_else(|| get_str("path")) {
+                    result.push_str(&format!("--repo {} ", repo));
+                }
+                result.push_str(&command);
                 if let Some(args_str) = get_str("args") {
                     result.push(' ');
                     result.push_str(&args_str);
@@ -820,17 +829,37 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
                 None
             }
         }
-        "edit" => {
-            if let (Some(file), Some(old_string), Some(new_string)) = (
-                get_str("file"),
-                get_str("old_string"),
-                get_str("new_string"),
-            ) {
-                Some(format!("replace {} {} {}", file, old_string, new_string))
-            } else {
-                None
+        "edit" => (|| {
+            // Accepts both {"file","old_string","new_string"} (implies replace)
+            // and {"operation":"read|write|replace","file"/"path",...}.
+            // Emits the exact CLI syntax EditTool::execute expects,
+            // including the " ||| " delimiter for replace.
+            let file = get_str("file").or_else(|| get_str("path"))?;
+            let operation = get_str("operation").unwrap_or_else(|| {
+                if get_str("old_string").is_some() {
+                    "replace".to_string()
+                } else if get_str("content").is_some() || get_str("new_string").is_some() {
+                    "write".to_string()
+                } else {
+                    "read".to_string()
+                }
+            });
+            match operation.as_str() {
+                "read" => Some(format!("read {}", file)),
+                "write" => {
+                    let content = get_str("content").or_else(|| get_str("new_string"))?;
+                    Some(format!("write {} {}", file, content))
+                }
+                "replace" | "patch" => {
+                    let old = get_str("old_string").or_else(|| get_str("old_lines"))?;
+                    let new = get_str("new_string")
+                        .or_else(|| get_str("content"))
+                        .or_else(|| get_str("new_lines"))?;
+                    Some(format!("{} {} {} ||| {}", operation, file, old, new))
+                }
+                _ => None,
             }
-        }
+        })(),
         "refactor" => {
             if let (Some(file), Some(operation)) = (get_str("file"), get_str("operation")) {
                 Some(format!("{} {}", file, operation))
@@ -1043,4 +1072,92 @@ pub fn execute_tool(name: &str, args: &str) -> Option<Result<String>> {
     let tool = find_tool(name)?;
     let normalized = normalize_tool_args(name, args);
     Some(tool.execute(&normalized))
+}
+
+/// Heuristic: does a tool's `Ok(...)` output actually report a failure?
+/// Many tools return usage/error text as `Ok(String)` instead of `Err`,
+/// which used to make every failed call record `success = true` in the DB.
+/// Conservative: only matches on the *start* of the output to avoid
+/// false positives from file contents that merely contain these phrases.
+pub fn tool_output_indicates_failure(output: &str) -> bool {
+    let head = output.trim_start();
+    const FAILURE_PREFIXES: &[&str] = &[
+        "Usage:",
+        "Unknown ",
+        "String not found",
+        "Failed to",
+        "Tool execution failed",
+        "Security denied",
+        "Approval required",
+        "Not a git repository",
+        "fatal:",
+        "Error:",
+        "error:",
+    ];
+    FAILURE_PREFIXES.iter().any(|p| head.starts_with(p))
+}
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::*;
+
+    #[test]
+    fn edit_json_operation_write() {
+        let args = r#"{"operation":"write","file":"/tmp/demo.txt","new_string":"hello world"}"#;
+        assert_eq!(
+            normalize_tool_args("edit", args),
+            "write /tmp/demo.txt hello world"
+        );
+    }
+
+    #[test]
+    fn edit_json_operation_write_with_content_key() {
+        let args = r#"{"operation":"write","path":"/tmp/demo.txt","content":"line1\nline2"}"#;
+        assert_eq!(
+            normalize_tool_args("edit", args),
+            "write /tmp/demo.txt line1\nline2"
+        );
+    }
+
+    #[test]
+    fn edit_json_replace_uses_delimiter() {
+        let args = r#"{"file":"/tmp/demo.txt","old_string":"foo bar","new_string":"baz"}"#;
+        assert_eq!(
+            normalize_tool_args("edit", args),
+            "replace /tmp/demo.txt foo bar ||| baz"
+        );
+    }
+
+    #[test]
+    fn edit_json_operation_read() {
+        let args = r#"{"operation":"read","file":"/tmp/demo.txt"}"#;
+        assert_eq!(normalize_tool_args("edit", args), "read /tmp/demo.txt");
+    }
+
+    #[test]
+    fn edit_plain_args_pass_through() {
+        let args = "replace /tmp/demo.txt foo ||| bar";
+        assert_eq!(normalize_tool_args("edit", args), args);
+    }
+
+    #[test]
+    fn failure_heuristic_catches_usage_errors() {
+        assert!(tool_output_indicates_failure(
+            "Unknown edit command: {\"operation\":\"write\"}"
+        ));
+        assert!(tool_output_indicates_failure("Usage: edit read <path>"));
+        assert!(tool_output_indicates_failure(
+            "String not found in /tmp/x. Use 'edit read' to see exact content."
+        ));
+        assert!(tool_output_indicates_failure(
+            "Tool 'terminal' timed out after 120s"
+        ) == false); // doesn't start with a known prefix — acceptable
+    }
+
+    #[test]
+    fn failure_heuristic_passes_real_output() {
+        assert!(!tool_output_indicates_failure("Written 57 bytes to /tmp/demo.txt"));
+        assert!(!tool_output_indicates_failure("Replaced in /tmp/demo.txt"));
+        assert!(!tool_output_indicates_failure("   1| fn main() {}"));
+    }
 }

@@ -26,7 +26,7 @@ static SPLASH_DRAWN: AtomicBool = AtomicBool::new(false);
 ///
 /// Anti-flicker: only clears and redraws on the first call. After that,
 /// the screen stays static until the user dismisses it.
-pub fn draw_splash_screen(_app: &App, term_width: u16, term_height: u16) -> io::Result<()> {
+pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::Result<()> {
     let mut out = stdout();
 
     // Only clear and draw once — after that, the screen is static.
@@ -38,8 +38,25 @@ pub fn draw_splash_screen(_app: &App, term_width: u16, term_height: u16) -> io::
         // Clear screen once
         queue!(out, Clear(ClearType::All))?;
 
+        // Build live splash info from App state so the banner never goes stale
+        let directory = if app.project_path.is_empty() {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        } else {
+            app.project_path.clone()
+        };
+        let info = ascii_art::SplashInfo {
+            model: app.model.clone(),
+            provider: app.provider.name.clone(),
+            permissions: app.profile_registry.active().to_string(),
+            branch: detect_git_branch(&directory),
+            session: app.session_id.clone(),
+            directory,
+        };
+
         // Get banner text
-        let banner_text = ascii_art::banner(term_width as usize);
+        let banner_text = ascii_art::banner(term_width as usize, &info);
         let banner_lines: Vec<&str> = banner_text.lines().collect();
         let banner_height = banner_lines.len() as u16;
 
@@ -54,16 +71,7 @@ pub fn draw_splash_screen(_app: &App, term_width: u16, term_height: u16) -> io::
             }
         }
 
-        let current_row = vertical_offset + banner_height + 1;
-
-        // Version info
-        let version_text = ascii_art::version_line(
-            env!("CARGO_PKG_VERSION"),
-            "2026.6.16",
-            "c9523d0",
-        );
-        let version_x = (term_width.saturating_sub(visible_width(&version_text) as u16)) / 2;
-        queue!(out, MoveTo(version_x, current_row), Print(&version_text), ResetColor)?;
+        // Version line is already rendered inside the banner — no duplicate draw here.
 
         // Session info (replaced by system info panel in new banner)
         // Skip session line — it's now part of the two-column panel in ascii_art
@@ -95,6 +103,21 @@ pub fn draw_splash_screen(_app: &App, term_width: u16, term_height: u16) -> io::
 #[allow(dead_code)]
 pub fn reset_splash() {
     SPLASH_DRAWN.store(false, Ordering::Relaxed);
+}
+
+/// Detect the current git branch in the given directory.
+/// Returns "n/a" when not in a repo or git is unavailable.
+fn detect_git_branch(dir: &str) -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 /// Calculate visible width of a string (ignoring ANSI escape codes).

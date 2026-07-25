@@ -1441,6 +1441,7 @@ async fn run_app(
             if rx.is_closed() {
                 // Stream ended unexpectedly — background task died or sender was dropped
                 if app.is_streaming {
+                    crate::debug_log("stream channel closed while is_streaming=true (background task died without sending Done)");
                     app.is_streaming = false;
                     app.stream_start_time = None;
                     app.add_system_message(
@@ -1453,6 +1454,27 @@ async fn run_app(
             }
         }
         if stream_changed {
+            crate::tui::render::request_redraw();
+        }
+
+        // Stall watchdog: if a stream has been running for over 4 minutes,
+        // unwedge the UI no matter where the background task is stuck
+        // (hung HTTP request, stuck tool, dead channel). The orphaned task's
+        // sends will fail silently once we drop the receiver.
+        if app.is_streaming
+            && let Some(started) = app.stream_start_time
+            && started.elapsed() > Duration::from_secs(240)
+        {
+            app.is_streaming = false;
+            app.stream_start_time = None;
+            app.is_reasoning = false;
+            app.reasoning_content.clear();
+            app.stream_rx = None;
+            app.add_system_message(
+                "⚠️ Response stalled for 4 minutes — stream reset so you can keep chatting. \
+                 Type 'continue' to retry the last turn."
+                    .to_string(),
+            );
             crate::tui::render::request_redraw();
         }
 
@@ -1511,21 +1533,39 @@ async fn run_app(
                             app.mouse_state.selecting = true;
                             app.mouse_state.selection_start = Some((x, y));
                             app.mouse_state.selection_end = Some((x, y));
+                            render::request_redraw();
                         }
                         mouse::MouseAction::SelectMove { x, y } => {
                             if app.mouse_state.selecting {
                                 app.mouse_state.selection_end = Some((x, y));
+                                render::request_redraw();
                             }
                         }
                         mouse::MouseAction::DragEnd { x, y } => {
                             if app.mouse_state.selecting {
                                 app.mouse_state.selection_end = Some((x, y));
                                 app.mouse_state.selecting = false;
-                                // Copy-on-select: extract text and copy to clipboard
-                                if let (Some(start), Some(end)) = (
+                                render::request_redraw();
+                                let moved = if let (Some(start), Some(end)) = (
                                     app.mouse_state.selection_start,
                                     app.mouse_state.selection_end,
                                 ) {
+                                    (end.1 as isize - start.1 as isize).abs() > 0
+                                        || (end.0 as isize - start.0 as isize).abs() > 0
+                                } else {
+                                    false
+                                };
+                                if !moved {
+                                    // Plain click (no drag) — keep the old click-to-scroll behavior
+                                    app.scroll = (y as usize).saturating_sub(5);
+                                }
+                                // Copy-on-select: extract text and copy to clipboard
+                                if moved
+                                    && let (Some(start), Some(end)) = (
+                                        app.mouse_state.selection_start,
+                                        app.mouse_state.selection_end,
+                                    )
+                                {
                                     let (start_col, start_row) = (start.0 as usize, start.1 as usize);
                                     let (end_col, end_row) = (end.0 as usize, end.1 as usize);
                                     if (end_row as isize - start_row as isize).abs() > 0
@@ -3644,6 +3684,21 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         return Ok(());
     }
 
+    // ── Busy Guard: one stream at a time ────────────────────────────────────
+    // Never launch a second stream while one is running — the old receiver
+    // would be overwritten and the in-flight turn's events/history silently
+    // lost. Hand the text back to the input box so nothing is swallowed.
+    if app.is_streaming || app.stream_rx.is_some() {
+        app.add_system_message(
+            "⏳ Still working on the previous message — your text is back in the input box. \
+             Wait for the response to finish, or type 'stop' to interrupt."
+                .to_string(),
+        );
+        app.input = input.clone();
+        app.cursor_position = app.input.len();
+        return Ok(());
+    }
+
     app.add_user_message(input.clone());
     // Reset circuit breaker on fresh user input
     app.empty_response_count = 0;
@@ -4471,11 +4526,13 @@ async fn stream_model_response_task(
     match handle.await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => {
+            crate::debug_log(&format!("stream_model_response_task harness error: {}", e));
             let _ = tx.send(StreamEvent::Error(format!("Harness error: {}", e)));
             let _ = tx.send(StreamEvent::Done);
             Err(e)
         }
         Err(e) => {
+            crate::debug_log(&format!("stream_model_response_task PANIC: {}", e));
             let _ = tx.send(StreamEvent::Error(format!("Harness task panicked: {}", e)));
             let _ = tx.send(StreamEvent::Done);
             Err(anyhow::anyhow!("Harness task panicked: {}", e))

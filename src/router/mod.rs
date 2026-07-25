@@ -665,7 +665,7 @@ mod tests {
                 base_url: "https://api.kimi.com/coding/v1".to_string(),
                 api_key: "test-key".to_string(),
                 models: vec![ModelConfig {
-                    name: "kimi-k2.6".to_string(),
+                    name: "k3".to_string(),
                     context_length: 128000,
                     cost_per_1k_input: 0.01,
                     cost_per_1k_output: 0.02,
@@ -719,7 +719,7 @@ mod tests {
 
         Config {
             version: crate::VERSION.to_string(),
-            default_model: "kimi-k2.6".to_string(),
+            default_model: "k3".to_string(),
             providers,
             memory_db_path: PathBuf::from("/tmp/test_openshark_router_memory_new.db"),
             tools_enabled: vec!["fs".to_string(), "terminal".to_string()],
@@ -816,7 +816,7 @@ mod tests {
     #[test]
     fn test_find_provider_for_model() {
         let config = create_test_config();
-        assert_eq!(find_provider_for_model(&config, "kimi-k2.6"), "kimi");
+        assert_eq!(find_provider_for_model(&config, "k3"), "kimi");
         assert_eq!(
             find_provider_for_model(&config, "deepseek-v4-flash-free"),
             "opencode"
@@ -1013,8 +1013,8 @@ mod tests {
     fn test_find_best_model_for_task_analysis() {
         let config = create_test_config();
         let result = find_best_model_for_task(&config, "analysis");
-        // Only kimi-k2.6 has 'analysis' capability
-        assert_eq!(result, "kimi-k2.6");
+        // Only k3 has 'analysis' capability
+        assert_eq!(result, "k3");
     }
 
     #[test]

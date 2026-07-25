@@ -10,13 +10,32 @@ impl Tool for GitTool {
     }
 
     fn description(&self) -> &str {
-        "Git operations: status, diff, log, branch, checkout, commit"
+        "Git operations: status, diff, log, branch, checkout, commit. \
+         Prefix with '--repo <path>' to run against a repository outside the current directory."
     }
 
     fn execute(&self, args: &str) -> Result<String> {
-        // Check if we're in a git repo before running any command
-        if !Self::in_repo() {
-            return Ok("Not a git repository. This directory is not tracked by git.".to_string());
+        // Optional repo targeting: `git --repo <path> <cmd> [args]`
+        // Without it, commands run in the process cwd (legacy behavior).
+        let mut work_dir =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let mut args = args;
+        if let Some(rest) = args.strip_prefix("--repo ") {
+            let mut parts = rest.splitn(2, ' ');
+            let dir = parts.next().unwrap_or("");
+            if dir.is_empty() {
+                return Ok("Usage: git [--repo <path>] <command> [args]".to_string());
+            }
+            work_dir = std::path::PathBuf::from(dir);
+            args = parts.next().unwrap_or("");
+        }
+
+        // Check if the target is a git repo before running any command
+        if !Self::in_repo_at(&work_dir) {
+            return Ok(format!(
+                "Not a git repository: {}",
+                work_dir.display()
+            ));
         }
 
         let parts: Vec<&str> = args.splitn(2, ' ').collect();
@@ -28,46 +47,46 @@ impl Tool for GitTool {
         let rest = parts.get(1).unwrap_or(&"");
 
         let output = match cmd {
-            "status" => Command::new("git").args(["status", "--short"]).output(),
+            "status" => Self::git_cmd(&work_dir).args(["status", "--short"]).output(),
             "diff" => {
-                let mut c = Command::new("git");
+                let mut c = Self::git_cmd(&work_dir);
                 c.arg("diff");
                 if !rest.is_empty() {
                     c.arg(rest);
                 }
                 c.output()
             }
-            "diff-staged" => Command::new("git").args(["diff", "--staged"]).output(),
-            "diff-cached" => Command::new("git").args(["diff", "--cached"]).output(),
+            "diff-staged" => Self::git_cmd(&work_dir).args(["diff", "--staged"]).output(),
+            "diff-cached" => Self::git_cmd(&work_dir).args(["diff", "--cached"]).output(),
             "log" => {
                 let limit = rest.parse::<usize>().unwrap_or(10);
-                Command::new("git")
+                Self::git_cmd(&work_dir)
                     .args(["log", &format!("--max-count={}", limit), "--oneline"])
                     .output()
             }
-            "branch" => Command::new("git").args(["branch", "-a"]).output(),
+            "branch" => Self::git_cmd(&work_dir).args(["branch", "-a"]).output(),
             "checkout" => {
                 if rest.is_empty() {
                     return Ok("Usage: git checkout <branch>".to_string());
                 }
-                Command::new("git").args(["checkout", rest]).output()
+                Self::git_cmd(&work_dir).args(["checkout", rest]).output()
             }
             "commit" => {
                 if rest.is_empty() {
                     return Ok("Usage: git commit <message>".to_string());
                 }
-                Command::new("git").args(["commit", "-m", rest]).output()
+                Self::git_cmd(&work_dir).args(["commit", "-m", rest]).output()
             }
             "add" => {
                 if rest.is_empty() {
                     return Ok("Usage: git add <path>".to_string());
                 }
-                Command::new("git").args(["add", rest]).output()
+                Self::git_cmd(&work_dir).args(["add", rest]).output()
             }
-            "show" => Command::new("git").args(["show", "--stat", rest]).output(),
-            "stage-all" => Command::new("git").args(["add", "-A"]).output(),
+            "show" => Self::git_cmd(&work_dir).args(["show", "--stat", rest]).output(),
+            "stage-all" => Self::git_cmd(&work_dir).args(["add", "-A"]).output(),
             "push" => {
-                let mut c = Command::new("git");
+                let mut c = Self::git_cmd(&work_dir);
                 c.arg("push");
                 if !rest.is_empty() {
                     c.args(rest.split_whitespace());
@@ -78,7 +97,7 @@ impl Tool for GitTool {
                 if rest.is_empty() {
                     return Ok("Usage: git branch-create <name>".to_string());
                 }
-                Command::new("git").args(["checkout", "-b", rest]).output()
+                Self::git_cmd(&work_dir).args(["checkout", "-b", rest]).output()
             }
             _ => {
                 return Ok(format!("Unknown git command: {}\n{}", cmd, self.usage()));
@@ -103,21 +122,38 @@ impl Tool for GitTool {
 }
 
 impl GitTool {
+    /// Build a git Command pinned to the given working directory.
+    fn git_cmd(dir: &std::path::Path) -> Command {
+        let mut c = Command::new("git");
+        c.current_dir(dir);
+        c
+    }
+
+    /// Check whether the given directory is inside a git repository.
+    pub fn in_repo_at(dir: &std::path::Path) -> bool {
+        Command::new("git")
+            .args(["rev-parse", "--git-dir"])
+            .current_dir(dir)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
     fn usage(&self) -> String {
-        "Git tool usage:\n\
-         git status           - Show working tree status\n\
-         git diff [path]      - Show changes\n\
-         git diff-staged      - Show staged changes\n\
-         git diff-cached      - Alias for diff-staged\n\
-         git log [n]          - Show last n commits (default 10)\n\
-         git branch           - List branches\n\
-         git checkout <name>  - Switch branch\n\
-         git add <path>       - Stage files\n\
-         git commit <msg>     - Commit staged files\n\
-         git show <ref>       - Show commit details\n\
-         git stage-all         - Stage all changes\n\
-         git push [remote]     - Push current branch\n\
-         git branch-create <n> - Create and switch to branch"
+        "Git tool usage:\n\\
+         git [--repo <path>] status           - Show working tree status\n\\
+         git [--repo <path>] diff [path]      - Show changes\n\\
+         git [--repo <path>] diff-staged      - Show staged changes\n\\
+         git [--repo <path>] diff-cached      - Alias for diff-staged\n\\
+         git [--repo <path>] log [n]          - Show last n commits (default 10)\n\\
+         git [--repo <path>] branch           - List branches\n\\
+         git [--repo <path>] checkout <name>  - Switch branch\n\\
+         git [--repo <path>] add <path>       - Stage files\n\\
+         git [--repo <path>] commit <msg>     - Commit staged files\n\\
+         git [--repo <path>] show <ref>       - Show commit details\n\\
+         git [--repo <path>] stage-all        - Stage all changes\n\\
+         git [--repo <path>] push [remote]    - Push current branch\n\\
+         git [--repo <path>] branch-create <n> - Create and switch to branch"
             .to_string()
     }
 
@@ -227,10 +263,37 @@ mod tests {
     }
 
     #[test]
+    fn test_git_repo_flag_targets_other_repo() {
+        let dir = temp_git_repo();
+        let tool = GitTool;
+
+        // --repo must run against the target repo, not the process cwd
+        let result = tool.execute(&format!("--repo {} branch", dir)).unwrap();
+        assert!(
+            !result.starts_with("Not a git repository"),
+            "--repo target was not honored: {}",
+            result
+        );
+
+        // Non-repo path reports cleanly with the path included
+        let bad = tool
+            .execute("--repo /tmp/openshark_definitely_not_a_repo_xyz status")
+            .unwrap();
+        assert!(
+            bad.starts_with("Not a git repository"),
+            "expected clean failure, got: {}",
+            bad
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
     fn test_git_status_empty() {
         let dir = temp_git_repo();
         let tool = GitTool;
         let result = tool.execute(&format!("status {}", dir));
+
         if let Ok(output) = result {
             assert!(!output.is_empty() || output.is_empty());
         }

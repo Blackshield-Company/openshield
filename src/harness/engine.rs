@@ -59,7 +59,7 @@ impl Default for HarnessConfig {
             multi_model_enabled: false,
             memory_context_limit: 5,
             skills_enabled: true,
-            primary_model: "kimi-k2.6".to_string(),
+            primary_model: "k3".to_string(),
             secondary_models: Vec::new(),
         }
     }
@@ -968,24 +968,47 @@ impl HarnessEngine {
             }
         }
 
-        // Normalize args and execute
+        // Normalize args and execute — inside spawn_blocking with a hard
+        // timeout so a stuck tool (e.g. a terminal command waiting on stdin)
+        // can never wedge the whole turn forever.
         let normalized_args = normalize_tool_args(tool_name, args);
-        let result = match execute_tool(tool_name, &normalized_args) {
+        let tool_name_owned = tool_name.clone();
+        let exec_handle = tokio::task::spawn_blocking(move || {
+            execute_tool(&tool_name_owned, &normalized_args)
+        });
+        let exec_result =
+            match tokio::time::timeout(std::time::Duration::from_secs(120), exec_handle).await {
+                Ok(join_result) => join_result.unwrap_or_else(|e| {
+                    Some(Err(anyhow::anyhow!("Tool task panicked: {}", e)))
+                }),
+                Err(_) => Some(Err(anyhow::anyhow!(
+                    "Tool '{}' timed out after 120s",
+                    tool_name
+                ))),
+            };
+        let result = match exec_result {
             Some(Ok(output)) => {
                 let sanitized = self.security_engine.sanitize_output(tool_name, &output);
+                // Tools report usage/parse failures as Ok(String) — detect them
+                // so the DB and analytics record the real outcome.
+                let ok = !crate::tools::tool_output_indicates_failure(&sanitized);
                 self.security_engine.audit(
                     tool_name,
                     args,
-                    true,
-                    crate::security::RiskLevel::Low,
-                    "approved",
+                    ok,
+                    if ok {
+                        crate::security::RiskLevel::Low
+                    } else {
+                        crate::security::RiskLevel::Medium
+                    },
+                    if ok { "approved" } else { "tool-reported-failure" },
                 );
                 ToolExecutionResult {
                     tool_call_id: tool_call.id.clone(),
                     tool_name: tool_name.clone(),
                     args: args.clone(),
                     result: sanitized,
-                    success: true,
+                    success: ok,
                     execution_time_ms: start.elapsed().as_millis() as u64,
                 }
             }

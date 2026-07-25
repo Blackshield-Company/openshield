@@ -19,7 +19,7 @@
 //! [context_compression]
 //! enabled = true
 //! threshold = 0.8          # Trigger at 80% of context window
-//! summary_model = "kimi-k2.6"  # Model to use for summarization
+//! summary_model = "k3"  # Model to use for summarization
 //! preserve_recent = 4      # Keep N most recent exchanges uncompressed
 //! ```
 
@@ -53,7 +53,7 @@ impl Default for ContextCompressionConfig {
         Self {
             enabled: true,
             threshold: 0.8,
-            summary_model: "kimi-k2.6".to_string(),
+            summary_model: "k3".to_string(),
             preserve_recent: 4,
             max_summary_tokens: 512,
         }
@@ -69,7 +69,7 @@ fn default_threshold() -> f64 {
 }
 
 fn default_summary_model() -> String {
-    "kimi-k2.6".to_string()
+    "k3".to_string()
 }
 
 fn default_preserve_recent() -> usize {

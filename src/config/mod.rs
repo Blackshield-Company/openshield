@@ -478,21 +478,24 @@ impl Default for Config {
             },
         );
 
-        // Kimi via local proxy
+        // Kimi for Coding — direct. The endpoint speaks OpenAI-compatible
+        // natively, no local proxy shim required.
         providers.insert(
             "kimi".to_string(),
             ProviderConfig {
-                base_url: "http://127.0.0.1:8699/v1".to_string(),
+                base_url: "https://api.kimi.com/coding/v1".to_string(),
                 api_key: env_or_placeholder("KIMI_API_KEY"),
                 models: vec![ModelConfig {
-                    name: "kimi-k2.6".to_string(),
-                    context_length: 262100,
+                    name: "k3".to_string(),
+                    context_length: 1048576,
                     cost_per_1k_input: 0.0,
                     cost_per_1k_output: 0.0,
                     capabilities: vec![
                         "code".to_string(),
                         "chat".to_string(),
                         "analysis".to_string(),
+                        "reasoning".to_string(),
+                        "vision".to_string(),
                     ],
                 }],
                 kind: ProviderKind::OpenAiCompatible,
@@ -655,7 +658,7 @@ impl Default for Config {
         );
 
         let default_model = if std::env::var("KIMI_API_KEY").is_ok() {
-            "kimi-k2.6".to_string()
+            "k3".to_string()
         } else {
             "gpt-4o".to_string()
         };
@@ -769,7 +772,7 @@ mod tests {
                 base_url: "https://api.kimi.com/coding/v1".to_string(),
                 api_key: "test-key".to_string(),
                 models: vec![ModelConfig {
-                    name: "kimi-k2.6".to_string(),
+                    name: "k3".to_string(),
                     context_length: 128000,
                     cost_per_1k_input: 0.01,
                     cost_per_1k_output: 0.02,
@@ -805,7 +808,7 @@ mod tests {
 
         Config {
             version: crate::VERSION.to_string(),
-            default_model: "kimi-k2.6".to_string(),
+            default_model: "k3".to_string(),
             providers,
             memory_db_path: std::path::PathBuf::from("/tmp/test_openshark_memory.db"),
             tools_enabled: vec!["fs".to_string(), "terminal".to_string()],
@@ -841,7 +844,7 @@ mod tests {
     #[test]
     fn test_config_default_model() {
         let config = create_test_config();
-        assert_eq!(config.default_model, "kimi-k2.6");
+        assert_eq!(config.default_model, "k3");
     }
 
     #[test]
@@ -919,7 +922,7 @@ mod tests {
     #[test]
     fn test_find_provider_for_model() {
         let config = create_test_config();
-        let (name, _) = config.find_provider_for_model("kimi-k2.6").unwrap();
+        let (name, _) = config.find_provider_for_model("k3").unwrap();
         assert_eq!(name, "kimi");
     }
 
