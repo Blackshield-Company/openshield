@@ -241,7 +241,7 @@ pub fn build_rendered_lines(app: &crate::tui::App, width: usize) -> (Vec<String>
         all_lines.extend(reasoning_lines);
     }
 
-    (all_lines, app.scroll)
+    (all_lines, app.effective_scroll())
 }
 
 fn format_info_line(label: &str, value: &str, width: usize) -> String {
