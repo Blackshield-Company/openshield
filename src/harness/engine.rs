@@ -68,10 +68,17 @@ impl Default for HarnessConfig {
 /// The central AI harness engine.
 impl HarnessEngine {
     /// Build a static system prompt used for tests and headless mode.
+    ///
+    /// The harness is OpenShark; the soul is synthclaw (from AgentIdentity::default).
+    /// Both names appear here — OpenShark is the software, synthclaw is the agent.
     #[allow(dead_code)]
     pub fn build_system_prompt_static() -> String {
+        let soul = crate::agent::soul::AgentSoul::from_config(
+            crate::config::AgentIdentity::default(),
+        );
         let mut prompt = String::from("You are OpenShark, an autonomous AI coding agent.\n\n");
-        prompt.push_str("## AVAILABLE TOOLS\n");
+        prompt.push_str(&soul.system_prompt());
+        prompt.push_str("\n## AVAILABLE TOOLS\n");
         prompt.push_str("You have access to tools. When you need to use a tool, respond with a tool call. ");
         prompt.push_str("The system will execute the tool and return the result to you.\n");
         prompt.push_str("## MEMORY\n");
@@ -1014,22 +1021,35 @@ impl HarnessEngine {
 
         // Normalize args and execute — inside spawn_blocking with a hard
         // timeout so a stuck tool (e.g. a terminal command waiting on stdin)
-        // can never wedge the whole turn forever.
+        // can never wedge the whole turn forever. Timeout comes from
+        // [autonomy] tool_timeout_secs; 0 = no limit (fully autonomous).
         let normalized_args = normalize_tool_args(tool_name, args);
+        let tool_timeout_secs = self.app_config.autonomy.tool_timeout_secs;
         let tool_name_owned = tool_name.clone();
         let exec_handle = tokio::task::spawn_blocking(move || {
             execute_tool(&tool_name_owned, &normalized_args)
         });
-        let exec_result =
-            match tokio::time::timeout(std::time::Duration::from_secs(120), exec_handle).await {
+        let exec_result = if tool_timeout_secs == 0 {
+            exec_handle.await.unwrap_or_else(|e| {
+                Some(Err(anyhow::anyhow!("Tool task panicked: {}", e)))
+            })
+        } else {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(tool_timeout_secs),
+                exec_handle,
+            )
+            .await
+            {
                 Ok(join_result) => join_result.unwrap_or_else(|e| {
                     Some(Err(anyhow::anyhow!("Tool task panicked: {}", e)))
                 }),
                 Err(_) => Some(Err(anyhow::anyhow!(
-                    "Tool '{}' timed out after 120s",
-                    tool_name
+                    "Tool '{}' timed out after {}s",
+                    tool_name,
+                    tool_timeout_secs
                 ))),
-            };
+            }
+        };
         let result = match exec_result {
             Some(Ok(output)) => {
                 let sanitized = self.security_engine.sanitize_output(tool_name, &output);
