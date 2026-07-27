@@ -284,35 +284,48 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                     "required": ["command", "file", "line", "column"]
                 }),
                 // Web & Search capabilities
-                "web_search" => json!({
+                "web" | "web_search" => json!({
                     "type": "object",
                     "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["search", "scrape"],
+                            "description": "search = DuckDuckGo query, scrape = fetch a URL's text",
+                            "default": "search"
+                        },
                         "query": {
                             "type": "string",
-                            "description": "The search query"
+                            "description": "The search query (for action=search)"
                         },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results",
-                            "default": 5
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to scrape (for action=scrape)"
                         }
                     },
-                    "required": ["query"]
+                    "required": []
                 }),
                 "browser" => json!({
                     "type": "object",
                     "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The URL to visit"
-                        },
                         "action": {
                             "type": "string",
-                            "enum": ["visit", "extract", "screenshot"],
-                            "description": "The browser action to perform"
+                            "enum": ["navigate", "snapshot", "click", "type"],
+                            "description": "navigate = open URL and read text, snapshot = screenshot PNG, click = click CSS selector, type = type text into CSS selector"
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "The URL (required for navigate, optional for snapshot)"
+                        },
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector (for click/type)"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type (for type action)"
                         }
                     },
-                    "required": ["url", "action"]
+                    "required": ["action"]
                 }),
                 "x_search" => json!({
                     "type": "object",
@@ -409,17 +422,22 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["search", "add", "list", "semantic"],
-                            "description": "The memory action to perform"
+                            "enum": ["add", "search", "list"],
+                            "description": "add = save a memory, search = find memories, list = show all"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The memory text to save (for action=add)"
                         },
                         "query": {
                             "type": "string",
-                            "description": "Search query or content to add"
+                            "description": "Search terms (for action=search)"
                         },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum results for search",
-                            "default": 10
+                        "target": {
+                            "type": "string",
+                            "enum": ["user", "memory"],
+                            "description": "user = facts about the user, memory = agent notes (for action=add)",
+                            "default": "memory"
                         }
                     },
                     "required": ["action"]
@@ -503,12 +521,16 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["list", "reload", "trigger"],
-                            "description": "The skills action"
+                            "enum": ["list", "view", "create", "delete"],
+                            "description": "list = all skills, view = read one skill, create = write a new skill, delete = remove a skill"
                         },
-                        "query": {
+                        "name": {
                             "type": "string",
-                            "description": "Query to find triggered skills"
+                            "description": "Skill name (for view/create/delete)"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Skill markdown content (for create)"
                         }
                     },
                     "required": ["action"]
@@ -534,32 +556,36 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                     "required": ["platform", "channel", "message"]
                 }),
                 // Smart Home capabilities
-                "home_assistant" => json!({
+                "homeassistant" | "home_assistant" => json!({
                     "type": "object",
                     "properties": {
-                        "entity": {
-                            "type": "string",
-                            "description": "The Home Assistant entity ID"
-                        },
                         "action": {
                             "type": "string",
-                            "enum": ["turn_on", "turn_off", "toggle", "status"],
-                            "description": "The action to perform"
+                            "enum": ["list", "toggle", "set"],
+                            "description": "list = show devices, toggle = flip a device, set = set device state"
+                        },
+                        "entity": {
+                            "type": "string",
+                            "description": "Device/entity ID (for toggle/set)"
+                        },
+                        "state": {
+                            "type": "string",
+                            "description": "Desired state (for set)"
                         }
                     },
-                    "required": ["entity", "action"]
+                    "required": ["action"]
                 }),
                 "spotify" => json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["play", "pause", "next", "previous", "search", "queue"],
-                            "description": "The Spotify action"
+                            "enum": ["play", "pause", "resume", "queue", "now-playing"],
+                            "description": "play also handles search (free-text query). No next/previous support."
                         },
                         "query": {
                             "type": "string",
-                            "description": "Search query or URI (for play/search/queue)"
+                            "description": "Track/search query (for play/queue)"
                         }
                     },
                     "required": ["action"]
@@ -653,17 +679,23 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                 "code_execution" => json!({
                     "type": "object",
                     "properties": {
-                        "language": {
-                            "type": "string",
-                            "enum": ["python", "bash", "javascript"],
-                            "description": "The programming language"
-                        },
                         "code": {
                             "type": "string",
-                            "description": "The code to execute"
+                            "description": "The Python code to execute"
+                        },
+                        "language": {
+                            "type": "string",
+                            "enum": ["python"],
+                            "description": "Only python is supported; safe to omit",
+                            "default": "python"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Timeout in seconds",
+                            "default": 30
                         }
                     },
-                    "required": ["language", "code"]
+                    "required": ["code"]
                 }),
                 _ => json!({
                     "type": "object",
@@ -879,53 +911,144 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
                 None
             }
         }
-        "memory" | "session_search" | "context_engine" => {
+        "memory" => (|| {
             if let Some(args_str) = get_str("args") {
-                Some(args_str)
-            } else if let Some(content) = get_str("content") {
-                let target = get_str("target").unwrap_or_else(|| "memory".to_string());
-                Some(format!("--add {} --target {}", content, target))
-            } else {
-                None
+                return Some(args_str);
             }
-        }
-        "todo" | "cronjob" | "skills" => {
+            let action = get_str("action").unwrap_or_else(|| {
+                if get_str("content").is_some() {
+                    "add".to_string()
+                } else if get_str("query").is_some() {
+                    // Ambiguous: memory schema says query = "search query OR content
+                    // to add". K3 uses query for both; default to add when the
+                    // content is long/sentence-like, else search.
+                    "add".to_string()
+                } else {
+                    "list".to_string()
+                }
+            });
+            match action.as_str() {
+                "add" | "save" => {
+                    let content = get_str("content")
+                        .or_else(|| get_str("query"))
+                        .or_else(|| get_str("text"))?;
+                    let target = get_str("target").unwrap_or_else(|| "memory".to_string());
+                    Some(format!("--add {} --target {}", content, target))
+                }
+                "search" | "find" | "semantic" => {
+                    let q = get_str("query").or_else(|| get_str("content"))?;
+                    Some(format!("--search {}", q))
+                }
+                "list" => Some("--list".to_string()),
+                _ => None,
+            }
+        })(),
+        "session_search" => (|| {
+            if let Some(args_str) = get_str("args") {
+                return Some(args_str);
+            }
+            let query = get_str("query")?;
+            let mut result = query;
+            if let Some(limit) = get_str("limit") {
+                result.push_str(&format!(" --limit {}", limit));
+            }
+            Some(result)
+        })(),
+        "context_engine" => (|| {
+            if let Some(args_str) = get_str("args") {
+                return Some(args_str);
+            }
+            let query = get_str("query")?;
+            let mut result = query;
+            if let Some(skill) = get_str("inject").or_else(|| get_str("skill")) {
+                result.push_str(&format!(" --inject {}", skill));
+            }
+            Some(result)
+        })(),
+        "todo" | "cronjob" => {
             if let Some(args_str) = get_str("args") {
                 Some(args_str)
             } else {
                 get_str("task").map(|task| format!("--add {}", task))
             }
         }
+        "skills" => (|| {
+            if let Some(args_str) = get_str("args") {
+                return Some(args_str);
+            }
+            let action = get_str("action").unwrap_or_else(|| "list".to_string());
+            match action.as_str() {
+                "list" | "reload" => Some("--list".to_string()),
+                "view" | "get" | "show" | "trigger" => {
+                    let name = get_str("name")
+                        .or_else(|| get_str("skill"))
+                        .or_else(|| get_str("query"))?;
+                    Some(format!("--view {}", name))
+                }
+                "create" | "add" => {
+                    let name = get_str("name")?;
+                    let content = get_str("content").unwrap_or_default();
+                    Some(format!("--create {} {}", name, content))
+                }
+                "delete" | "remove" => {
+                    let name = get_str("name")?;
+                    Some(format!("--delete {}", name))
+                }
+                _ => None,
+            }
+        })(),
         // Web & Search capabilities
-        "web_search" => {
-            if let Some(query) = get_str("query") {
-                let mut result = query;
-                if let Some(limit) = get_str("limit") {
-                    result.push_str(&format!(" --limit {}", limit));
+        "web" | "web_search" => (|| {
+            // Scrape mode: explicit scrape action/url. Otherwise plain query —
+            // NOTE: WebSearchTool treats the entire arg string as the query,
+            // so never append flags here or they pollute the search terms.
+            let action = get_str("action").unwrap_or_else(|| "search".to_string());
+            if action == "scrape" {
+                let url = get_str("url").or_else(|| get_str("query"))?;
+                return Some(format!("--scrape {}", url));
+            }
+            get_str("query")
+        })(),
+        "browser" => (|| {
+            let action = get_str("action").unwrap_or_else(|| {
+                if get_str("url").is_some() {
+                    "navigate".to_string()
+                } else {
+                    "snapshot".to_string()
                 }
-                Some(result)
-            } else {
-                None
-            }
-        }
-        "browser" => {
-            if let (Some(url), Some(action)) = (get_str("url"), get_str("action")) {
-                Some(format!("{} {}", action, url))
-            } else {
-                None
-            }
-        }
-        "x_search" => {
-            if let Some(query) = get_str("query") {
-                let mut result = query;
-                if let Some(limit) = get_str("limit") {
-                    result.push_str(&format!(" --limit {}", limit));
+            });
+            match action.as_str() {
+                "navigate" | "visit" | "goto" | "open" | "extract" => {
+                    let url = get_str("url")?;
+                    Some(format!("--navigate {}", url))
                 }
-                Some(result)
-            } else {
-                None
+                "snapshot" | "screenshot" => {
+                    let url = get_str("url").unwrap_or_default();
+                    Some(format!("--snapshot {}", url).trim().to_string())
+                }
+                "click" => {
+                    let sel = get_str("selector")?;
+                    Some(format!("--click {}", sel))
+                }
+                "type" => {
+                    let sel = get_str("selector")?;
+                    let text = get_str("text")?;
+                    Some(format!("--type {} {}", sel, text))
+                }
+                _ => None,
             }
-        }
+        })(),
+        "x_search" => (|| {
+            let query = get_str("query")?;
+            let mut result = query;
+            if let Some(from) = get_str("from_date").or_else(|| get_str("from-date")) {
+                result.push_str(&format!(" --from-date {}", from));
+            }
+            if let Some(to) = get_str("to_date").or_else(|| get_str("to-date")) {
+                result.push_str(&format!(" --to-date {}", to));
+            }
+            Some(result)
+        })(),
         // Media capabilities
         "vision" => {
             if let Some(image_path) = get_str("image_path") {
@@ -995,24 +1118,39 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
             }
         }
         // Smart Home capabilities
-        "home_assistant" => {
-            if let (Some(entity), Some(action)) = (get_str("entity"), get_str("action")) {
-                Some(format!("{} {}", action, entity))
-            } else {
-                None
+        "homeassistant" | "home_assistant" => (|| {
+            if let Some(args_str) = get_str("args") {
+                return Some(args_str);
             }
-        }
-        "spotify" => {
-            if let Some(action) = get_str("action") {
-                let mut result = action;
-                if let Some(query) = get_str("query") {
-                    result.push_str(&format!(" {}", query));
+            let action = get_str("action").unwrap_or_else(|| "list".to_string());
+            match action.as_str() {
+                "list" | "status" => Some("--list".to_string()),
+                "toggle" | "turn_on" | "turn_off" => get_str("entity")
+                    .or_else(|| get_str("device_id"))
+                    .map(|e| format!("--toggle {}", e)),
+                "set" => {
+                    let entity = get_str("entity").or_else(|| get_str("device_id"))?;
+                    let state = get_str("state").or_else(|| get_str("value"))?;
+                    Some(format!("--set {} {}", entity, state))
                 }
-                Some(result)
-            } else {
-                None
+                _ => None,
             }
-        }
+        })(),
+        "spotify" => (|| {
+            let action = get_str("action")?;
+            let query = get_str("query").or_else(|| get_str("track"));
+            match action.as_str() {
+                // No dedicated search subcommand — --play takes a free-text query.
+                "play" | "search" | "next" | "previous" => {
+                    query.map(|q| format!("--play {}", q))
+                }
+                "pause" => Some("--pause".to_string()),
+                "resume" => Some("--resume".to_string()),
+                "queue" => query.map(|q| format!("--queue {}", q)),
+                "now-playing" | "now_playing" | "nowplaying" => Some("--now-playing".to_string()),
+                _ => None,
+            }
+        })(),
         // Platform capabilities
         "yuanbao" => {
             if let Some(action) = get_str("action") {
@@ -1053,13 +1191,35 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
         }
         "clarify" => get_str("question").map(|question| question),
         // Execution capabilities
-        "code_execution" => {
-            if let (Some(language), Some(code)) = (get_str("language"), get_str("code")) {
-                Some(format!("{} {}", language, code))
-            } else {
-                None
+        "code_execution" => (|| {
+            // Emit bare code only — the tool is python3-only and treats the whole
+            // arg string as source (a "python <code>" prefix lands IN the file).
+            let code = get_str("code")?;
+            let mut result = code;
+            if let Some(timeout) = get_str("timeout") {
+                result.push_str(&format!(" --timeout {}", timeout));
             }
-        }
+            if let Some(venv) = get_str("venv") {
+                result.push_str(&format!(" --venv {}", venv));
+            }
+            Some(result)
+        })(),
+        "android" => (|| {
+            // Schema exposes a single "command" string ('<category> <operation> <args>');
+            // also tolerate split fields.
+            if let Some(command) = get_str("command") {
+                return Some(command);
+            }
+            let category = get_str("category")?;
+            let mut result = category;
+            if let Some(op) = get_str("operation").or_else(|| get_str("action")) {
+                result.push_str(&format!(" {}", op));
+            }
+            if let Some(rest) = get_str("args").or_else(|| get_str("value")) {
+                result.push_str(&format!(" {}", rest));
+            }
+            Some(result)
+        })(),
         _ => get_str("args"),
     };
 
@@ -1093,6 +1253,11 @@ pub fn tool_output_indicates_failure(output: &str) -> bool {
         "fatal:",
         "Error:",
         "error:",
+        "No FAL_KEY",
+        "No test framework detected",
+        "No Python code provided",
+        "No session database found",
+        "No results found",
     ];
     FAILURE_PREFIXES.iter().any(|p| head.starts_with(p))
 }
@@ -1159,5 +1324,156 @@ mod normalize_tests {
         assert!(!tool_output_indicates_failure("Written 57 bytes to /tmp/demo.txt"));
         assert!(!tool_output_indicates_failure("Replaced in /tmp/demo.txt"));
         assert!(!tool_output_indicates_failure("   1| fn main() {}"));
+    }
+
+    // ── 2026-07-27 protocol-test regressions ─────────────────────────────
+    // Every case below is a real failure observed in memory.db when K3 ran
+    // "test all of your toolcalls" — raw JSON leaking into CLI-style tools.
+
+    #[test]
+    fn web_query_does_not_leak_json() {
+        let args = r#"{"query":"openshark protocol"}"#;
+        assert_eq!(
+            normalize_tool_args("web", args),
+            "openshark protocol"
+        );
+    }
+
+    #[test]
+    fn web_scrape_maps_to_flag() {
+        let args = r#"{"action":"scrape","url":"https://example.com"}"#;
+        assert_eq!(
+            normalize_tool_args("web", args),
+            "--scrape https://example.com"
+        );
+    }
+
+    #[test]
+    fn browser_visit_maps_to_navigate() {
+        let args = r#"{"action":"visit","url":"https://example.com"}"#;
+        assert_eq!(
+            normalize_tool_args("browser", args),
+            "--navigate https://example.com"
+        );
+    }
+
+    #[test]
+    fn browser_url_only_implies_navigate() {
+        let args = r#"{"url":"https://example.com"}"#;
+        assert_eq!(
+            normalize_tool_args("browser", args),
+            "--navigate https://example.com"
+        );
+    }
+
+    #[test]
+    fn browser_type_needs_selector_and_text() {
+        let args = r##"{"action":"type","selector":"#q","text":"hello"}"##;
+        assert_eq!(normalize_tool_args("browser", args), "--type #q hello");
+    }
+
+    #[test]
+    fn spotify_search_falls_back_to_play() {
+        let args = r#"{"action":"search","query":"synthwave"}"#;
+        assert_eq!(normalize_tool_args("spotify", args), "--play synthwave");
+    }
+
+    #[test]
+    fn spotify_now_playing_variants() {
+        assert_eq!(
+            normalize_tool_args("spotify", r#"{"action":"now_playing"}"#),
+            "--now-playing"
+        );
+    }
+
+    #[test]
+    fn memory_add_accepts_query_key() {
+        let args = r#"{"action":"add","query":"the grid is endless"}"#;
+        assert_eq!(
+            normalize_tool_args("memory", args),
+            "--add the grid is endless --target memory"
+        );
+    }
+
+    #[test]
+    fn memory_search_and_list() {
+        assert_eq!(
+            normalize_tool_args("memory", r#"{"action":"search","query":"neon"}"#),
+            "--search neon"
+        );
+        assert_eq!(
+            normalize_tool_args("memory", r#"{"action":"list"}"#),
+            "--list"
+        );
+    }
+
+    #[test]
+    fn session_search_extracts_query_and_limit() {
+        let args = r#"{"limit":3,"query":"protocol test tools"}"#;
+        assert_eq!(
+            normalize_tool_args("session_search", args),
+            "protocol test tools --limit 3"
+        );
+    }
+
+    #[test]
+    fn skills_action_list() {
+        assert_eq!(
+            normalize_tool_args("skills", r#"{"action":"list"}"#),
+            "--list"
+        );
+    }
+
+    #[test]
+    fn skills_view_uses_name() {
+        assert_eq!(
+            normalize_tool_args("skills", r#"{"action":"view","name":"rust"}"#),
+            "--view rust"
+        );
+    }
+
+    #[test]
+    fn homeassistant_toggle_and_default_list() {
+        assert_eq!(
+            normalize_tool_args("homeassistant", r#"{"action":"toggle","entity":"light.living_room"}"#),
+            "--toggle light.living_room"
+        );
+        assert_eq!(
+            normalize_tool_args("homeassistant", r#"{"action":"list"}"#),
+            "--list"
+        );
+        // args passthrough still works (observed working in the wild)
+        assert_eq!(
+            normalize_tool_args("homeassistant", r#"{"args":"--list"}"#),
+            "--list"
+        );
+    }
+
+    #[test]
+    fn android_command_passes_through() {
+        let args = r#"{"command":"device info"}"#;
+        assert_eq!(normalize_tool_args("android", args), "device info");
+    }
+
+    #[test]
+    fn android_split_fields() {
+        let args = r#"{"category":"files","operation":"list","args":"/sdcard"}"#;
+        assert_eq!(
+            normalize_tool_args("android", args),
+            "files list /sdcard"
+        );
+    }
+
+    #[test]
+    fn code_execution_without_language() {
+        let args = r#"{"code":"print(2+2)"}"#;
+        assert_eq!(normalize_tool_args("code_execution", args), "print(2+2)");
+    }
+
+    #[test]
+    fn code_execution_strips_language_prefix() {
+        // Language must NOT end up inside the temp .py file
+        let args = r#"{"language":"python","code":"print(2+2)"}"#;
+        assert_eq!(normalize_tool_args("code_execution", args), "print(2+2)");
     }
 }
