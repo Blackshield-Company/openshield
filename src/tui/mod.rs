@@ -79,8 +79,16 @@ pub(crate) struct App {
     cursor_position: usize,
     /// Chat history (scrollable).
     messages: Vec<ChatMessage>,
-    /// Scroll offset for chat history.
+    /// Scroll offset for chat history (line-based, into the rendered feed).
     scroll: usize,
+    /// When true, the feed stays pinned to the newest content (auto-follow).
+    /// Scrolling up unpins; scrolling back to the bottom re-pins.
+    follow_tail: bool,
+    /// Feed geometry from the last rendered frame — total wrapped lines and
+    /// viewport height. draw_unified_feed refreshes these every frame so
+    /// scroll math works in real lines, not message counts.
+    feed_total_lines: usize,
+    feed_viewport: usize,
     /// Whether the app should exit.
     should_exit: bool,
     /// Ctrl+C press counter for double-tap quit.
@@ -472,6 +480,9 @@ impl App {
             cursor_position: 0,
             messages: Vec::new(),
             scroll: 0,
+            follow_tail: true,
+            feed_total_lines: 0,
+            feed_viewport: 1,
             should_exit: false,
             ctrl_c_count: 0,
             last_ctrl_c: None,
@@ -1283,16 +1294,36 @@ impl App {
         self.messages[start..end].iter().collect()
     }
 
-    /// Scroll up in chat history — smooth line-by-line.
-    fn scroll_up(&mut self, amount: usize) {
-        self.scroll = self.scroll.saturating_sub(amount);
+    /// Effective first visible line of the feed, honoring tail-follow.
+    /// Uses the feed geometry measured by the last rendered frame.
+    pub(crate) fn effective_scroll(&self) -> usize {
+        let max = self.feed_total_lines.saturating_sub(self.feed_viewport);
+        if self.follow_tail {
+            max
+        } else {
+            self.scroll.min(max)
+        }
     }
 
-    /// Scroll down in chat history — smooth line-by-line.
+    /// Scroll up in chat history — line-based. Unpins from the tail.
+    fn scroll_up(&mut self, amount: usize) {
+        self.scroll = self.effective_scroll().saturating_sub(amount);
+        self.follow_tail = false;
+    }
+
+    /// Scroll down in chat history — line-based. Re-pins on hitting bottom.
+    /// (Used to clamp to messages.len() — a MESSAGE count applied to a LINE
+    /// offset — which made the bottom of the feed unreachable.)
     fn scroll_down(&mut self, amount: usize) {
-        let total_lines = self.messages.len();
-        let max_scroll = total_lines.saturating_sub(1);
-        self.scroll = (self.scroll + amount).min(max_scroll);
+        let max = self.feed_total_lines.saturating_sub(self.feed_viewport);
+        let new = self.effective_scroll().saturating_add(amount);
+        if new >= max {
+            self.follow_tail = true;
+            self.scroll = max;
+        } else {
+            self.scroll = new;
+            self.follow_tail = false;
+        }
     }
 
     /// Get session duration as formatted string.
@@ -1514,8 +1545,11 @@ async fn run_app(
                 Event::Mouse(mouse_event) if app.mouse_enabled => {
                     let action = mouse::translate_mouse_event(mouse_event, app);
                     match action {
-                        mouse::MouseAction::ChatClick { y } => {
-                            app.scroll = y.saturating_sub(5);
+                        mouse::MouseAction::ChatClick { y: _ } => {
+                            // Plain click does NOT move scroll — clicking to
+                            // re-position the viewport made the feed jump
+                            // erratically. Drag-select copies; scroll via
+                            // wheel / PgUp / PgDn.
                         }
                         mouse::MouseAction::InputClick => {
                             // Focus input — already focused in this design
@@ -1524,10 +1558,12 @@ async fn run_app(
                             app.sidebar_scroll = y;
                         }
                         mouse::MouseAction::ScrollUp => {
-                            app.scroll_up(1);
+                            app.scroll_up(3);
+                            render::request_redraw();
                         }
                         mouse::MouseAction::ScrollDown => {
-                            app.scroll_down(1);
+                            app.scroll_down(3);
+                            render::request_redraw();
                         }
                         mouse::MouseAction::DragStart { x, y } => {
                             app.mouse_state.selecting = true;
@@ -1556,8 +1592,8 @@ async fn run_app(
                                     false
                                 };
                                 if !moved {
-                                    // Plain click (no drag) — keep the old click-to-scroll behavior
-                                    app.scroll = (y as usize).saturating_sub(5);
+                                    // Plain click (no drag) — no-op (used to
+                                    // jump scroll to the clicked row)
                                 }
                                 // Copy-on-select: extract text and copy to clipboard
                                 if moved
@@ -1808,6 +1844,9 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     let input = app.input.trim().to_string();
                     app.input.clear();
                     app.cursor_position = 0;
+                    // Snap back to the tail so the user sees their message
+                    // and the response stream
+                    app.follow_tail = true;
                     process_user_input(app, input).await?;
                 }
                 crate::tui::render::request_redraw();
@@ -2317,6 +2356,9 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     let _ = std::fs::write(&app.history_file, app.input_history.join("\n"));
                     app.input.clear();
                     app.cursor_position = 0;
+                    // Snap back to the tail so the user sees their message
+                    // and the response stream
+                    app.follow_tail = true;
                     process_user_input(app, input).await?;
                 }
             }
@@ -2414,18 +2456,13 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::PageUp => {
-            if app.focused_pane == 0 {
-                app.sidebar_scroll = app.sidebar_scroll.saturating_sub(5);
-            } else {
-                app.scroll_up(5);
-            }
+            // Always page the chat feed (no sidebar is rendered in this layout)
+            let page = app.feed_viewport.saturating_sub(2).max(1);
+            app.scroll_up(page);
         }
         KeyCode::PageDown => {
-            if app.focused_pane == 0 {
-                app.sidebar_scroll += 5;
-            } else {
-                app.scroll_down(5);
-            }
+            let page = app.feed_viewport.saturating_sub(2).max(1);
+            app.scroll_down(page);
         }
         KeyCode::Esc => {
             if app.show_comparison {
@@ -3164,6 +3201,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 app.tool_calls_count = export.metadata.tool_calls_count;
                 app.model_messages = export.to_model_messages();
                 app.scroll = 0;
+                app.follow_tail = true;
 
                 app.add_system_message(format!(
                     "📂 Session imported from {} (v{}, exported {})",

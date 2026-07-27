@@ -16,7 +16,7 @@ use crate::tui::{App, ChatMessage};
 /// clearing the entire screen once and flushing once at frame end.
 pub fn draw_unified_feed(
     out: &mut impl Write,
-    app: &App,
+    app: &mut App,
     area: (u16, u16, u16, u16),
 ) -> io::Result<()> {
     let (x, y, width, height) = area;
@@ -87,9 +87,13 @@ pub fn draw_unified_feed(
         all_lines.extend(reasoning_lines);
     }
 
-    // Calculate scroll offset
+    // Store feed geometry so scroll math (scroll_up/down, PgUp/PgDn, wheel)
+    // works in real rendered lines, then resolve the effective scroll offset
+    // (tail-follow pins to the bottom unless the user scrolled up).
     let total_lines = all_lines.len();
-    let scroll = app.scroll.min(total_lines.saturating_sub(inner_height));
+    app.feed_total_lines = total_lines;
+    app.feed_viewport = inner_height;
+    let scroll = app.effective_scroll();
 
     // Draw visible lines — NO Clear(UntilNewLine), just Print. The screen was
     // already cleared once by the caller at frame start.
