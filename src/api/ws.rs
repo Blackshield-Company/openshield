@@ -74,8 +74,20 @@ pub async fn ws_agent(ws: WebSocketUpgrade, State(_state): State<AppState>) -> i
     ws.on_upgrade(handle_agent_ws)
 }
 
-fn build_provider(config: &crate::config::Config) -> Option<(crate::providers::Provider, String)> {
-    let (name, pc) = config.providers.iter().next()?;
+fn build_provider(
+    config: &crate::config::Config,
+    model: &str,
+) -> Option<(crate::providers::Provider, String)> {
+    // Route to the provider that actually owns the requested model.
+    // Fall back to the first provider for models not listed in config
+    // (e.g. proxies that accept arbitrary model names).
+    let (name, pc) = config.find_provider_for_model(model).or_else(|| {
+        config
+            .providers
+            .iter()
+            .next()
+            .map(|(n, p)| (n.clone(), p.clone()))
+    })?;
     let provider = crate::providers::Provider::new(
         name.clone(),
         pc.base_url.clone(),
@@ -128,7 +140,7 @@ async fn handle_chat_ws(mut socket: WebSocket) {
                 };
                 let model = model.unwrap_or_else(|| config.default_model.clone());
 
-                let (provider, _) = match build_provider(&config) {
+                let (provider, _) = match build_provider(&config, &model) {
                     Some(p) => p,
                     None => {
                         let _ = send_json(
@@ -248,7 +260,7 @@ async fn handle_agent_ws(mut socket: WebSocket) {
                 };
                 let model = config.default_model.clone();
 
-                let (provider, _) = match build_provider(&config) {
+                let (provider, _) = match build_provider(&config, &model) {
                     Some(p) => p,
                     None => {
                         let _ = send_json(
@@ -441,5 +453,51 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("complete"));
+    }
+
+    #[test]
+    fn test_build_provider_routes_to_model_owner() {
+        use crate::config::{Config, ModelConfig, ProviderConfig, ProviderKind};
+        use std::collections::HashMap;
+
+        let model = |name: &str| ModelConfig {
+            name: name.to_string(),
+            context_length: 128000,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            capabilities: vec![],
+        };
+        let provider = |url: &str, models| ProviderConfig {
+            base_url: url.to_string(),
+            api_key: "test".to_string(),
+            models,
+            kind: ProviderKind::OpenAiCompatible,
+            headers: HashMap::new(),
+            env_file: None,
+        };
+
+        let mut config = Config::default();
+        config.providers.clear();
+        config.providers.insert(
+            "kimi".to_string(),
+            provider("https://api.kimi.com/coding/v1", vec![model("k3")]),
+        );
+        config.providers.insert(
+            "llama-swap".to_string(),
+            provider("http://127.0.0.1:8080/v1", vec![model("synthclaw-fast")]),
+        );
+
+        // Regression: default_model owned by kimi must route to kimi even
+        // when HashMap order would surface llama-swap first.
+        let (p, name) = build_provider(&config, "k3").unwrap();
+        assert_eq!(name, "kimi");
+        assert_eq!(p.base_url, "https://api.kimi.com/coding/v1");
+
+        let (_, name) = build_provider(&config, "synthclaw-fast").unwrap();
+        assert_eq!(name, "llama-swap");
+
+        // Unlisted model → first-provider fallback, never a panic.
+        let (_, name) = build_provider(&config, "unlisted-model").unwrap();
+        assert!(name == "kimi" || name == "llama-swap");
     }
 }
