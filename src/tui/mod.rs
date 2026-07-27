@@ -411,7 +411,7 @@ impl App {
             memory.create_session_with_project(&session_id, &model, "general", &project_path)?;
         }
 
-        let persona_registry = crate::agent::persona::PersonaRegistry::new();
+        let persona_registry = crate::agent::persona::PersonaRegistry::new(&config.agent);
         let soul_prompt = persona_registry.active_system_prompt();
 
         // Build filesystem capabilities description
@@ -1488,24 +1488,28 @@ async fn run_app(
             crate::tui::render::request_redraw();
         }
 
-        // Stall watchdog: if a stream has been running for over 4 minutes,
-        // unwedge the UI no matter where the background task is stuck
-        // (hung HTTP request, stuck tool, dead channel). The orphaned task's
-        // sends will fail silently once we drop the receiver.
-        if app.is_streaming
+        // Stall watchdog: if a stream has been inactive for over
+        // [autonomy] stream_stall_timeout_secs, unwedge the UI no matter where
+        // the background task is stuck (hung HTTP request, stuck tool, dead
+        // channel). 0 = disabled (fully autonomous). The orphaned task's sends
+        // will fail silently once we drop the receiver.
+        let stall_timeout = app.config.autonomy.stream_stall_timeout_secs;
+        if stall_timeout > 0
+            && app.is_streaming
             && let Some(started) = app.stream_start_time
-            && started.elapsed() > Duration::from_secs(240)
+            && started.elapsed() > Duration::from_secs(stall_timeout)
         {
             app.is_streaming = false;
             app.stream_start_time = None;
             app.is_reasoning = false;
             app.reasoning_content.clear();
             app.stream_rx = None;
-            app.add_system_message(
-                "⚠️ Response stalled for 4 minutes — stream reset so you can keep chatting. \
-                 Type 'continue' to retry the last turn."
-                    .to_string(),
-            );
+            app.add_system_message(format!(
+                "⚠️ Response stalled for {} minutes — stream reset so you can keep chatting. \
+                 Type 'continue' to retry the last turn. \
+                 (Tune [autonomy] stream_stall_timeout_secs in config.toml, 0 = never reset.)",
+                stall_timeout / 60
+            ));
             crate::tui::render::request_redraw();
         }
 
@@ -1790,25 +1794,32 @@ async fn run_app(
             }
         }
         if app.mode == AppMode::ToolApproval
+            && app.config.autonomy.approval_timeout_secs > 0
             && let Some(shown_at) = app.tool_approval_shown_at
-            && shown_at.elapsed() >= Duration::from_secs(60)
+            && shown_at.elapsed() >= Duration::from_secs(app.config.autonomy.approval_timeout_secs)
         {
-            let tool_name = app
-                .pending_suggestion
-                .as_ref()
-                .map(|s| s.tool_name.clone())
-                .unwrap_or_default();
-            app.pending_suggestion = None;
-            app.mode = AppMode::Normal;
-            app.tool_approval_shown_at = None;
-            app.add_system_message(format!(
-                "⏭ Tool approval timed out after 60s{}.",
-                if tool_name.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(" for {}", tool_name)
-                }
-            ));
+            if app.config.autonomy.enabled {
+                // Fully autonomous: approval prompts approve themselves.
+                approve_pending_tool(app, "auto-approved (autonomy)");
+            } else {
+                let tool_name = app
+                    .pending_suggestion
+                    .as_ref()
+                    .map(|s| s.tool_name.clone())
+                    .unwrap_or_default();
+                app.pending_suggestion = None;
+                app.mode = AppMode::Normal;
+                app.tool_approval_shown_at = None;
+                app.add_system_message(format!(
+                    "⏭ Tool approval timed out after {}s{}.",
+                    app.config.autonomy.approval_timeout_secs,
+                    if tool_name.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(" for {}", tool_name)
+                    }
+                ));
+            }
         }
 
         if app.should_exit {
@@ -1817,6 +1828,48 @@ async fn run_app(
     }
 
     Ok(())
+}
+
+/// Approve the pending tool suggestion and spawn its execution task.
+/// Shared by the manual 'y' keypress and the autonomy auto-approve path.
+/// `label` is the verb shown in the confirmation message ("Approved" or
+/// "auto-approved (autonomy)").
+fn approve_pending_tool(app: &mut App, label: &str) {
+    if let Some(suggestion) = app.pending_suggestion.take() {
+        app.mode = AppMode::Normal;
+        app.tool_approval_shown_at = None;
+        app.add_system_message(format!(
+            "✅ {}: {} {}",
+            label, suggestion.tool_name, suggestion.args
+        ));
+
+        // Spawn background task so follow-up responses are processed
+        // through the same event pipeline (handles chained tool calls)
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        app.stream_rx = Some(rx);
+
+        let provider = app.provider.clone();
+        let model = app.model.clone();
+        let model_messages = app.model_messages.clone();
+        let security_engine = app.security_engine.clone();
+        let stall_timeout = app.config.autonomy.stream_stall_timeout_secs;
+
+        tokio::spawn(async move {
+            let _ = execute_approved_tool_task(
+                tx,
+                provider,
+                model,
+                model_messages,
+                security_engine,
+                suggestion,
+                stall_timeout,
+            )
+            .await;
+        });
+    } else {
+        app.mode = AppMode::Normal;
+        app.tool_approval_shown_at = None;
+    }
 }
 
 async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
@@ -1938,35 +1991,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     if app.mode == AppMode::ToolApproval {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if let Some(suggestion) = app.pending_suggestion.take() {
-                    app.mode = AppMode::Normal;
-                    app.add_system_message(format!(
-                        "✅ Approved: {} {}",
-                        suggestion.tool_name, suggestion.args
-                    ));
-
-                    // Spawn background task so follow-up responses are processed
-                    // through the same event pipeline (handles chained tool calls)
-                    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                    app.stream_rx = Some(rx);
-
-                    let provider = app.provider.clone();
-                    let model = app.model.clone();
-                    let model_messages = app.model_messages.clone();
-                    let security_engine = app.security_engine.clone();
-
-                    tokio::spawn(async move {
-                        let _ = execute_approved_tool_task(
-                            tx,
-                            provider,
-                            model,
-                            model_messages,
-                            security_engine,
-                            suggestion,
-                        )
-                        .await;
-                    });
-                }
+                approve_pending_tool(app, "Approved");
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 let tool_name = app
@@ -3938,6 +3963,7 @@ async fn execute_tool_chain(
     security_engine: &crate::security::SecurityEngine,
     tools: &[(String, String)],
     _original_content: &str,
+    stall_timeout_secs: u64,
 ) -> Result<()> {
     if tools.is_empty() {
         return Ok(());
@@ -4100,18 +4126,26 @@ async fn execute_tool_chain(
                 let mut follow_tool_calls: Vec<StreamChunk> = Vec::new();
                 let mut follow_finish: Option<String> = None;
 
-                let follow_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                // Idle timeout per chunk (not a total deadline) — a steadily
+                // streaming follow-up runs as long as it needs; only a true
+                // stall trips this. 0 = wait forever (fully autonomous).
                 while let Some(fchunk) = {
-                    let remaining = follow_deadline.saturating_duration_since(std::time::Instant::now());
-                    if remaining.is_zero() {
-                        let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
-                        None
+                    if stall_timeout_secs == 0 {
+                        follow_rx.recv().await
                     } else {
-                        match tokio::time::timeout(remaining, follow_rx.recv()).await {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(stall_timeout_secs),
+                            follow_rx.recv(),
+                        )
+                        .await
+                        {
                             Ok(Some(chunk)) => Some(chunk),
                             Ok(None) => None,
                             Err(_) => {
-                                let _ = tx.send(StreamEvent::Error("[⏱ Follow-up timed out after 120s]".to_string()));
+                                let _ = tx.send(StreamEvent::Error(format!(
+                                    "[⏱ Follow-up stalled — no stream activity for {}s]",
+                                    stall_timeout_secs
+                                )));
                                 None
                             }
                         }
@@ -4226,11 +4260,15 @@ async fn execute_tool_chain(
                         Ok((mut synth_rx, _)) => {
                             let mut synth_content = String::new();
                             let mut synth_reasoning = String::new();
-                            let synth_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                            // Idle timeout per chunk, 0 = wait forever
                             while let Some(schunk) = {
-                                let remaining = synth_deadline.saturating_duration_since(std::time::Instant::now());
-                                if remaining.is_zero() { None } else {
-                                    match tokio::time::timeout(remaining, synth_rx.recv()).await {
+                                if stall_timeout_secs == 0 {
+                                    synth_rx.recv().await
+                                } else {
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(stall_timeout_secs),
+                                        synth_rx.recv(),
+                                    ).await {
                                         Ok(Some(chunk)) => Some(chunk),
                                         Ok(None) => None,
                                         Err(_) => None,
@@ -4302,13 +4340,15 @@ async fn execute_tool_chain(
                         Ok((mut retry_rx, _retry_metrics)) => {
                             let mut retry_content = String::new();
                             let mut retry_reasoning = String::new();
-                            let retry_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                            // Idle timeout per chunk, 0 = wait forever
                             while let Some(rchunk) = {
-                                let remaining = retry_deadline.saturating_duration_since(std::time::Instant::now());
-                                if remaining.is_zero() {
-                                    None
+                                if stall_timeout_secs == 0 {
+                                    retry_rx.recv().await
                                 } else {
-                                    match tokio::time::timeout(remaining, retry_rx.recv()).await {
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(stall_timeout_secs),
+                                        retry_rx.recv(),
+                                    ).await {
                                         Ok(Some(chunk)) => Some(chunk),
                                         Ok(None) => None,
                                         Err(_) => None,
@@ -4667,6 +4707,7 @@ async fn stream_model_response_task_legacy(
                     &security_engine,
                     &embedded_tools,
                     &full_content,
+                    config.autonomy.stream_stall_timeout_secs,
                 )
                 .await;
             } else {
@@ -5660,6 +5701,7 @@ async fn execute_approved_tool_task(
     model_messages: Vec<Message>,
     security_engine: crate::security::SecurityEngine,
     suggestion: ToolSuggestion,
+    stall_timeout_secs: u64,
 ) -> Result<()> {
     let _ = tx.send(StreamEvent::Start);
     let executor = AsyncToolExecutor::new();
@@ -5741,7 +5783,17 @@ async fn execute_approved_tool_task(
                 }
                 follow_up.max_tokens = Some(512);
 
-                match tokio::time::timeout(Duration::from_secs(120), provider.chat_stream(follow_up)).await {
+                // Idle timeout on the follow-up request — 0 = wait forever
+                let follow_response = if stall_timeout_secs == 0 {
+                    Ok(provider.chat_stream(follow_up).await)
+                } else {
+                    tokio::time::timeout(
+                        Duration::from_secs(stall_timeout_secs),
+                        provider.chat_stream(follow_up),
+                    )
+                    .await
+                };
+                match follow_response {
                     Ok(Ok((chunks, metrics))) => {
                         let follow_content: String = chunks.join("");
 
@@ -5828,9 +5880,10 @@ async fn execute_approved_tool_task(
                         break;
                     }
                     Err(_) => {
-                        let _ = tx.send(StreamEvent::Error(
-                            "Follow-up timed out after 120s".to_string(),
-                        ));
+                        let _ = tx.send(StreamEvent::Error(format!(
+                            "Follow-up stalled — no response for {}s",
+                            stall_timeout_secs
+                        )));
                         break;
                     }
                 }
