@@ -732,8 +732,18 @@ impl HarnessEngine {
         // 2. Memory context injection
         let relevant_messages = self.get_relevant_memory(user_message)?;
         for msg in relevant_messages {
+            // Sanitize roles: a remembered "tool"/"function" message injected
+            // without its original tool_call_id makes strict APIs (Kimi,
+            // OpenAI) reject the whole request with 400 "tool_call_id is not
+            // found". Skip tool-role rows outright; coerce anything that is
+            // not user/assistant/system to "user".
+            let role = match msg.role.as_str() {
+                "tool" | "function" => continue,
+                "user" | "assistant" | "system" => msg.role,
+                _ => "user".to_string(),
+            };
             messages.push(Message {
-                role: msg.role,
+                role,
                 content: msg.content,
                 images: None,
                 tool_call_id: None,

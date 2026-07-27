@@ -43,8 +43,49 @@ pub struct Diagnostic {
     pub character: u32,
 }
 
+/// True if `command` resolves to an executable file on PATH.
+pub fn command_on_path(command: &str) -> bool {
+    if command.contains('/') {
+        return std::path::Path::new(command).is_file();
+    }
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths).any(|dir| dir.join(command).is_file())
+        })
+        .unwrap_or(false)
+}
+
+/// Install hint for a known LSP server binary (Arch/CachyOS-flavored).
+pub fn lsp_server_install_hint(command: &str) -> Option<&'static str> {
+    match command {
+        "pylsp" => Some("sudo pacman -S python-lsp-server  (or: pipx install python-lsp-server)"),
+        "typescript-language-server" => {
+            Some("npm install -g typescript-language-server typescript")
+        }
+        "gopls" => Some("go install golang.org/x/tools/gopls@latest"),
+        "rust-analyzer" => Some("rustup component add rust-analyzer"),
+        "clangd" => Some("sudo pacman -S clang"),
+        _ => None,
+    }
+}
+
+/// Fail fast with an actionable message when the server binary is missing,
+/// instead of the opaque "Failed to start LSP server: <cmd>" spawn error.
+pub fn ensure_lsp_server(command: &str) -> Result<()> {
+    if command_on_path(command) {
+        return Ok(());
+    }
+    let hint = lsp_server_install_hint(command)
+        .map(|h| format!(" Install: {h}"))
+        .unwrap_or_default();
+    Err(anyhow::anyhow!(
+        "LSP server '{command}' is not installed (not found in PATH).{hint}"
+    ))
+}
+
 impl LspClient {
     pub fn start(command: &str, args: &[&str], root_path: &str) -> Result<Self> {
+        ensure_lsp_server(command)?;
         let mut server = Command::new(command)
             .args(args)
             .stdin(Stdio::piped())
@@ -117,14 +158,20 @@ impl LspClient {
         Ok(())
     }
 
-    fn read_response(&self, _expected_id: i64) -> Result<Value> {
-        let mut stdout = self.stdout.lock().expect("LSP stdout mutex poisoned");
-
+    /// Read exactly one Content-Length framed message from the server.
+    /// MUST read the body through the BufReader (`stdout`) — never via
+    /// `get_mut()` on the underlying fd. BufReader swallows the whole pipe
+    /// chunk (headers + body) into its internal buffer; bypassing it blocks
+    /// forever waiting for data that is already sitting in the buffer.
+    fn read_message(&self, stdout: &mut BufReader<ChildStdout>) -> Result<Value> {
         let mut content_length: Option<usize> = None;
         let mut header = String::new();
         loop {
             header.clear();
-            stdout.read_line(&mut header)?;
+            let n = stdout.read_line(&mut header)?;
+            if n == 0 {
+                anyhow::bail!("LSP server closed stdout (EOF) while reading headers");
+            }
             if header == "\r\n" {
                 break;
             }
@@ -137,23 +184,33 @@ impl LspClient {
 
         let len = content_length.context("Missing Content-Length header in LSP response")?;
 
-        let mut _body = String::new();
-        {
-            let reader = stdout.get_mut();
-            let mut buf = vec![0u8; len];
-            std::io::Read::read_exact(reader, &mut buf)?;
-            _body = String::from_utf8_lossy(&buf).to_string();
-        }
+        let mut buf = vec![0u8; len];
+        std::io::Read::read_exact(stdout, &mut buf)?;
+        let body = String::from_utf8_lossy(&buf).to_string();
 
-        let response: Value = serde_json::from_str(&_body)
-            .with_context(|| format!("Failed to parse LSP response: {}", _body))?;
+        serde_json::from_str(&body)
+            .with_context(|| format!("Failed to parse LSP response: {}", body))
+    }
 
-        if let Some(result) = response.get("result") {
-            Ok(result.clone())
-        } else if let Some(error) = response.get("error") {
-            anyhow::bail!("LSP error: {}", error)
-        } else {
-            Ok(Value::Null)
+    fn read_response(&self, expected_id: i64) -> Result<Value> {
+        let mut stdout = self.stdout.lock().expect("LSP stdout mutex poisoned");
+
+        // Skip interleaved messages (publishDiagnostics notifications, log
+        // messages, server→client requests) until OUR response arrives.
+        // pylsp routinely sends publishDiagnostics before the actual result.
+        loop {
+            let message = self.read_message(&mut stdout)?;
+            let id = message.get("id").and_then(|v| v.as_i64());
+            if id != Some(expected_id) {
+                continue;
+            }
+            if let Some(result) = message.get("result") {
+                return Ok(result.clone());
+            }
+            if let Some(error) = message.get("error") {
+                anyhow::bail!("LSP error: {}", error);
+            }
+            return Ok(Value::Null);
         }
     }
 
@@ -350,4 +407,102 @@ pub fn global_lsp_manager() -> std::sync::Arc<LspManager> {
     LSP_MANAGER
         .get_or_init(|| std::sync::Arc::new(LspManager::new(".")))
         .clone()
+}
+
+#[cfg(test)]
+mod lsp_server_preflight_tests {
+    use super::*;
+
+    #[test]
+    fn command_on_path_finds_sh() {
+        assert!(command_on_path("sh"));
+    }
+
+    #[test]
+    fn command_on_path_rejects_missing_binary() {
+        assert!(!command_on_path("definitely-not-a-real-lsp-server-xyz"));
+    }
+
+    #[test]
+    fn ensure_lsp_server_error_names_binary_and_hint() {
+        let err = ensure_lsp_server("pylsp-nonexistent-variant").unwrap_err();
+        assert!(err.to_string().contains("not installed"));
+        // Unknown binary → no hint, but still a clear message
+        assert!(!err.to_string().contains("Install:"));
+    }
+
+    #[test]
+    fn install_hints_cover_every_detected_server() {
+        // Every server named in the detect_server tables must have a hint —
+        // otherwise the model gets "not installed" with no way forward.
+        for cmd in [
+            "rust-analyzer",
+            "pylsp",
+            "typescript-language-server",
+            "gopls",
+            "clangd",
+        ] {
+            assert!(
+                lsp_server_install_hint(cmd).is_some(),
+                "missing install hint for {cmd}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod lsp_live_tests {
+    //! Live protocol tests against a real pylsp process.
+    //! Run: cargo test --bin openshark lsp_live -- --include-ignored --nocapture
+    use super::*;
+    use crate::lsp::LspManager;
+
+    const DEMO: &str = "/tmp/lsp_check/demo.py";
+
+    fn demo_content() -> String {
+        "def greet(name: str) -> str:\n    \"\"\"Return a retro greeting.\"\"\"\n    return f\"Stay retro, {name}\"\n\n\nmessage = greet(\"openshark\")\nprint(message)\n"
+            .to_string()
+    }
+
+    #[test]
+    #[ignore = "requires pylsp installed"]
+    fn sync_client_hover_python() {
+        let client = LspClient::start("pylsp", &[], "/tmp/lsp_check").unwrap();
+        client
+            .open_document(DEMO, "python", &demo_content())
+            .unwrap();
+        let hover = client.hover(DEMO, 5, 12).unwrap();
+        println!("sync hover result: {hover:?}");
+        // KNOWN BUG: sync read_response returns the FIRST message, which may be
+        // a publishDiagnostics notification → hover reports None even though
+        // pylsp sent a real result right after.
+        assert!(
+            hover.is_some(),
+            "sync client lost the hover result to an interleaved notification"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires pylsp installed"]
+    async fn async_manager_hover_python() {
+        let manager = LspManager::new("/tmp/lsp_check");
+        let server = manager
+            .get_or_create_server("python", "pylsp", &[])
+            .await
+            .unwrap();
+        server
+            .ensure_document_open(DEMO, &demo_content())
+            .await
+            .unwrap();
+        let hover = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            server.hover(DEMO, 5, 12),
+        )
+        .await
+        .expect("async hover wedged — 30s timeout")
+        .unwrap();
+        println!("async hover result: {hover:?}");
+        assert!(hover.is_some(), "async manager returned no hover");
+        manager.shutdown_all().await.unwrap();
+    }
 }

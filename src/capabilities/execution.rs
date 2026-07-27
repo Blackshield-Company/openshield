@@ -61,9 +61,17 @@ impl Tool for CodeExecutionTool {
                 lines.pop();
             }
             lines.join("\n")
-        } else if code.starts_with("python") || code.starts_with("Python") {
-            // Strip leading "python" or "Python" language identifier
-            code.strip_prefix("python").unwrap_or(code).strip_prefix("Python").unwrap_or(code).trim().to_string()
+        } else if code.starts_with("python ") || code.starts_with("Python ") || code.starts_with("python\n") || code.starts_with("Python\n") {
+            // Strip a leading "python"/"Python" language identifier.
+            // Word-boundary guard: never mangle code that merely starts with a
+            // variable like `python_version`. Also: strip ONCE — chaining
+            // .unwrap_or(code) resurrects the original string on the second
+            // strip (that bug wrote "python import ..." into the temp file).
+            let stripped = code
+                .strip_prefix("python")
+                .or_else(|| code.strip_prefix("Python"))
+                .unwrap_or(code);
+            stripped.trim().to_string()
         } else {
             code.to_string()
         };
