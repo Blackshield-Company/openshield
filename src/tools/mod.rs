@@ -1258,6 +1258,7 @@ pub fn tool_output_indicates_failure(output: &str) -> bool {
         "No Python code provided",
         "No session database found",
         "No results found",
+        "[stderr]: error",
     ];
     FAILURE_PREFIXES.iter().any(|p| head.starts_with(p))
 }

@@ -22,6 +22,10 @@ pub struct LspClient {
     stdout: Arc<Mutex<BufReader<ChildStdout>>>,
     request_id: Arc<Mutex<i64>>,
     root_uri: String,
+    /// Last bytes of the server's stderr — included in EOF errors so a
+    /// server that dies on startup (missing rustup component, bad flags)
+    /// tells us WHY instead of just closing the pipe.
+    stderr_buf: Arc<Mutex<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,7 +94,7 @@ impl LspClient {
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("Failed to start LSP server: {}", command))?;
 
@@ -99,12 +103,37 @@ impl LspClient {
         let stdout = server.stdout.take()
             .ok_or_else(|| anyhow::anyhow!("LSP server stdout not available"))?;
 
+        // Drain stderr into a small ring buffer so EOF errors can quote it.
+        let stderr_buf: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        if let Some(mut stderr) = server.stderr.take() {
+            let buf = Arc::clone(&stderr_buf);
+            std::thread::spawn(move || {
+                let mut chunk = [0u8; 1024];
+                loop {
+                    match std::io::Read::read(&mut stderr, &mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if let Ok(mut b) = buf.lock() {
+                                b.push_str(&String::from_utf8_lossy(&chunk[..n]));
+                                // Cap at 4KB — keep the tail, that's where errors live
+                                if b.len() > 4096 {
+                                    let keep = b.len() - 4096;
+                                    b.drain(..keep);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         let client = LspClient {
             server,
             stdin: Arc::new(Mutex::new(stdin)),
             stdout: Arc::new(Mutex::new(BufReader::new(stdout))),
             request_id: Arc::new(Mutex::new(0)),
             root_uri: format!("file://{}", std::fs::canonicalize(root_path)?.display()),
+            stderr_buf,
         };
 
         // Send initialize request
@@ -170,7 +199,20 @@ impl LspClient {
             header.clear();
             let n = stdout.read_line(&mut header)?;
             if n == 0 {
-                anyhow::bail!("LSP server closed stdout (EOF) while reading headers");
+                let stderr_tail = self
+                    .stderr_buf
+                    .lock()
+                    .map(|b| b.trim().to_string())
+                    .unwrap_or_default();
+                if stderr_tail.is_empty() {
+                    anyhow::bail!(
+                        "LSP server closed stdout (EOF) while reading headers — the server exited. Verify the server binary runs standalone."
+                    );
+                }
+                anyhow::bail!(
+                    "LSP server closed stdout (EOF) while reading headers — the server exited. Server stderr: {}",
+                    stderr_tail
+                );
             }
             if header == "\r\n" {
                 break;
@@ -457,25 +499,36 @@ mod lsp_live_tests {
     use super::*;
     use crate::lsp::LspManager;
 
-    const DEMO: &str = "/tmp/lsp_check/demo.py";
+    const DEMO: &str = "demo.py";
 
     fn demo_content() -> String {
         "def greet(name: str) -> str:\n    \"\"\"Return a retro greeting.\"\"\"\n    return f\"Stay retro, {name}\"\n\n\nmessage = greet(\"openshark\")\nprint(message)\n"
             .to_string()
     }
 
+    /// Self-contained scratch dir + python file (tests must not depend on
+    /// anything outside the repo/target tmp dirs).
+    fn setup_python_file() -> (std::path::PathBuf, String) {
+        let dir = std::env::temp_dir().join("lsp_check_py");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(DEMO);
+        std::fs::write(&file, demo_content()).unwrap();
+        (dir, file.to_string_lossy().to_string())
+    }
+
     #[test]
     #[ignore = "requires pylsp installed"]
     fn sync_client_hover_python() {
-        let client = LspClient::start("pylsp", &[], "/tmp/lsp_check").unwrap();
+        let (dir, file) = setup_python_file();
+        let client = LspClient::start("pylsp", &[], dir.to_str().unwrap()).unwrap();
         client
-            .open_document(DEMO, "python", &demo_content())
+            .open_document(&file, "python", &demo_content())
             .unwrap();
-        let hover = client.hover(DEMO, 5, 12).unwrap();
+        let hover = client.hover(&file, 5, 12).unwrap();
         println!("sync hover result: {hover:?}");
-        // KNOWN BUG: sync read_response returns the FIRST message, which may be
-        // a publishDiagnostics notification → hover reports None even though
-        // pylsp sent a real result right after.
+        // Regression: sync read_response used to return the FIRST message —
+        // often an interleaved publishDiagnostics notification — and lose the
+        // real hover result.
         assert!(
             hover.is_some(),
             "sync client lost the hover result to an interleaved notification"
@@ -485,18 +538,19 @@ mod lsp_live_tests {
     #[tokio::test]
     #[ignore = "requires pylsp installed"]
     async fn async_manager_hover_python() {
-        let manager = LspManager::new("/tmp/lsp_check");
+        let (dir, file) = setup_python_file();
+        let manager = LspManager::new(dir.to_str().unwrap());
         let server = manager
             .get_or_create_server("python", "pylsp", &[])
             .await
             .unwrap();
         server
-            .ensure_document_open(DEMO, &demo_content())
+            .ensure_document_open(&file, &demo_content())
             .await
             .unwrap();
         let hover = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            server.hover(DEMO, 5, 12),
+            server.hover(&file, 5, 12),
         )
         .await
         .expect("async hover wedged — 30s timeout")
@@ -504,5 +558,56 @@ mod lsp_live_tests {
         println!("async hover result: {hover:?}");
         assert!(hover.is_some(), "async manager returned no hover");
         manager.shutdown_all().await.unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires rust-analyzer component (rustup component add rust-analyzer)"]
+    fn sync_client_hover_rust() {
+        // rust-analyzer is a rustup PROXY: the binary exists on PATH even when
+        // the component is missing, in which case it prints "Unknown binary
+        // 'rust-analyzer' in official toolchain" to stderr and exits → EOF.
+        // The EOF error must quote that stderr, not just say "closed stdout".
+        //
+        // NOTE: rust-analyzer gives full semantics only inside a cargo
+        // project — a bare .rs file ("detached file") gets no hover. The
+        // scratch project below mirrors real usage.
+        let dir = std::env::temp_dir().join("lsp_check_rs");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"lsp_check_rs\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        let file = dir.join("src/main.rs");
+        std::fs::write(
+            &file,
+            "fn main() {\n    let msg = \"openshark protocol test\";\n    println!(\"{}\", msg);\n}\n",
+        )
+        .unwrap();
+        let file_str = file.to_string_lossy().to_string();
+
+        let client = LspClient::start("rust-analyzer", &[], dir.to_str().unwrap()).unwrap();
+        let content = std::fs::read_to_string(&file).unwrap();
+        client.open_document(&file_str, "rust", &content).unwrap();
+        // rust-analyzer needs time to load the project model; poll the hover.
+        // -32801 (ContentModified) is transient during startup — r-a reloads
+        // the file from disk and bumps its internal version, making our
+        // didOpen version momentarily stale.
+        let mut hover = None;
+        for _ in 0..15 {
+            match client.hover(&file_str, 2, 20) {
+                Ok(Some(h)) => {
+                    hover = Some(h);
+                    break;
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_secs(2)),
+                Err(e) if e.to_string().contains("-32801") => {
+                    std::thread::sleep(std::time::Duration::from_secs(2))
+                }
+                Err(e) => panic!("hover errored (EOF/crash?): {e:#}"),
+            }
+        }
+        println!("rust hover result: {hover:?}");
+        assert!(hover.is_some(), "rust-analyzer returned no hover");
     }
 }
