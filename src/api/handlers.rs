@@ -188,9 +188,18 @@ pub async fn chat(body: Json<ApiChatRequest>) -> impl IntoResponse {
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Get first configured provider
-    let (provider_name, provider_config) = match config.providers.iter().next() {
-        Some((n, p)) => (n.clone(), p.clone()),
+    // Route to the provider that owns the requested model; fall back to
+    // the first provider for unlisted models (proxies, passthroughs).
+    let (provider_name, provider_config) = match config
+        .find_provider_for_model(&model)
+        .or_else(|| {
+            config
+                .providers
+                .iter()
+                .next()
+                .map(|(n, p)| (n.clone(), p.clone()))
+        }) {
+        Some(x) => x,
         None => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -291,8 +300,19 @@ pub async fn start_agent_task(
             }
         };
 
-        let (provider_name, provider_config) = match config.providers.iter().next() {
-            Some((n, p)) => (n.clone(), p.clone()),
+        let model = model_override.unwrap_or_else(|| config.default_model.clone());
+
+        // Route to the provider that owns the model; fall back to first.
+        let (provider_name, provider_config) = match config
+            .find_provider_for_model(&model)
+            .or_else(|| {
+                config
+                    .providers
+                    .iter()
+                    .next()
+                    .map(|(n, p)| (n.clone(), p.clone()))
+            }) {
+            Some(x) => x,
             None => {
                 let mut tasks = state_clone.running_tasks.write().await;
                 if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
@@ -312,7 +332,6 @@ pub async fn start_agent_task(
             provider_config.headers,
         );
 
-        let model = model_override.unwrap_or_else(|| config.default_model.clone());
         let headless_config = crate::headless::HeadlessConfig {
             task: task_str,
             yolo,
