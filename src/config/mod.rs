@@ -97,6 +97,35 @@ pub struct FilesystemConfig {
     pub working_directory: Option<String>,
 }
 
+/// Autonomy settings — how long unattended work may run before the
+/// harness/TUI intervenes. All timeouts are seconds; 0 disables the limit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutonomyConfig {
+    /// Master switch for fully autonomous operation: tool approval prompts
+    /// AUTO-APPROVE on timeout instead of being skipped.
+    pub enabled: bool,
+    /// Hard timeout for ONE tool execution (e.g. a long build). 0 = no limit.
+    pub tool_timeout_secs: u64,
+    /// Reset/error a model stream after this much INACTIVITY (no chunks).
+    /// Steadily-streaming responses never trip this. 0 = never intervene.
+    pub stream_stall_timeout_secs: u64,
+    /// How long a tool approval prompt waits before timing out.
+    /// With `enabled = true`, timeout approves; otherwise it skips.
+    pub approval_timeout_secs: u64,
+}
+
+impl Default for AutonomyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tool_timeout_secs: 600,
+            stream_stall_timeout_secs: 900,
+            approval_timeout_secs: 60,
+        }
+    }
+}
+
 impl Default for FilesystemConfig {
     fn default() -> Self {
         Self {
@@ -135,6 +164,8 @@ pub struct Config {
     pub theme: String,
     #[serde(default)]
     pub filesystem: FilesystemConfig,
+    #[serde(default)]
+    pub autonomy: AutonomyConfig,
     #[serde(default)]
     pub swarm: crate::swarm::SwarmConfig,
     #[serde(default)]
@@ -725,6 +756,7 @@ impl Default for Config {
                 max_list_entries: 500,
                 working_directory: None,
             },
+            autonomy: AutonomyConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: KeybindingsConfig::default(),
@@ -819,6 +851,7 @@ mod tests {
             user_name: "user".to_string(),
             theme: "synthwave84".to_string(),
             filesystem: FilesystemConfig::default(),
+            autonomy: AutonomyConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: KeybindingsConfig::default(),
