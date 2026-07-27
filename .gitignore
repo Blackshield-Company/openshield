@@ -17,3 +17,4 @@ __pycache__/
 
 # Rust build artifacts
 /target
+*.openshark_backup
