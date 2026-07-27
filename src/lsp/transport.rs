@@ -36,6 +36,7 @@ impl AsyncTransport {
     /// Returns `(AsyncTransport, Child)` so the caller retains ownership of
     /// the child process for lifecycle management (e.g. killing on shutdown).
     pub async fn spawn(command: &str, args: &[&str]) -> Result<(Self, Child)> {
+        crate::lsp::ensure_lsp_server(command)?;
         let mut child = Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
