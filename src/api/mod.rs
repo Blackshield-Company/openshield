@@ -38,6 +38,21 @@ use tokio::sync::RwLock;
 pub struct AppState {
     pub config: Arc<crate::config::Config>,
     pub running_tasks: Arc<RwLock<Vec<AgentTask>>>,
+    /// Explicit config directory for embedded hosts (Android), where
+    /// `dirs::config_dir()` is None. When set, per-request config reloads
+    /// use `Config::load_from_dir` instead of `load_or_default`.
+    pub config_dir: Option<std::path::PathBuf>,
+}
+
+impl AppState {
+    /// Reload config fresh from disk so edits (e.g. provider keys saved
+    /// from a host app's config view) apply without a server restart.
+    pub fn reload_config(&self) -> anyhow::Result<crate::config::Config> {
+        match &self.config_dir {
+            Some(dir) => crate::config::Config::load_from_dir(dir),
+            None => crate::config::Config::load_or_default(),
+        }
+    }
 }
 
 /// A tracked agent task.
