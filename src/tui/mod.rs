@@ -5349,14 +5349,20 @@ async fn handle_slash_result(
             Ok(true)
         }
         SlashResult::Prompt(prompt) => {
-            // Inject as a user message that triggers the model
-            app.add_user_message(prompt.clone());
-            // Reset circuit breaker
-            app.empty_response_count = 0;
-            // Let the normal flow handle it — but we already added the user message
-            // so we need to trigger the model response here
-            // For now, just show what would be sent
-            app.add_system_message(format!("🤖 Prompt: {}", prompt));
+            if prompt.starts_with("__") {
+                // Internal pseudo-prompt (e.g. "__ctx_pin__ <path>") —
+                // re-enter input processing so the legacy "__cmd__"
+                // handlers actually execute. Deliberately NOT added to
+                // chat history. Box::pin: async recursion.
+                Box::pin(process_user_input(app, prompt)).await?;
+            } else {
+                // Natural-language model prompt (e.g. /review) — run it
+                // through the normal input flow so it actually reaches
+                // the model instead of just being displayed. The normal
+                // path adds the user message itself.
+                app.empty_response_count = 0;
+                Box::pin(process_user_input(app, prompt)).await?;
+            }
             Ok(true)
         }
         SlashResult::Toggle { setting, value } => {
