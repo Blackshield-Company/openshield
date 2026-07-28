@@ -295,20 +295,27 @@ impl Config {
     pub fn load_from_dir(config_dir: &std::path::Path) -> Result<Self> {
         std::fs::create_dir_all(config_dir)?;
         let config_path = config_dir.join("config.toml");
-        if config_path.exists() {
+        let mut config = if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)
                 .with_context(|| format!("Failed to read {}", config_path.display()))?;
             let mut config: Config =
                 toml::from_str(&content).context("Failed to parse config.toml")?;
             config.resolve_env_keys()?;
-            Ok(config)
+            config
         } else {
             let config = Config::default();
             if let Ok(content) = toml::to_string_pretty(&config) {
                 let _ = std::fs::write(&config_path, content);
             }
-            Ok(config)
+            config
+        };
+        // Embedded hosts (Android): dirs::data_dir() is None, so Config::default()
+        // falls back to a relative memory_db_path ("./openshark/memory.db") that
+        // resolves against a read-only cwd like "/". Rebase it under config_dir.
+        if config.memory_db_path.is_relative() {
+            config.memory_db_path = config_dir.join("memory.db");
         }
+        Ok(config)
     }
 
     pub fn load_or_default() -> Result<Self> {
@@ -812,6 +819,24 @@ fn resolve_gateway_token(token: &mut Option<String>) {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_load_from_dir_rebases_relative_memory_db_path() {
+        // Embedded hosts (Android): dirs::data_dir() is None and the default
+        // memory_db_path is relative — load_from_dir must rebase it under the
+        // host-provided config dir, or the memory store fails with
+        // "Failed to create memory directory" against a read-only cwd.
+        let dir = std::env::temp_dir().join(format!("openshark-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cfg = Config::default();
+        cfg.memory_db_path = std::path::PathBuf::from("./openshark/memory.db");
+        let content = toml::to_string_pretty(&cfg).unwrap();
+        std::fs::write(dir.join("config.toml"), content).unwrap();
+        let config = Config::load_from_dir(&dir).unwrap();
+        assert_eq!(config.memory_db_path, dir.join("memory.db"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn create_test_config() -> Config {
         let mut providers = HashMap::new();
