@@ -1,0 +1,22 @@
+{
+  "name": "openshark-desktop",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Standalone desktop GUI for OpenShark — the harness that learns",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "@tauri-apps/cli": "^2",
+    "svelte": "^5",
+    "vite": "^6"
+  }
+}

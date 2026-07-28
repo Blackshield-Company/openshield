@@ -18,3 +18,8 @@ __pycache__/
 # Rust build artifacts
 /target
 *.openshark_backup
+
+# Desktop app (Tauri + Svelte)
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
