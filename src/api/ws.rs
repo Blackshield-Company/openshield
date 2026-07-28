@@ -504,7 +504,7 @@ mod tests {
         );
         config.providers.insert(
             "llama-swap".to_string(),
-            provider("http://127.0.0.1:8080/v1", vec![model("synthclaw-fast")]),
+            provider("http://127.0.0.1:8080/v1", vec![model("local-fast")]),
         );
 
         // Regression: default_model owned by kimi must route to kimi even
@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(name, "kimi");
         assert_eq!(p.base_url, "https://api.kimi.com/coding/v1");
 
-        let (_, name) = build_provider(&config, "synthclaw-fast").unwrap();
+        let (_, name) = build_provider(&config, "local-fast").unwrap();
         assert_eq!(name, "llama-swap");
 
         // Unlisted model → first-provider fallback, never a panic.
