@@ -219,16 +219,24 @@ pub async fn chat(body: Json<ApiChatRequest>) -> impl IntoResponse {
         provider_config.headers,
     );
 
+    // Inject the agent identity as the system prompt — without it the
+    // model answers with its training identity instead of the soul.
+    let soul = crate::agent::soul::AgentSoul::from_config(config.agent.clone());
+    let msg = |role: &str, content: String| crate::providers::Message {
+        role: role.to_string(),
+        content,
+        images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
+    };
+
     let request = crate::providers::ChatRequest::new(
         model.clone(),
-        vec![crate::providers::Message {
-            role: "user".to_string(),
-            content: body.message.clone(),
-            images: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_content: None,
-        }],
+        vec![
+            msg("system", soul.system_prompt()),
+            msg("user", body.message.clone()),
+        ],
         false,
     );
 
