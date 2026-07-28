@@ -873,8 +873,9 @@ async fn main() -> anyhow::Result<()> {
                     .collect::<Vec<_>>()
                     .join("\n");
 
+                let soul = crate::agent::soul::AgentSoul::from_config(config.agent.clone());
                 let system_prompt = format!(
-                    "You are an AI coding assistant with TOOL ACCESS. You MUST use tools when asked to perform actions. \
+                    "{}\n\nYou have TOOL ACCESS. You MUST use tools when asked to perform actions. \
                      You are NOT a generic chatbot — you are an agent with real tool capabilities. \
                      \n\nAVAILABLE TOOLS:\n{}\n\nTOOL USAGE RULES:\n\
                      1. When asked to do something requiring a tool, output ONLY: TOOL:<tool_name> <args>\n\
@@ -884,6 +885,7 @@ async fn main() -> anyhow::Result<()> {
                      5. High risk tools require user approval.\n\
                      6. If the user says 'test', run the test tool immediately.\n\
                      7. For one-line tasks, just do it. No manifesto.",
+                    soul.system_prompt(),
                     tool_descriptions
                 );
 

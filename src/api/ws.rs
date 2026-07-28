@@ -32,6 +32,22 @@ fn default_max_turns() -> usize {
     50
 }
 
+/// Build chat messages with the agent's identity (soul) as the system
+/// prompt. Without this the model falls back to its training identity
+/// (e.g. "I'm Kimi") instead of the configured agent.
+fn chat_messages(config: &crate::config::Config, message: String) -> Vec<crate::providers::Message> {
+    let soul = crate::agent::soul::AgentSoul::from_config(config.agent.clone());
+    let msg = |role: &str, content: String| crate::providers::Message {
+        role: role.to_string(),
+        content,
+        images: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_content: None,
+    };
+    vec![msg("system", soul.system_prompt()), msg("user", message)]
+}
+
 /// WS message to client.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -156,14 +172,7 @@ async fn handle_chat_ws(mut socket: WebSocket) {
 
                 let request = crate::providers::ChatRequest::new(
                     model,
-                    vec![crate::providers::Message {
-                        role: "user".to_string(),
-                        content: message,
-                        images: None,
-                        tool_call_id: None,
-                        tool_calls: None,
-                        reasoning_content: None,
-                    }],
+                    chat_messages(&config, message),
                     true, // stream
                 );
 
@@ -390,6 +399,17 @@ async fn send_json(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), ()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_chat_messages_include_identity_system_prompt() {
+        let config = crate::config::Config::default();
+        let msgs = chat_messages(&config, "hello".to_string());
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].role, "system");
+        assert!(msgs[0].content.contains(&config.agent.display_name));
+        assert_eq!(msgs[1].role, "user");
+        assert_eq!(msgs[1].content, "hello");
+    }
 
     #[test]
     fn test_client_message_parse_chat() {
