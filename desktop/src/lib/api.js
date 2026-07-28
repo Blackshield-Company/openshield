@@ -54,9 +54,13 @@ export async function writeConfig(content) {
   return invoke('write_config', { content });
 }
 
-/** Start (or adopt) an openshark serve API server → { running, owned, port, version } */
-export async function serverStart(port) {
-  return invoke('server_start', port ? { port } : {});
+/** Start (or adopt) an openshark serve API server → { running, owned, port, version }
+ *  bindLan=true binds 0.0.0.0 (Tailscale/LAN access from the Android app) */
+export async function serverStart(port, bindLan) {
+  const args = {};
+  if (port) args.port = port;
+  if (bindLan) args.bindLan = true;
+  return invoke('server_start', args);
 }
 
 /** Stop the server if we own it */

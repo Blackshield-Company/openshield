@@ -1,25 +1,22 @@
 <script>
   import { onMount } from 'svelte';
-  import { runStream, serverStatus } from '../lib/api.js';
+  import { runStream } from '../lib/api.js';
   import { sharkWs } from '../lib/sharkws.js';
+  import { resolveConn } from '../lib/conn.js';
 
   let task = $state('');
   let yolo = $state(false);
   let running = $state(false);
   let outputEl;
-  let server = $state(null);
+  let conn = $state(null);
 
   // Structured event log (server mode) or raw text (cli mode)
   let events = $state([]);
   let cliOutput = $state('');
 
   onMount(async () => {
-    try {
-      const s = await serverStatus();
-      server = s.running ? s : null;
-    } catch {
-      server = null;
-    }
+    conn = await resolveConn();
+    if (!conn.running) conn = null;
   });
 
   function push(ev) {
@@ -36,15 +33,13 @@
     events = [];
     cliOutput = '';
 
-    // Re-check in case the server came up after this view mounted
-    if (!server) {
-      try {
-        const s = await serverStatus();
-        if (s.running) server = s;
-      } catch { /* stay in cli mode */ }
+    // Re-check in case the connection came up after this view mounted
+    if (!conn) {
+      const c = await resolveConn();
+      if (c.running) conn = c;
     }
 
-    if (server) {
+    if (conn) {
       await runViaServer(t);
     } else {
       await runViaCli(t);
@@ -63,9 +58,9 @@
         }
       };
 
-      push({ kind: 'meta', text: `$ openshark agent "${t}" (server :${server.port})` });
+      push({ kind: 'meta', text: `$ openshark agent "${t}" (${conn.mode} ${conn.host}:${conn.port})` });
 
-      sharkWs(server.port, '/ws/v1/agent', {
+      sharkWs(conn.host, conn.port, '/ws/v1/agent', {
         onOpen: (ws) => {
           ws.send(JSON.stringify({ type: 'agent', task: t, yolo, max_turns: 50 }));
         },
@@ -141,7 +136,7 @@
   </div>
 
   <div class="output card" bind:this={outputEl}>
-    {#if server}
+    {#if conn}
       {#if events.length === 0}
         <p class="placeholder">Events will stream here.</p>
       {/if}

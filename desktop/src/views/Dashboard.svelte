@@ -16,10 +16,12 @@
     }
   }
 
+  let bindLan = $state(false);
+
   async function startServer() {
     serverBusy = true;
     try {
-      server = await serverStart();
+      server = await serverStart(undefined, bindLan);
     } catch (e) {
       server = { running: false, error: String(e) };
     } finally {
@@ -80,9 +82,14 @@
       {:else}
         <p><span class="badge info">offline</span></p>
         <p class="hint">Start the server for token streaming and structured agent events.</p>
-        <button class="primary" onclick={startServer} disabled={serverBusy}>
-          {serverBusy ? 'Starting…' : 'Start Server'}
-        </button>
+        <div class="start-row">
+          <button class="primary" onclick={startServer} disabled={serverBusy}>
+            {serverBusy ? 'Starting…' : 'Start Server'}
+          </button>
+          <label class="lan" title="Bind 0.0.0.0 — reachable over LAN/Tailscale (Android app)">
+            <input type="checkbox" bind:checked={bindLan} /> 🌐 LAN
+          </label>
+        </div>
         {#if server?.error}<p class="hint err-text">{server.error}</p>{/if}
       {/if}
     </div>
@@ -115,6 +122,9 @@
   .hint { color: var(--text-dim); font-size: 12px; margin-top: 8px; }
   .err-text { color: var(--error); }
   .card button { margin-top: 10px; font-size: 12px; padding: 6px 14px; }
+  .start-row { display: flex; align-items: center; gap: 12px; }
+  .start-row button { margin-top: 10px; }
+  .lan { color: var(--text-dim); font-size: 11px; display: flex; align-items: center; gap: 4px; margin-top: 10px; }
   .output { font-size: 12px; color: var(--text); max-height: 400px; overflow-y: auto; }
   .wide { min-height: 200px; }
   @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
