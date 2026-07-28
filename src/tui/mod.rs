@@ -71,6 +71,17 @@ struct ChatMessage {
     reasoning: Option<String>,
 }
 
+/// Compact count formatting: 1234 → "1.2k", 1048576 → "1.0M".
+fn fmt_count(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
 /// Application state for the TUI.
 pub(crate) struct App {
     /// User input buffer.
@@ -925,6 +936,82 @@ impl App {
     }
 
     /// Prevent unbounded RAM growth by truncating old chat messages.
+
+    /// (message_count, approx_tokens) for the current session, from memory.
+    fn session_usage(&self) -> (usize, usize) {
+        let msgs = self
+            .memory
+            .get_session_messages(&self.session_id)
+            .unwrap_or_default();
+        let chars: usize = msgs
+            .iter()
+            .filter(|m| m.role == "user" || m.role == "assistant")
+            .map(|m| m.content.len())
+            .sum();
+        (msgs.len(), chars / 4)
+    }
+
+    /// Clear the visible chat + model history, preserving the system prompt
+    /// at model_messages[0] (the agent's soul lives there).
+    fn clear_conversation(&mut self) {
+        self.messages.clear();
+        let system = self
+            .model_messages
+            .first()
+            .filter(|m| m.role == "system")
+            .cloned();
+        self.model_messages.clear();
+        if let Some(sys) = system {
+            self.model_messages.push(sys);
+        }
+    }
+
+    /// Load an existing session's history into the chat view + model context.
+    /// Returns how many older messages were skipped (only the last 50 replay).
+    fn load_session(&mut self, session_id: &str) -> std::result::Result<usize, String> {
+        let all = self
+            .memory
+            .get_session_messages(session_id)
+            .map_err(|e| e.to_string())?;
+        let replay: Vec<_> = all
+            .into_iter()
+            .filter(|m| m.role == "user" || m.role == "assistant")
+            .collect();
+        if replay.is_empty() {
+            return Err("no messages in that session".to_string());
+        }
+        const REPLAY_MAX: usize = 50;
+        let skipped = replay.len().saturating_sub(REPLAY_MAX);
+        let window = if skipped > 0 {
+            replay[skipped..].to_vec()
+        } else {
+            replay
+        };
+
+        self.clear_conversation();
+        self.session_id = session_id.to_string();
+        for m in window {
+            self.messages.push(ChatMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+                images: None,
+                timestamp: m.created_at,
+                multi_model_responses: Vec::new(),
+                reasoning: None,
+            });
+            self.model_messages.push(Message {
+                role: m.role.clone(),
+                content: m.content.clone(),
+                images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            });
+        }
+        self.truncate_model_messages_if_needed();
+        Ok(skipped)
+    }
+
     fn truncate_messages_if_needed(&mut self) {
         const MAX_MESSAGES: usize = 300;
         const KEEP_FIRST: usize = 2;
@@ -2713,6 +2800,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • /swarm status     — Show swarm status\n\
             \n\
             Session commands:\n\
+            • /new              — Start a fresh session\n\
+            • /sessions         — List recent sessions\n\
+            • /resume <id|latest> — Resume a past session\n\
             • /export [path]    — Export session to JSON\n\
             • /import <path>    — Import session from JSON\n\
             • /imports          — List exported sessions\n\
@@ -2773,25 +2863,152 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         let dir = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "(unknown)".to_string());
+        let (msg_count, approx_tokens) = app.session_usage();
         app.add_system_message(format!(
-            "📊 Status\n  Model: {}\n  Session: {}\n  Branch: {}\n  Directory: {}",
-            app.model, app.session_id, branch, dir
+            "📊 Status\n  Model: {} (ctx {})\n  Session: #{}\n  Messages: {} · ~{}/{} ctx\n  Branch: {}\n  Directory: {}",
+            app.model,
+            fmt_count(app.model_context_length),
+            &app.session_id[..app.session_id.len().min(8)],
+            msg_count,
+            fmt_count(approx_tokens),
+            fmt_count(app.model_context_length),
+            branch,
+            dir
         ));
         return Ok(());
     }
 
+    if input == "/new" {
+        let session_id = Uuid::new_v4().to_string();
+        let _ = if app.project_path.is_empty() {
+            app.memory
+                .create_session(&session_id, &app.model, "general")
+        } else {
+            app.memory.create_session_with_project(
+                &session_id,
+                &app.model,
+                "general",
+                &app.project_path,
+            )
+        };
+        app.clear_conversation();
+        app.session_id = session_id.clone();
+        app.add_system_message(format!("🆕 New session #{}", &session_id[..8]));
+        return Ok(());
+    }
+
+    if input == "/sessions" {
+        match app.memory.get_recent_sessions(30) {
+            Ok(list) => {
+                let mut out = String::from("🗂 Recent Sessions\n");
+                let mut shown = 0;
+                for s in list.iter().take(15) {
+                    let msgs = app
+                        .memory
+                        .get_session_messages(&s.id)
+                        .unwrap_or_default();
+                    let preview = msgs
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == "user" || m.role == "assistant")
+                        .map(|m| m.content.chars().take(50).collect::<String>())
+                        .unwrap_or_default();
+                    let cur = if s.id == app.session_id {
+                        " ← current"
+                    } else {
+                        ""
+                    };
+                    out.push_str(&format!(
+                        "  • #{} | {} | {} msgs | {}{}\n    {}\n",
+                        &s.id[..s.id.len().min(8)],
+                        s.model,
+                        msgs.len(),
+                        s.started_at.format("%m-%d %H:%M"),
+                        cur,
+                        preview
+                    ));
+                    shown += 1;
+                }
+                if shown == 0 {
+                    out.push_str("  (none yet)\n");
+                }
+                out.push_str("Resume with /resume <id-prefix>");
+                app.add_system_message(out);
+            }
+            Err(e) => app.add_system_message(format!("❌ {}", e)),
+        }
+        return Ok(());
+    }
+
     if input == "/resume" || input == "/resume latest" {
-        app.add_system_message(
-            "💡 Resume: Use /search to find past sessions, then reference the session ID.".to_string(),
-        );
+        let target = if input == "/resume latest" {
+            app.memory
+                .get_recent_sessions(1)
+                .ok()
+                .and_then(|list| list.into_iter().next())
+        } else {
+            app.add_system_message("💡 Usage: /resume <id-prefix|latest> — see /sessions".to_string());
+            return Ok(());
+        };
+        match target {
+            Some(s) if s.id == app.session_id => {
+                app.add_system_message("💡 Already in the latest session.".to_string());
+            }
+            Some(s) => {
+                let id = s.id.clone();
+                match app.load_session(&id) {
+                    Ok(skipped) => {
+                        let note = if skipped > 0 {
+                            format!(" (replaying last 50, skipped {} older)", skipped)
+                        } else {
+                            String::new()
+                        };
+                        app.add_system_message(format!("📂 Resumed session #{}{}", &id[..8], note));
+                    }
+                    Err(e) => app
+                        .add_system_message(format!("⚠ Couldn't resume #{}: {}", &id[..8], e)),
+                }
+            }
+            None => app.add_system_message("💡 No past sessions found.".to_string()),
+        }
         return Ok(());
     }
 
     if input.starts_with("/resume ") {
-        let id = input.strip_prefix("/resume ").unwrap_or("").trim();
-        app.add_system_message(format!(
-            "💡 Resume session '{}' — load it via the session database or search for it."
-        , id));
+        let want = input.strip_prefix("/resume ").unwrap_or("").trim();
+        if want.is_empty() {
+            app.add_system_message("💡 Usage: /resume <id-prefix> — see /sessions".to_string());
+            return Ok(());
+        }
+        let found = app
+            .memory
+            .get_recent_sessions(100)
+            .ok()
+            .and_then(|list| list.into_iter().find(|s| s.id.starts_with(want)));
+        match found {
+            Some(s) if s.id == app.session_id => {
+                app.add_system_message(format!("💡 Already in session #{}", &s.id[..8]));
+            }
+            Some(s) => {
+                let id = s.id.clone();
+                match app.load_session(&id) {
+                    Ok(skipped) => {
+                        let note = if skipped > 0 {
+                            format!(" (replaying last 50, skipped {} older)", skipped)
+                        } else {
+                            String::new()
+                        };
+                        app.add_system_message(format!("📂 Resumed session #{}{}", &id[..8], note));
+                    }
+                    Err(e) => app
+                        .add_system_message(format!("⚠ Couldn't resume #{}: {}", &id[..8], e)),
+                }
+            }
+            None => app.add_system_message(format!(
+                "❌ No session matching '{}'. See /sessions",
+                want
+            )),
+        }
         return Ok(());
     }
 
