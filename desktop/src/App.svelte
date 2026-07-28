@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { getBinaryInfo, serverStart, serverStatus } from './lib/api.js';
+  import { resolveConn, getRemote, setRemote } from './lib/conn.js';
   import { THEMES, applyTheme, currentThemeId } from './lib/themes.js';
   import Dashboard from './views/Dashboard.svelte';
   import Chat from './views/Chat.svelte';
@@ -28,6 +29,19 @@
   let themeId = $state(currentThemeId());
   let showThemes = $state(false);
   let server = $state(null);
+  let conn = $state(null);
+  let remoteDraft = $state(getRemote());
+  let editingRemote = $state(false);
+
+  async function refreshConn() {
+    conn = await resolveConn();
+  }
+
+  async function saveRemote() {
+    setRemote(remoteDraft);
+    editingRemote = false;
+    await refreshConn();
+  }
 
   function pickTheme(id) {
     applyTheme(id);
@@ -51,6 +65,7 @@
         server = null;
       }
     }
+    await refreshConn();
   });
 </script>
 
@@ -91,10 +106,32 @@
         🎨 {THEMES.find((t) => t.id === themeId)?.name ?? 'Themes'}
       </button>
 
-      {#if server?.running}
-        <span class="badge ok server-badge" title="openshark serve — WebSocket streaming active">
-          ⚡ api :{server.port}
-        </span>
+      {#if conn?.running}
+        <button
+          class="badge ok server-badge conn-badge"
+          title="Connection settings"
+          onclick={() => (editingRemote = !editingRemote)}
+        >
+          {conn.mode === 'remote' ? `🌐 ${conn.host}:${conn.port}` : `⚡ api :${conn.port}`}
+        </button>
+      {:else}
+        <button class="badge info server-badge conn-badge" title="Connection settings" onclick={() => (editingRemote = !editingRemote)}>
+          ⚡ offline
+        </button>
+      {/if}
+
+      {#if editingRemote}
+        <div class="remote-editor">
+          <input
+            bind:value={remoteDraft}
+            placeholder="host:port (blank = local)"
+            onkeydown={(e) => e.key === 'Enter' && saveRemote()}
+          />
+          <div class="remote-buttons">
+            <button onclick={saveRemote}>Save</button>
+            <button onclick={() => { remoteDraft = ''; saveRemote(); }}>Local</button>
+          </div>
+        </div>
       {/if}
 
       {#if showThemes}
@@ -298,6 +335,97 @@
 
   .server-badge {
     font-size: 10px;
+  }
+
+  .conn-badge {
+    border: none;
+    cursor: pointer;
+    padding: 2px 10px;
+    box-shadow: none;
+  }
+
+  .remote-editor {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .remote-editor input {
+    font-size: 11px;
+    padding: 6px 8px;
+    width: 100%;
+  }
+
+  .remote-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .remote-buttons button {
+    flex: 1;
+    font-size: 11px;
+    padding: 5px 8px;
+  }
+
+  /* ── Phone layout: sidebar becomes a top bar ─────────────────── */
+  @media (max-width: 700px) {
+    .shell {
+      flex-direction: column;
+    }
+
+    .sidebar {
+      width: 100%;
+      flex-direction: row;
+      align-items: center;
+      padding: 8px 10px;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      gap: 8px;
+    }
+
+    .logo {
+      padding: 0;
+      border-bottom: none;
+      margin-bottom: 0;
+      flex-shrink: 0;
+    }
+
+    .wordmark {
+      font-size: 13px;
+      flex-direction: row;
+      gap: 6px;
+      letter-spacing: 1px;
+    }
+
+    .tagline {
+      display: none;
+    }
+
+    nav {
+      flex-direction: row;
+      overflow-x: auto;
+      flex: 1;
+      gap: 2px;
+    }
+
+    nav button {
+      padding: 8px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    nav button .icon {
+      width: auto;
+    }
+
+    .status {
+      display: none;
+    }
+
+    main {
+      padding: 12px;
+    }
   }
 
   main {

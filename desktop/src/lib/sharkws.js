@@ -17,8 +17,8 @@
  * handlers: { onOpen(ws), onMessage(msg, ws), onClose(), onError(err) }
  * Returns the WebSocket.
  */
-export function sharkWs(port, path, handlers = {}) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+export function sharkWs(host, port, path, handlers = {}) {
+  const ws = new WebSocket(`ws://${host}:${port}${path}`);
   ws.onopen = () => handlers.onOpen?.(ws);
   ws.onmessage = (e) => {
     try {

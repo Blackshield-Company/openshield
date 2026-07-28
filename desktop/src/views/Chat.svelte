@@ -1,23 +1,20 @@
 <script>
   import { onMount } from 'svelte';
-  import { runStream, serverStatus } from '../lib/api.js';
+  import { runStream } from '../lib/api.js';
   import { sharkWs, makeThinkFilter } from '../lib/sharkws.js';
+  import { resolveConn } from '../lib/conn.js';
 
   let input = $state('');
   let messages = $state([]);
   let running = $state(false);
   let outputEl;
-  let server = $state(null);
+  let conn = $state(null);
   let model = $state('');
   let activeWs = null;
 
   onMount(async () => {
-    try {
-      const s = await serverStatus();
-      server = s.running ? s : null;
-    } catch {
-      server = null;
-    }
+    conn = await resolveConn();
+    if (!conn.running) conn = null;
   });
 
   function appendToLast(text) {
@@ -35,15 +32,13 @@
     messages = [...messages, { role: 'assistant', text: '' }];
     scrollDown();
 
-    // Re-check in case the server came up after this view mounted
-    if (!server) {
-      try {
-        const s = await serverStatus();
-        if (s.running) server = s;
-      } catch { /* stay in cli mode */ }
+    // Re-check in case the connection came up after this view mounted
+    if (!conn) {
+      const c = await resolveConn();
+      if (c.running) conn = c;
     }
 
-    if (server) {
+    if (conn) {
       await sendViaServer(msg);
     } else {
       await sendViaCli(msg);
@@ -63,7 +58,7 @@
         }
       };
 
-      activeWs = sharkWs(server.port, '/ws/v1/chat', {
+      activeWs = sharkWs(conn.host, conn.port, '/ws/v1/chat', {
         onOpen: (ws) => {
           const payload = { type: 'chat', message: msg };
           if (model.trim()) payload.model = model.trim();
@@ -127,8 +122,8 @@
   <header>
     <h1 class="glow-text">▸ Chat</h1>
     <div class="chat-bar">
-      <span class="badge {server ? 'ok' : 'info'}">
-        {server ? `server :${server.port}` : 'cli mode'}
+      <span class="badge {conn ? 'ok' : 'info'}">
+        {conn ? (conn.mode === 'remote' ? `🌐 ${conn.host}:${conn.port}` : `server :${conn.port}`) : 'cli mode'}
       </span>
       <input
         class="model-input"

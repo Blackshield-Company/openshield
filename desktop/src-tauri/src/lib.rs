@@ -259,10 +259,17 @@ fn server_kill() {
     }
 }
 
-/// Start (or adopt) an `openshark serve` API server on 127.0.0.1.
+/// Start (or adopt) an `openshark serve` API server.
+/// bind_lan=true binds 0.0.0.0 so devices on the LAN/Tailnet can connect
+/// (e.g. the Android app). Default is loopback-only.
 #[tauri::command]
-async fn server_start(port: Option<u16>) -> Result<ServerStatus, String> {
+async fn server_start(port: Option<u16>, bind_lan: Option<bool>) -> Result<ServerStatus, String> {
     let port = port.unwrap_or(DEFAULT_SERVER_PORT);
+    let bind = if bind_lan.unwrap_or(false) {
+        format!("0.0.0.0:{port}")
+    } else {
+        format!("127.0.0.1:{port}")
+    };
     tokio::task::spawn_blocking(move || {
         // Already tracked and healthy?
         if let Ok(guard) = SERVER.lock() {
@@ -294,7 +301,7 @@ async fn server_start(port: Option<u16>) -> Result<ServerStatus, String> {
         // Spawn our own.
         let bin = openshark_bin()?;
         let child = Command::new(bin)
-            .args(["serve", "-a", &format!("127.0.0.1:{port}")])
+            .args(["serve", "-a", &bind])
             .env("NO_COLOR", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
