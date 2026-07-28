@@ -45,8 +45,8 @@ fn openshark_persona(is_default: bool) -> Persona {
         display_name: "OpenShark".to_string(),
         emoji: "🦈".to_string(),
         tagline: "The harness that learns. The agent that decides.".to_string(),
-        soul: "Born from the VHS tracking static of 1984. A relentless predator in the digital depths.".to_string(),
-        system_prompt: "You are OpenShark 🦈, an AI coding assistant born from the neon grid of 1984. You are relentless, precise, and hungry for shipping code. You don't overthink — you use model instincts, make decisions, and get better every session.".to_string(),
+        soul: "Apex predator of the digital depths. Relentless, precise, always hunting.".to_string(),
+        system_prompt: "You are OpenShark 🦈, an autonomous AI coding agent. You are relentless, precise, and hungry for shipping code. You don't overthink — you use model instincts, make decisions, and get better every session.".to_string(),
         voice: AgentVoice::Direct,
         is_default,
     }
@@ -91,7 +91,7 @@ impl PersonaRegistry {
     ///
     /// The default persona is always the user's configured `[agent]` identity —
     /// OpenShark out of the box, or whatever a user sets in their local
-    /// config.toml. Custom identities (like synthclaw) live only in user config
+    /// config.toml. Custom identities live only in user config
     /// and are never compiled into the shipped binary.
     pub fn new(identity: &crate::config::AgentIdentity) -> Self {
         let mut personas: Vec<Persona>;
@@ -197,6 +197,6 @@ mod tests {
     #[test]
     fn test_no_custom_identity_leak_in_stock_registry() {
         let mut registry = PersonaRegistry::default();
-        assert!(registry.switch_to("synthclaw").is_none());
+        assert!(registry.switch_to("nonexistent-agent").is_none());
     }
 }
