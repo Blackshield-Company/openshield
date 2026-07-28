@@ -41,6 +41,17 @@ pub struct ToolCall {
     pub created_at: DateTime<Utc>,
 }
 
+/// Lightweight session row for chat-session pickers: id, when, model,
+/// message count, and a title derived from the first user message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub id: String,
+    pub started_at: DateTime<Utc>,
+    pub model: String,
+    pub message_count: i64,
+    pub title: Option<String>,
+}
+
 pub struct MemoryStore {
     conn: Connection,
 }
@@ -169,6 +180,50 @@ impl MemoryStore {
         }
 
         Ok(())
+    }
+
+    /// Create a session row unless it already exists (idempotent — chat
+    /// clients may pass the same session id on every message).
+    pub fn ensure_session(&self, id: &str, model: &str, task_type: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, started_at, model, task_type, project_path, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, Utc::now().to_rfc3339(), model, task_type, None::<String>, 0],
+        ).context("Failed to ensure session")?;
+        Ok(())
+    }
+
+    /// Non-archived sessions with message counts and a title derived from
+    /// the first user message — for chat session lists in API clients.
+    pub fn list_session_summaries(&self, limit: usize) -> Result<Vec<SessionSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.started_at, s.model,
+                    (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id),
+                    (SELECT substr(m2.content, 1, 80) FROM messages m2
+                      WHERE m2.session_id = s.id AND m2.role = 'user'
+                      ORDER BY m2.created_at ASC, m2.rowid ASC LIMIT 1)
+             FROM sessions s
+             WHERE s.archived = 0
+             ORDER BY s.started_at DESC
+             LIMIT ?1",
+        )?;
+
+        let sessions = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(SessionSummary {
+                    id: row.get(0)?,
+                    started_at: row
+                        .get::<_, String>(1)?
+                        .parse()
+                        .unwrap_or_else(|_| Utc::now()),
+                    model: row.get(2)?,
+                    message_count: row.get(3)?,
+                    title: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to list session summaries")?;
+
+        Ok(sessions)
     }
 
     pub fn create_session(&self, id: &str, model: &str, task_type: &str) -> Result<()> {

@@ -17,6 +17,8 @@ enum ClientMessage {
         message: String,
         #[serde(default)]
         model: Option<String>,
+        #[serde(default)]
+        session_id: Option<String>,
     },
     Agent {
         task: String,
@@ -77,6 +79,8 @@ enum ServerMessage {
         summary: String,
         total_turns: usize,
         duration_secs: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
     },
 }
 
@@ -140,7 +144,11 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
             ClientMessage::Ping => {
                 let _ = send_json(&mut socket, &ServerMessage::Pong).await;
             }
-            ClientMessage::Chat { message, model } => {
+            ClientMessage::Chat {
+                message,
+                model,
+                session_id,
+            } => {
                 let config = match state.reload_config() {
                     Ok(c) => c,
                     Err(e) => {
@@ -155,6 +163,15 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                     }
                 };
                 let model = model.unwrap_or_else(|| config.default_model.clone());
+                let session_id =
+                    session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                // Persistent session: ensure the row exists, replay recent
+                // history for continuity, and record the exchange after.
+                let memory = crate::memory::MemoryStore::new(&config.memory_db_path).ok();
+                if let Some(m) = &memory {
+                    let _ = m.ensure_session(&session_id, &model, "chat");
+                }
 
                 let (provider, _) = match build_provider(&config, &model) {
                     Some(p) => p,
@@ -170,9 +187,22 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                     }
                 };
 
+                // Order: system prompt, then replayed history, then the new
+                // user message (chat_messages returns [system, user]).
+                let mut pair = chat_messages(&config, message.clone());
+                let user_msg = pair.pop().expect("chat_messages yields user msg");
+                let mut request_messages = pair;
+                if let Some(m) = &memory {
+                    request_messages.extend(super::handlers::session_history_messages(
+                        m,
+                        &session_id,
+                        40,
+                    ));
+                }
+                request_messages.push(user_msg);
                 let request = crate::providers::ChatRequest::new(
                     model,
-                    chat_messages(&config, message),
+                    request_messages,
                     true, // stream
                 );
 
@@ -189,12 +219,34 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                             .await;
                         }
                         let full = chunks.join("");
+                        if let Some(m) = &memory {
+                            let now = chrono::Utc::now();
+                            let _ = m.save_message(&crate::memory::Message {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                session_id: session_id.clone(),
+                                role: "user".to_string(),
+                                content: message.clone(),
+                                created_at: now,
+                                tokens_used: None,
+                            });
+                            if !full.is_empty() {
+                                let _ = m.save_message(&crate::memory::Message {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    session_id: session_id.clone(),
+                                    role: "assistant".to_string(),
+                                    content: full.clone(),
+                                    created_at: chrono::Utc::now(),
+                                    tokens_used: None,
+                                });
+                            }
+                        }
                         let _ = send_json(
                             &mut socket,
                             &ServerMessage::Complete {
                                 summary: full,
                                 total_turns: 1,
                                 duration_secs: 0,
+                                session_id: Some(session_id.clone()),
                             },
                         )
                         .await;
@@ -361,6 +413,7 @@ async fn handle_agent_ws(mut socket: WebSocket, state: AppState) {
                                 summary,
                                 total_turns,
                                 duration_secs,
+                                session_id: None,
                             };
                             let _ = send_json(&mut socket, &msg).await;
                             break;
@@ -470,6 +523,7 @@ mod tests {
             summary: "done".to_string(),
             total_turns: 5,
             duration_secs: 30,
+            session_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("complete"));

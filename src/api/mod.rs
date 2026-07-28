@@ -29,7 +29,7 @@ pub mod handlers;
 pub mod ws;
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -154,6 +154,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/memory", get(handlers::memory_search))
         // Chat
         .route("/api/v1/chat", post(handlers::chat))
+        // Chat sessions
+        .route(
+            "/api/v1/sessions",
+            get(handlers::list_sessions).post(handlers::create_session),
+        )
+        .route("/api/v1/sessions/{id}", delete(handlers::close_session))
+        .route(
+            "/api/v1/sessions/{id}/messages",
+            get(handlers::session_messages),
+        )
         // Agent
         .route("/api/v1/agent", post(handlers::start_agent_task))
         .route("/api/v1/agent/{id}", get(handlers::get_agent_task))

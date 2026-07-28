@@ -11,6 +11,177 @@ use super::{
     ToolRequest, ToolResponse,
 };
 
+/// Open the persistent memory store using a freshly reloaded config
+/// (falls back to the boot config when reload fails).
+fn open_memory(state: &AppState) -> Result<crate::memory::MemoryStore, (StatusCode, Json<ApiError>)> {
+    let config = state
+        .reload_config()
+        .unwrap_or_else(|_| state.config.as_ref().clone());
+    crate::memory::MemoryStore::new(&config.memory_db_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("memory store: {}", e),
+            }),
+        )
+    })
+}
+
+/// GET /api/v1/sessions — list open (non-archived) chat sessions.
+pub async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
+    let memory = match open_memory(&state) {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
+    match memory.list_session_summaries(200) {
+        Ok(sessions) => Json(json!({ "sessions": sessions })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("list sessions failed: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/v1/sessions — create a new empty chat session.
+pub async fn create_session(State(state): State<AppState>) -> impl IntoResponse {
+    let memory = match open_memory(&state) {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
+    let model = state
+        .reload_config()
+        .map(|c| c.default_model.clone())
+        .unwrap_or_else(|_| state.config.default_model.clone());
+    let id = uuid::Uuid::new_v4().to_string();
+    match memory.ensure_session(&id, &model, "chat") {
+        Ok(()) => Json(json!({ "id": id })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("create session failed: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// DELETE /api/v1/sessions/{id} — close (archive) a chat session.
+pub async fn close_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let memory = match open_memory(&state) {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
+    match memory.archive_session(&id) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("close session failed: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/v1/sessions/{id}/messages — full history of one session.
+pub async fn session_messages(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let memory = match open_memory(&state) {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
+    match memory.get_session_messages(&id) {
+        Ok(msgs) => {
+            let items: Vec<serde_json::Value> = msgs
+                .iter()
+                .map(|m| {
+                    json!({
+                        "role": m.role,
+                        "content": m.content,
+                        "created_at": m.created_at.to_rfc3339(),
+                    })
+                })
+                .collect();
+            Json(json!({ "messages": items })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("session messages failed: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// Persist a chat exchange (user + assistant) into a session. Best-effort:
+/// failures are logged, never fatal to the chat response.
+fn persist_chat_exchange(
+    state: &AppState,
+    session_id: &str,
+    model: &str,
+    user_text: &str,
+    assistant_text: &str,
+) {
+    let Ok(memory) = open_memory(state) else {
+        return;
+    };
+    let _ = memory.ensure_session(session_id, model, "chat");
+    let now = chrono::Utc::now();
+    let _ = memory.save_message(&crate::memory::Message {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        role: "user".to_string(),
+        content: user_text.to_string(),
+        created_at: now,
+        tokens_used: None,
+    });
+    if !assistant_text.is_empty() {
+        let _ = memory.save_message(&crate::memory::Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            role: "assistant".to_string(),
+            content: assistant_text.to_string(),
+            created_at: chrono::Utc::now(),
+            tokens_used: None,
+        });
+    }
+}
+
+/// Recent session history as provider messages (oldest first), bounded so
+/// long sessions don't blow the context window.
+pub(crate) fn session_history_messages(
+    memory: &crate::memory::MemoryStore,
+    session_id: &str,
+    max_messages: usize,
+) -> Vec<crate::providers::Message> {
+    let Ok(mut msgs) = memory.get_session_messages(session_id) else {
+        return Vec::new();
+    };
+    if msgs.len() > max_messages {
+        msgs = msgs.split_off(msgs.len() - max_messages);
+    }
+    msgs.iter()
+        .filter(|m| m.role == "user" || m.role == "assistant")
+        .map(|m| crate::providers::Message {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        })
+        .collect()
+}
+
 /// GET /api/v1/health
 pub async fn health() -> Json<serde_json::Value> {
     Json(json!({
@@ -412,14 +583,15 @@ pub async fn chat(State(state): State<AppState>, body: Json<ApiChatRequest>) -> 
         reasoning_content: None,
     };
 
-    let request = crate::providers::ChatRequest::new(
-        model.clone(),
-        vec![
-            msg("system", soul.system_prompt()),
-            msg("user", body.message.clone()),
-        ],
-        false,
-    );
+    // Replay prior session messages so multi-turn chats have continuity.
+    let history = open_memory(&state)
+        .map(|m| session_history_messages(&m, &session_id, 40))
+        .unwrap_or_default();
+    let mut messages = vec![msg("system", soul.system_prompt())];
+    messages.extend(history);
+    messages.push(msg("user", body.message.clone()));
+
+    let request = crate::providers::ChatRequest::new(model.clone(), messages, false);
 
     match provider.chat(request).await {
         Ok(response) => {
@@ -428,6 +600,7 @@ pub async fn chat(State(state): State<AppState>, body: Json<ApiChatRequest>) -> 
                 .first()
                 .map(|c| c.message.content.clone())
                 .unwrap_or_default();
+            persist_chat_exchange(&state, &session_id, &model, &body.message, &content);
             Json(ChatResponse {
                 message: content,
                 model,
