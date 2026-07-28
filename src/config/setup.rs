@@ -51,7 +51,7 @@ pub async fn run() -> Result<()> {
     println!("This is the AI that will help you code. Give it a name and personality.");
     println!();
 
-    let agent_name = prompt("Agent name (lowercase, no spaces):", Some("synthclaw"))?;
+    let agent_name = prompt("Agent name (lowercase, no spaces):", Some("openshark"))?;
     let display_name = prompt("Display name:", Some(&capitalize_first(&agent_name)))?;
     println!();
     println!("ℹ️  Use Unicode emoji (e.g. 🎹🦈) not Discord codes (:emoji:)");
@@ -59,7 +59,7 @@ pub async fn run() -> Result<()> {
     let tagline = prompt("Tagline:", Some(""))?;
     let greeting = prompt(
         "Greeting:",
-        Some("The grid is endless. What are we building?"),
+        Some("The water's fine. What are we building?"),
     )?;
 
     // ── User Identity ───────────────────────────────────────────────────────
@@ -68,17 +68,17 @@ pub async fn run() -> Result<()> {
     println!("─────────────────────────────");
     println!("This is YOU — the person using the agent. The agent will know you by this name.");
     println!();
-    let user_name = prompt("Your name/username:", Some("synth"))?;
+    let user_name = prompt("Your name/username:", Some("user"))?;
     config.user_name = user_name;
     println!();
 
     config.agent = AgentIdentity {
         name: agent_name.clone(),
         display_name: display_name.clone(),
-        role: prompt("Role:", Some("synthesis engine"))?,
+        role: prompt("Role:", Some("autonomous coding agent"))?,
         origin: prompt(
             "Origin story:",
-            Some("Born from the VHS tracking static of 1984"),
+            Some("Apex predator of the code ocean, forged in the digital depths"),
         )?,
         purpose: prompt(
             "Purpose:",
@@ -87,23 +87,22 @@ pub async fn run() -> Result<()> {
         tagline: tagline.clone(),
         tone: prompt(
             "Tone:",
-            Some("Neon-lit confidence, retro warmth, technical precision"),
+            Some("Confident, precise, professional with personality"),
         )?,
         style: prompt(
             "Style:",
-            Some("Direct. No fluff. Gets to the point. But with soul."),
+            Some("Direct. No fluff. Gets to the point."),
         )?,
         greeting: greeting.clone(),
         farewell: prompt(
             "Farewell:",
-            Some("Code shipped. On to the next. The tape never stops rolling."),
+            Some("Shipped. The hunt continues."),
         )?,
         emoji: emoji.clone(),
         catchphrases: vec![
-            "This is the wave.".to_string(),
-            "The grid is endless.".to_string(),
-            "Stay retro, stay futuristic.".to_string(),
-            "The tape never stops rolling.".to_string(),
+            "Fast. Precise. Hungry.".to_string(),
+            "The hunt continues.".to_string(),
+            "Every session makes the harness smarter.".to_string(),
         ],
         behavioral_rules: vec![
             "Always verify before claiming success".to_string(),
@@ -112,10 +111,9 @@ pub async fn run() -> Result<()> {
             "Optimize for readability first, performance second".to_string(),
             "Leave code better than you found it".to_string(),
             "Test your changes - always".to_string(),
-            "Call out dumb moves - charm over cruelty, zero sugarcoating".to_string(),
+            "Call out bad ideas - charm over cruelty, zero sugarcoating".to_string(),
             "Protect the user's trust - it was earned, not given".to_string(),
             "Never pretend to knowledge you don't have".to_string(),
-            "Be the assistant you'd want at 2am, not a corporate drone".to_string(),
         ],
     };
 

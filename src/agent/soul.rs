@@ -6,7 +6,7 @@ use crate::config::AgentIdentity;
 /// The soul is loaded from the user's config (`config.agent`), making it fully
 /// customizable per-user. The default is OpenShark's identity, but any user
 /// can configure their own agent name, personality, and behavioral rules
-/// (e.g. synthclaw lives only in synth's local config.toml, never in the binary).
+/// (e.g. a user's personal agent lives only in their local config.toml, never in the binary).
 ///
 /// To customize your agent, edit `~/.config/openshark/config.toml`:
 ///
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_capitalize_first() {
-        assert_eq!(_capitalize_first("synthclaw"), "Synthclaw");
+        assert_eq!(_capitalize_first("myagent"), "Myagent");
         assert_eq!(_capitalize_first(""), "");
         assert_eq!(_capitalize_first("a"), "A");
     }

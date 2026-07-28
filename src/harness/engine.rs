@@ -69,8 +69,9 @@ impl Default for HarnessConfig {
 impl HarnessEngine {
     /// Build a static system prompt used for tests and headless mode.
     ///
-    /// The harness is OpenShark; the soul is synthclaw (from AgentIdentity::default).
-    /// Both names appear here — OpenShark is the software, synthclaw is the agent.
+    /// The harness is OpenShark; the soul is the generic OpenShark agent
+    /// (from AgentIdentity::default). Custom identities live only in the
+    /// user's local config.toml, never in the shipped binary.
     #[allow(dead_code)]
     pub fn build_system_prompt_static() -> String {
         let soul = crate::agent::soul::AgentSoul::from_config(
