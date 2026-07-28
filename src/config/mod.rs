@@ -290,6 +290,27 @@ pub struct ModelConfig {
 }
 
 impl Config {
+    /// Load config from an explicit directory (created if missing).
+    /// Used by embedded hosts (Android) where `dirs::config_dir()` is None.
+    pub fn load_from_dir(config_dir: &std::path::Path) -> Result<Self> {
+        std::fs::create_dir_all(config_dir)?;
+        let config_path = config_dir.join("config.toml");
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)
+                .with_context(|| format!("Failed to read {}", config_path.display()))?;
+            let mut config: Config =
+                toml::from_str(&content).context("Failed to parse config.toml")?;
+            config.resolve_env_keys()?;
+            Ok(config)
+        } else {
+            let config = Config::default();
+            if let Ok(content) = toml::to_string_pretty(&config) {
+                let _ = std::fs::write(&config_path, content);
+            }
+            Ok(config)
+        }
+    }
+
     pub fn load_or_default() -> Result<Self> {
         let config_dir = dirs::config_dir()
             .context("No config directory found")?

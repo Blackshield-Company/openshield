@@ -133,6 +133,10 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/diagnostics/{*file}",
             get(handlers::file_diagnostics),
         )
+        // Stats / Models / Memory
+        .route("/api/v1/stats", get(handlers::stats))
+        .route("/api/v1/models", get(handlers::list_models))
+        .route("/api/v1/memory", get(handlers::memory_search))
         // Chat
         .route("/api/v1/chat", post(handlers::chat))
         // Agent
