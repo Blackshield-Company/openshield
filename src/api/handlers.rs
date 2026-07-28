@@ -347,8 +347,8 @@ pub async fn memory_search(
 }
 
 /// POST /api/v1/chat
-pub async fn chat(body: Json<ApiChatRequest>) -> impl IntoResponse {
-    let config = match crate::config::Config::load_or_default() {
+pub async fn chat(State(state): State<AppState>, body: Json<ApiChatRequest>) -> impl IntoResponse {
+    let config = match state.reload_config() {
         Ok(c) => c,
         Err(_) => {
             return (
@@ -476,7 +476,7 @@ pub async fn start_agent_task(
     let max_turns = body.max_turns;
     let yolo = body.yolo;
     tokio::spawn(async move {
-        let config = match crate::config::Config::load_or_default() {
+        let config = match state_clone.reload_config() {
             Ok(c) => c,
             Err(e) => {
                 let mut tasks = state_clone.running_tasks.write().await;
