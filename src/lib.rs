@@ -94,6 +94,7 @@ pub async fn serve_in_process(
     let state = api::AppState {
         config: std::sync::Arc::new(config),
         running_tasks: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        config_dir: Some(config_dir.to_path_buf()),
     };
     api::serve(state, addr).await
 }

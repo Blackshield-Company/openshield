@@ -1649,6 +1649,7 @@ async fn main() -> anyhow::Result<()> {
             let state = crate::api::AppState {
                 config: Arc::new(config),
                 running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+                config_dir: None,
             };
             if let Err(e) = crate::api::serve(state, &addr).await {
                 eprintln!("❌ API server error: {}", e);

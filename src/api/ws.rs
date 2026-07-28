@@ -81,13 +81,13 @@ enum ServerMessage {
 }
 
 /// GET /ws/v1/chat — upgrade to WebSocket for streaming chat.
-pub async fn ws_chat(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_chat_ws)
+pub async fn ws_chat(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_chat_ws(socket, state))
 }
 
 /// GET /ws/v1/agent — upgrade to WebSocket for streaming agent tasks.
-pub async fn ws_agent(ws: WebSocketUpgrade, State(_state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(handle_agent_ws)
+pub async fn ws_agent(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_agent_ws(socket, state))
 }
 
 fn build_provider(
@@ -114,7 +114,7 @@ fn build_provider(
     Some((provider, name.clone()))
 }
 
-async fn handle_chat_ws(mut socket: WebSocket) {
+async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
     while let Some(Ok(msg)) = socket.recv().await {
         let text = match msg {
             Message::Text(t) => t,
@@ -141,7 +141,7 @@ async fn handle_chat_ws(mut socket: WebSocket) {
                 let _ = send_json(&mut socket, &ServerMessage::Pong).await;
             }
             ClientMessage::Chat { message, model } => {
-                let config = match crate::config::Config::load_or_default() {
+                let config = match state.reload_config() {
                     Ok(c) => c,
                     Err(e) => {
                         let _ = send_json(
@@ -223,7 +223,7 @@ async fn handle_chat_ws(mut socket: WebSocket) {
     }
 }
 
-async fn handle_agent_ws(mut socket: WebSocket) {
+async fn handle_agent_ws(mut socket: WebSocket, state: AppState) {
     while let Some(Ok(msg)) = socket.recv().await {
         let text = match msg {
             Message::Text(t) => t,
@@ -254,7 +254,7 @@ async fn handle_agent_ws(mut socket: WebSocket) {
                 yolo,
                 max_turns,
             } => {
-                let config = match crate::config::Config::load_or_default() {
+                let config = match state.reload_config() {
                     Ok(c) => c,
                     Err(e) => {
                         let _ = send_json(
