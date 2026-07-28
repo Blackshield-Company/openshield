@@ -7,7 +7,7 @@
 //!
 //! ## Architecture
 //!
-//! ```
+//! ```text
 //! User Message
 //!     │
 //!     ├─→ Memory Recall (inject relevant past context)

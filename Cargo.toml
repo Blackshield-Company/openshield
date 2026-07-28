@@ -14,6 +14,12 @@ rust-version = "1.91"
 name = "openshark"
 path = "src/main.rs"
 
+# Library target: same modules as the bin, exposed for embedding
+# (Tauri Android backend links this to host `openshark serve` in-process).
+[lib]
+name = "openshark"
+path = "src/lib.rs"
+
 [features]
 default = ["discord", "telegram", "slack", "matrix", "web-api"]
 discord = ["serenity"]
@@ -33,10 +39,9 @@ tokio = { version = "1.44", features = ["full"] }
 
 # CLI + TUI
 clap = { version = "4.5", features = ["derive"] }
-crossterm = "0.29"
 
 # HTTP + API
-reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls", "http2", "charset", "system-proxy"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 eventsource-stream = "0.2"
@@ -73,7 +78,11 @@ axum = { version = "0.8", features = ["ws"], optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 tungstenite = "0.29.0"
+
+# Desktop-only deps (clipboard + terminal UI) — not buildable/meaningful on Android.
+[target.'cfg(not(target_os = "android"))'.dependencies]
 arboard = { version = "3.5", default-features = false, features = ["wayland-data-control", "image-data"] }
+crossterm = "0.29"
 
 [dev-dependencies]
 tokio-test = "0.4"

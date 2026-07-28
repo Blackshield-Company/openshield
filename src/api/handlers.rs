@@ -165,6 +165,187 @@ pub async fn file_diagnostics(Path(file): Path<String>) -> Json<serde_json::Valu
     }))
 }
 
+
+// ---------------------------------------------------------------------------
+// Stats / Models / Memory — read-only endpoints (used by embedded hosts such
+// as the Android app, where there is no CLI binary to shell out to).
+// ---------------------------------------------------------------------------
+
+/// GET /api/v1/stats — session/memory statistics summary.
+pub async fn stats(State(state): State<AppState>) -> impl IntoResponse {
+    let memory = match crate::memory::MemoryStore::new(&state.config.memory_db_path) {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("memory store: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match memory.get_stats_summary() {
+        Ok(s) => Json(json!({
+            "total_sessions": s.total_sessions,
+            "total_messages": s.total_messages,
+            "total_tool_calls": s.total_tool_calls,
+            "successful_tool_calls": s.successful_tool_calls,
+            "total_tokens": s.total_tokens,
+            "unique_models": s.unique_models,
+            "tool_success_rate": s.tool_success_rate,
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("stats failed: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/v1/models — configured providers and their models.
+pub async fn list_models(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let models: Vec<serde_json::Value> = state
+        .config
+        .providers
+        .iter()
+        .flat_map(|(pname, p)| {
+            p.models.iter().map(move |m| {
+                json!({
+                    "provider": pname,
+                    "name": m.name,
+                    "context_length": m.context_length,
+                    "capabilities": m.capabilities,
+                })
+            })
+        })
+        .collect();
+    Json(json!({
+        "default_model": state.config.default_model,
+        "models": models,
+    }))
+}
+
+/// Query params for GET /api/v1/memory.
+#[derive(Debug, serde::Deserialize)]
+pub struct MemoryQueryParams {
+    pub q: Option<String>,
+    pub limit: Option<usize>,
+    pub recent: Option<bool>,
+    pub semantic: Option<bool>,
+}
+
+/// GET /api/v1/memory?q=&limit=&recent=&semantic= — search persistent memory.
+pub async fn memory_search(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<MemoryQueryParams>,
+) -> impl IntoResponse {
+    let memory = match crate::memory::MemoryStore::new(&state.config.memory_db_path) {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("memory store: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let limit = params.limit.unwrap_or(10);
+
+    if params.recent.unwrap_or(false) {
+        match memory.get_recent_sessions(limit) {
+            Ok(sessions) => {
+                let items: Vec<serde_json::Value> = sessions
+                    .iter()
+                    .map(|s| {
+                        json!({
+                            "id": s.id,
+                            "started_at": s.started_at.format("%Y-%m-%d %H:%M").to_string(),
+                            "model": s.model,
+                            "task_type": s.task_type,
+                        })
+                    })
+                    .collect();
+                return Json(json!({ "kind": "recent", "results": items })).into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError {
+                        error: format!("recent failed: {}", e),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let q = params.q.unwrap_or_default();
+    if q.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                error: "pass q= or recent=true".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    if params.semantic.unwrap_or(false) {
+        match memory.semantic_search(&q, limit) {
+            Ok(results) => {
+                let items: Vec<serde_json::Value> = results
+                    .iter()
+                    .map(|(msg, score)| {
+                        json!({
+                            "score": score,
+                            "role": msg.role,
+                            "content": msg.content,
+                            "created_at": msg.created_at.format("%Y-%m-%d %H:%M").to_string(),
+                        })
+                    })
+                    .collect();
+                Json(json!({ "kind": "semantic", "query": q, "results": items })).into_response()
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("semantic search failed: {}", e),
+                }),
+            )
+                .into_response(),
+        }
+    } else {
+        match memory.search_messages(&q, limit) {
+            Ok(messages) => {
+                let items: Vec<serde_json::Value> = messages
+                    .iter()
+                    .map(|msg| {
+                        json!({
+                            "role": msg.role,
+                            "content": msg.content,
+                            "created_at": msg.created_at.format("%Y-%m-%d %H:%M").to_string(),
+                        })
+                    })
+                    .collect();
+                Json(json!({ "kind": "keyword", "query": q, "results": items })).into_response()
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("search failed: {}", e),
+                }),
+            )
+                .into_response(),
+        }
+    }
+}
+
 /// POST /api/v1/chat
 pub async fn chat(body: Json<ApiChatRequest>) -> impl IntoResponse {
     let config = match crate::config::Config::load_or_default() {
