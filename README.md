@@ -14,6 +14,8 @@
 [![Version](https://img.shields.io/badge/version-1.1.0-neonpink)](https://github.com/synthalorian/openshark)
 [![License](https://img.shields.io/badge/license-MIT-neonblue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.91%2B-orange)](https://rust-lang.org)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue)](https://github.com/synthalorian/openshark)
+[![Status](https://img.shields.io/badge/status-active-brightgreen)](STATUS.md)
 
 ---
 
@@ -73,6 +75,20 @@ cp target/release/openshark ~/.local/bin/
 ```bash
 openshark setup    # Configure providers, models, preferences
 openshark          # Start TUI session
+```
+
+## Run
+
+```bash
+openshark setup    # Configure providers, models, preferences
+openshark          # Start TUI session
+```
+
+## Build
+
+```bash
+cargo build --release
+# Binary is at target/release/openshark
 ```
 
 ---
