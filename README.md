@@ -21,24 +21,21 @@
 
 ## What Is OpenShark?
 
-OpenShark is an open-source AI coding harness written in Rust that combines the best of every harness — Hermes, OpenClaw, Claude Code, Codex, OpenCode, and more — into a single, self-improving system. It doesn't overthink. It uses model instincts, makes decisions for you, and gets better every session.
+OpenShark is an open-source AI coding harness written in Rust. It's a fast terminal agent that chats with any model, executes tools, remembers everything, and gets sharper the more you use it. It doesn't overthink — it uses model instincts, makes sensible default decisions for you, and improves every session.
 
-Born from the neon grid of 1984, OpenShark is built for builders who want AI that **decides without asking** — except when it comes to UI/design, where your taste matters.
+Born from the neon grid of 1984, OpenShark is built for builders who want an agent that **decides without asking** — except when it comes to UI/design, where your taste matters.
 
 ---
 
-## What Makes OpenShark Different
+## What It's Good At
 
-| Feature | Other Harnesses | OpenShark |
-|---------|----------------|-----------|
-| **Memory** | Session-based, dies when you close | Persistent, queryable, versioned, semantic search |
-| **Model Access** | Locked to one provider | Universal — any model, any provider, local or cloud |
-| **Decision Making** | You choose everything | Suggests, decides, learns from results |
-| **Self-Improvement** | Static prompts | Evolves prompts, routing, tools based on success data |
-| **Cost Control** | Burn tokens blindly | Routes to cheapest capable model, tracks every token |
-| **Agent Autonomy** | Manual tool selection | Auto-detects tool needs, plans and executes autonomously |
-| **Multi-Platform** | Terminal only | Discord, Telegram, Slack, Matrix gateways |
-| **Open Source** | Proprietary | Fully open, community-driven |
+- **Persistent memory that actually works** — SQLite-backed sessions, messages, and tool calls with keyword *and* semantic search. Close the terminal, come back next week, it still knows what you were doing.
+- **Universal model access** — any provider with an OpenAI-compatible API, local or cloud. Point it at llama-swap, OpenRouter, xAI, whatever. Not locked to anyone.
+- **Smart routing** — picks the right model per task based on historical success rates, capability matching, and cost. Tracks every token so you don't burn budget blindly.
+- **Autonomous agent mode** — plans, executes, verifies, retries. You approve the plan, it does the work.
+- **Self-improvement** — analyzes its own sessions to detect tool failure patterns, rank prompt effectiveness, and recommend changes.
+- **Multi-platform gateways** — the same agent brain answers on Discord and Telegram, with Slack and Matrix scaffolds ready to extend.
+- **A TUI worth living in** — Ratatui-driven, keyboard-first, streaming responses, 24 preset themes (Synthwave84 by default, obviously).
 
 ---
 
@@ -48,7 +45,7 @@ Born from the neon grid of 1984, OpenShark is built for builders who want AI tha
 2. **Instinct Over Instructions** — Uses model capabilities natively, doesn't fight them
 3. **Decides For You** — Picks the right model, tool, and approach based on data
 4. **Learns From Itself** — Every session makes the next one better
-5. **Easy On, Hard Off** — 60 seconds to start, impossible to leave
+5. **Easy On** — 60 seconds from install to first session
 
 ---
 
@@ -77,20 +74,6 @@ openshark setup    # Configure providers, models, preferences
 openshark          # Start TUI session
 ```
 
-## Run
-
-```bash
-openshark setup    # Configure providers, models, preferences
-openshark          # Start TUI session
-```
-
-## Build
-
-```bash
-cargo build --release
-# Binary is at target/release/openshark
-```
-
 ---
 
 ## Architecture
@@ -112,8 +95,8 @@ cargo build --release
     ▼               ▼               ▼
 ┌─────────────────────────────────────────┐
 │      Provider Abstraction Layer         │
-│  OpenAI, Anthropic, xAI, local, etc.   │
-│  LiteLLM-compatible + native opts       │
+│  OpenAI-compatible + native options     │
+│  Cloud APIs, local servers, llama-swap  │
 └─────────────────────────────────────────┘
     │               │               │
     ▼               ▼               ▼
@@ -400,11 +383,8 @@ See [STATUS.md](STATUS.md) for current development status and session handoff no
 
 > One harness. Universal models. Real memory. Agent autonomy. Open source.
 >
-> Better than Claw Code at coding. Better than Hermes at memory.
-> Better than OpenCode/OMO at agent control. Better than OpenClaw at tool execution.
->
 > It knows its sense of direction. It decides for you. It learns from itself.
-> Easy to board, hard to get off.
+> Fast. Precise. Hungry.
 
 ---
 
