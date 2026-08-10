@@ -81,7 +81,7 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
                 if ok { "approved" } else { "tool-reported-failure" },
             );
 
-            app.model_messages.push(Message {
+            std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                 role: "user".to_string(),
                 content: format!("Tool {} returned: {}", tool_name, sanitized),
                 images: None,
