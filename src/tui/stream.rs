@@ -146,7 +146,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     }
                 }
                 for (tool_name, args) in &embedded_tools {
-                    app.model_messages.push(Message {
+                    std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                         role: "assistant".to_string(),
                         content: format!("TOOL:{} {}", tool_name, args),
                         images: None,
@@ -166,7 +166,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                         reasoning_to_save.clone(),
                         None,
                     );
-                    app.model_messages.push(Message {
+                    std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                         role: "assistant".to_string(),
                         content: format!("TOOL:{} {}", tool_name, args),
                         images: None,
@@ -297,7 +297,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 evolution.track_tool_outcome(&name, success, 0);
             }
 
-            app.model_messages.push(Message {
+            std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", result),
                 images: None,
@@ -347,7 +347,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     app.add_system_message(
                         "⚠️ Response was empty — re-prompting for synthesis...".to_string(),
                     );
-                    app.model_messages.push(Message {
+                    std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                         role: "assistant".to_string(),
                         content: content.clone(),
                         images: None,
@@ -355,7 +355,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                         tool_calls: None,
                         reasoning_content: None,
                     });
-                    app.model_messages.push(Message {
+                    std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                         role: "user".to_string(),
                         content: "Provide a COMPLETE synthesis of the tool results. Explain what was found, what it means, and the next step.".to_string(),
                         images: None,
@@ -368,12 +368,12 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     let provider = app.provider.clone();
                     let model = app.model.clone();
                     let model_config = app.model_config.clone();
-                    let model_messages = app.model_messages.clone();
+                    let model_messages = (*app.model_messages).clone();
                     let is_multi_model = app.multi_model_mode;
                     let config = app.config.clone();
                     let security_engine = app.security_engine.clone();
                     let session_id = app.session_id.clone();
-                    tokio::spawn(async move {
+                    let handle = tokio::spawn(async move {
                         let _ = stream_model_response_task(
                             tx,
                             provider,
@@ -387,6 +387,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                         )
                         .await;
                     });
+                    app.stream_task = Some(handle);
                 }
             } else {
                 app.empty_response_count = 0;
@@ -461,7 +462,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
         StreamEvent::AssistantToolCall { content, reasoning, tool_calls } => {
             // Add the assistant message with tool_calls to model_messages so that
             // subsequent tool result messages have a matching tool_call_id.
-            app.model_messages.push(Message {
+            std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                 role: "assistant".to_string(),
                 content,
                 images: None,

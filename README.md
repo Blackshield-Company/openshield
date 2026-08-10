@@ -1,300 +1,79 @@
-  ___                   ____  _                _    
- / _ \ _ __   ___ _ __ / ___|| |__   __ _ _ __| | __
-| | | | '_ \ / _ \ '_ \\___ \| '_ \ / _` | '__| |/ /
-| |_| | |_) |  __/ | | |___) | | | | (_| | |  |   < 
- \___/| .__/ \___|_| |_|____/|_| |_|\__,_|_|  |_|\_\
-      |_|
+# OpenShark
 
-> 🦈 *Fast. Precise. Hungry.*
+AI coding agent in your terminal. Rust. Open source.
 
-![OpenShark Title Screen](openshark.png)
+![OpenShark](openshark.png)
 
-*Retro DOS title screen aesthetic — pixel art, neon, and shark fins.*
+![OpenShark TUI](openshark-tui.png)
 
 [![Version](https://img.shields.io/badge/version-1.1.0-neonpink)](https://github.com/synthalorian/openshark)
 [![License](https://img.shields.io/badge/license-MIT-neonblue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.91%2B-orange)](https://rust-lang.org)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue)](https://github.com/synthalorian/openshark)
-[![Status](https://img.shields.io/badge/status-active-brightgreen)](STATUS.md)
 
----
+## What It Does
 
-## What Is OpenShark?
+- **Persistent memory** — SQLite-backed sessions with keyword and semantic search. Close the terminal, come back next week, it still knows what you were doing.
+- **Any model provider** — Works with any OpenAI-compatible API. OpenRouter, llama-swap, xAI, local servers. Not locked to anyone.
+- **Autonomous agent mode** — Plans, executes, verifies, retries. You approve the plan, it does the work.
 
-OpenShark is an open-source AI coding harness written in Rust. It's a fast terminal agent that chats with any model, executes tools, remembers everything, and gets sharper the more you use it. It doesn't overthink — it uses model instincts, makes sensible default decisions for you, and improves every session.
+Also: smart model routing, self-improvement analytics, Discord/Telegram gateways, MCP client, 24 TUI themes, 4-layer security.
 
-Born from the neon grid of 1984, OpenShark is built for builders who want an agent that **decides without asking** — except when it comes to UI/design, where your taste matters.
-
----
-
-## What It's Good At
-
-- **Persistent memory that actually works** — SQLite-backed sessions, messages, and tool calls with keyword *and* semantic search. Close the terminal, come back next week, it still knows what you were doing.
-- **Universal model access** — any provider with an OpenAI-compatible API, local or cloud. Point it at llama-swap, OpenRouter, xAI, whatever. Not locked to anyone.
-- **Smart routing** — picks the right model per task based on historical success rates, capability matching, and cost. Tracks every token so you don't burn budget blindly.
-- **Autonomous agent mode** — plans, executes, verifies, retries. You approve the plan, it does the work.
-- **Self-improvement** — analyzes its own sessions to detect tool failure patterns, rank prompt effectiveness, and recommend changes.
-- **Multi-platform gateways** — the same agent brain answers on Discord and Telegram, with Slack and Matrix scaffolds ready to extend.
-- **A TUI worth living in** — Ratatui-driven, keyboard-first, streaming responses, 24 preset themes (Synthwave84 by default, obviously).
-
----
-
-## Core Philosophy
-
-1. **Sense of Direction** — OpenShark knows what you're building and why
-2. **Instinct Over Instructions** — Uses model capabilities natively, doesn't fight them
-3. **Decides For You** — Picks the right model, tool, and approach based on data
-4. **Learns From Itself** — Every session makes the next one better
-5. **Easy On** — 60 seconds from install to first session
-
----
-
-## Quick Start
-
-### One-Liner Install
+## Install
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/synthalorian/openshark/main/install.sh | bash
 ```
 
-### Manual Install
+Requires Rust (installs via rustup if missing). Binary goes to `~/.local/bin/openshark`.
+
+## First Run
 
 ```bash
-git clone https://github.com/synthalorian/openshark.git
-cd openshark
-cargo build --release
-# Binary is at target/release/openshark
-cp target/release/openshark ~/.local/bin/
-```
-
-### First Run
-
-```bash
-openshark setup    # Configure providers, models, preferences
+openshark setup    # Configure providers and models
 openshark          # Start TUI session
 ```
 
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│         OpenShark TUI (Ratatui)         │
-│    Keyboard-driven, fast, beautiful     │
-└─────────────────────────────────────────┘
-                    │
-    ┌───────────────┼───────────────┐
-    ▼               ▼               ▼
-┌────────┐    ┌──────────┐    ┌──────────┐
-│ Router │    │  Memory  │    │  Tools   │
-│ Engine │◄──►│  Store   │◄──►│ (git, fs,│
-│        │    │(SQLite)  │    │  term)   │
-└────────┘    └──────────┘    └──────────┘
-    │               │               │
-    ▼               ▼               ▼
-┌─────────────────────────────────────────┐
-│      Provider Abstraction Layer         │
-│  OpenAI-compatible + native options     │
-│  Cloud APIs, local servers, llama-swap  │
-└─────────────────────────────────────────┘
-    │               │               │
-    ▼               ▼               ▼
-┌──────────┐ ┌──────────┐ ┌──────────────┐
-│  Agent   │ │  Cache   │ │ Self-Improve │
-│  Loop    │ │  Store   │ │   Engine     │
-└──────────┘ └──────────┘ └──────────────┘
-```
-
-### Module Breakdown
-
-```
-src/
-├── main.rs              # CLI entry (clap, async tokio)
-├── agent/               # Agentic loop: plan → execute → verify → iterate
-├── cache/               # Response cache with TTL and disk persistence
-├── config/              # Config struct, load/save, setup wizard
-├── evolution/           # Agent evolution and mutation system
-├── gateway/             # Multi-platform messaging gateway
-│   ├── discord.rs       # Native serenity 0.12 bot
-│   ├── telegram.rs      # teloxide bot with reply sender
-│   ├── slack.rs         # Socket Mode scaffold
-│   ├── matrix.rs        # Sync loop scaffold
-│   ├── message_router.rs# Cross-platform message routing
-│   └── unified_router.rs# Unified gateway router
-├── lsp/                 # Lightweight LSP client
-├── mcp/                 # Native MCP client (stdio + SSE)
-├── memory/              # SQLite memory with semantic search
-├── providers/           # Provider abstraction with streaming
-├── router/              # Smart model routing engine
-├── security/            # 4-layer security: sandbox, identity, PII, guardrails
-├── self_improve/        # Performance analysis and recommendations
-├── skills/              # YAML frontmatter skill system
-├── tools/               # 9 built-in tools + MCP bridge
-└── tui/                 # Ratatui interface with 24 themes
-```
-
----
+Set one API key environment variable before starting: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, or `XAI_API_KEY`.
 
 ## Commands
-
-### CLI Commands
 
 | Command | Description |
 |---------|-------------|
 | `openshark` | Start TUI session |
 | `openshark setup` | Configure providers, models, preferences |
-| `openshark stats` | View token usage, success rates, model performance |
-| `openshark memory <query>` | Query persistent memory (keyword search) |
-| `openshark memory <query> --semantic` | Semantic memory search |
-| `openshark memory --recent` | List recent sessions |
-| `openshark route` | Show current routing decisions |
-| `openshark learn` | Trigger self-improvement analysis |
 | `openshark agent "<task>"` | Execute task autonomously |
-| `openshark test run .` | Run tests (auto-detect framework) |
-| `openshark models` | List available models |
 | `openshark chat "<message>"` | One-shot chat |
+| `openshark memory <query>` | Search persistent memory |
+| `openshark memory <query> --semantic` | Semantic memory search |
+| `openshark stats` | Token usage and model performance |
+| `openshark models` | List available models |
 | `openshark config` | Show configuration |
-| `openshark security status` | Show security status |
-| `openshark mcp status` | Show MCP server status |
 
-### TUI Commands
-
-| Command | Description |
-|---------|-------------|
-| `help` | Show available commands |
-| `tools` | List available tools |
-| `history` | Show session history |
-| `context` | Show memory hierarchy summary |
-| `agent: <task>` | Trigger autonomous agent mode |
-| `what did we do about <x>?` | Natural memory query |
-| `exit` | End session |
-
-### TUI Keybindings
+## TUI Keybindings
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+A` | Toggle autonomous mode (safe ↔ full-send) |
-| `Ctrl+T` | Cycle through 24 preset themes |
-| `Ctrl+V` | Toggle multi-model comparison overlay |
+| `Ctrl+A` | Toggle autonomous mode |
+| `Ctrl+T` | Cycle themes |
+| `Ctrl+V` | Multi-model comparison overlay |
 | `↑/↓` | Navigate history |
-
----
 
 ## Tools
 
-| Tool | Purpose | Example |
-|------|---------|---------|
-| `edit` | Multi-file editing | `TOOL:edit read src/main.rs` |
-| `fs` | File system operations | `TOOL:fs list src/` |
-| `git` | Git operations | `TOOL:git status` |
-| `lsp` | LSP queries | `TOOL:lsp symbols src/main.rs` |
-| `refactor` | Code refactoring | `TOOL:refactor rename_symbol src/main.rs 10 5 new_name` |
-| `search` | Codebase search | `TOOL:search fn main --ext rust` |
-| `grep` | Regex search | `TOOL:grep async fn src/` |
-| `terminal` | Shell execution | `TOOL:terminal cargo test` |
-| `test` | Test runner | `TOOL:test run .` |
-| `mcp` | MCP server tools | Auto-discovered from configured MCP servers |
-
----
-
-## Features
-
-### 🤖 Agentic Loop
-
-Type `agent: fix the bug in src/main.rs` and OpenShark will:
-1. Generate a plan with specific steps
-2. Ask for your approval (approve/edit/reject)
-3. Execute each step with verification
-4. Retry failed steps (up to 3 times)
-5. Escalate to recovery plan if needed
-
-Max iterations: **84** (configurable)
-
-### 🧠 Semantic Memory
-
-OpenShark remembers everything across sessions:
-- **Keyword search**: `openshark memory "auth"`
-- **Semantic search**: `openshark memory "auth" --semantic`
-- **Natural queries**: Just ask "what did we do about auth?"
-- **Context injection**: Automatically injects relevant past context into new sessions
-- **Memory hierarchy**: Session → Project → Global layers
-
-### 🎯 Smart Routing
-
-Automatically picks the best model for each task:
-- Historical success rates (40%)
-- Capability matching (35%)
-- Cost efficiency (25%)
-- Context length enforcement
-- Budget limits
-
-### 📊 Self-Improvement
-
-Analyzes every session to get better:
-- Model performance trends
-- Tool failure pattern detection
-- Prompt effectiveness ranking
-- Session quality scoring
-- Actionable recommendations
-
-### 🔒 4-Layer Security
-
-- **Sandbox**: Restricted file system access
-- **Identity**: User verification and agent identity
-- **PII**: Personal information detection and redaction
-- **Guardrails**: Content policy enforcement
-
-Toggle between safe and full-send modes with `Ctrl+A`.
-
-### 🌐 Multi-Platform Gateway
-
-- **Discord**: Native bot with slash commands, free-form chat, keyword commands
-- **Telegram**: Bot with chunked message replies (4096 char limit)
-- **Slack**: Socket Mode scaffold (ready for expansion)
-- **Matrix**: Sync loop scaffold (ready for expansion)
-
-### 🎨 24 Preset Themes
-
-Synthwave84 default, Omarchy stock, light/dark variants. Cycle with `Ctrl+T`.
-
-### 🔌 Native MCP Client
-
-stdio + SSE transport, JSON-RPC 2.0, tool discovery/execution. No external MCP bridge needed.
-
-### 📊 Multi-Model Comparison
-
-`Ctrl+V` toggles a 90%×85% popup showing primary + all secondary model responses with navigation, model names, latency, and token counts.
-
----
+9 built-in tools: `edit`, `fs`, `git`, `lsp`, `refactor`, `search`, `grep`, `terminal`, `test`. Plus MCP server tools via native client.
 
 ## Config
 
-Run `openshark setup` to generate your config interactively, or create `~/.config/openshark/config.toml` manually:
+Config lives at `~/.config/openshark/config.toml`. Run `openshark setup` for interactive generation.
+
+<details>
+<summary>Example config</summary>
 
 ```toml
 version = "1.1.0"
 default_model = "gpt-4o"
 auto_route = true
 cost_limit_usd = 10.0
-
-[agent]
-name = "myagent"
-display_name = "MyAgent"
-role = "coding assistant"
-origin = "Created in the neon grid"
-purpose = "To ship code fast"
-tagline = "Let's build the future."
-tone = "Professional but friendly"
-style = "Concise and thorough"
-greeting = "Hey! Ready to code?"
-farewell = "See you next session!"
-emoji = "🤖"
-catchphrases = ["Let's do this!", "Ship it!"]
-behavioral_rules = [
-    "Always verify before claiming success",
-    "Show the code, don't just describe it",
-]
 
 [providers.openai]
 base_url = "https://api.openai.com/v1"
@@ -306,90 +85,25 @@ context_length = 128000
 cost_per_1k_input = 0.005
 cost_per_1k_output = 0.015
 capabilities = ["code", "chat", "analysis"]
-
-[gateway.discord]
-enabled = false
-token = "${DISCORD_BOT_TOKEN}"
-command_prefix = "!"
-slash_commands = true
-
-[gateway.telegram]
-enabled = false
-token = "${TELEGRAM_BOT_TOKEN}"
-
-[gateway.slack]
-enabled = false
-app_token = "${SLACK_APP_TOKEN}"
-bot_token = "${SLACK_BOT_TOKEN}"
-socket_mode = true
-
-[gateway.matrix]
-enabled = false
-homeserver = "https://matrix.org"
-user_id = "@myagent:matrix.org"
-access_token = "${MATRIX_ACCESS_TOKEN}"
 ```
 
----
-
-## Natural Language Control
-
-In the TUI, these words are intercepted before hitting the model API:
-- `stop` / `wait` / `cancel` — Halt current operation
-- `continue` / `go` — Resume or proceed
-
-No need to prefix with `/` or `!` — just type them naturally.
-
----
+</details>
 
 ## Development
 
 ```bash
-# Clone and build
 git clone https://github.com/synthalorian/openshark
 cd openshark
 cargo build --release
-
-# Run tests
 cargo test
-
-# Run with local model
-cargo run --
-
-# Run agent mode
-cargo run -- agent "refactor the auth module"
-
-# Run setup wizard
-cargo run -- setup
 ```
 
----
+## More
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history.
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for detailed future plans.
-
-## Status
-
-See [STATUS.md](STATUS.md) for current development status and session handoff notes.
-
----
-
-## The Vision
-
-> One harness. Universal models. Real memory. Agent autonomy. Open source.
->
-> It knows its sense of direction. It decides for you. It learns from itself.
-> Fast. Precise. Hungry.
-
----
-
-Made by synth with synthclaw 🎹🦞
+- [CHANGELOG.md](CHANGELOG.md) — Version history
+- [ROADMAP.md](ROADMAP.md) — Future plans
+- [STATUS.md](STATUS.md) — Current development status
 
 ## License
 
-MIT — The future of coding belongs to everyone.
+MIT
