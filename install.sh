@@ -27,6 +27,17 @@ setup_repo() {
         echo "🔄 Updating existing OpenShark..."
         cd "$INSTALL_DIR"
         git pull
+    elif [ -d "$INSTALL_DIR" ]; then
+        echo "🔄 Found existing directory, updating..."
+        cd "$INSTALL_DIR"
+        if [ -d .git ]; then
+            git pull
+        else
+            cd ..
+            rm -rf "$INSTALL_DIR"
+            git clone "$REPO" "$INSTALL_DIR"
+            cd "$INSTALL_DIR"
+        fi
     else
         echo "📥 Cloning OpenShark..."
         mkdir -p "$(dirname "$INSTALL_DIR")"

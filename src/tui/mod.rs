@@ -128,12 +128,14 @@ pub(crate) struct App {
     batch_selected: usize,
     /// Receiver for background stream events.
     stream_rx: Option<tokio::sync::mpsc::UnboundedReceiver<StreamEvent>>,
+    /// Handle to the background stream task for abortion on stall/cancel.
+    stream_task: Option<tokio::task::JoinHandle<()>>,
     /// Memory store for persistence.
     memory: MemoryStore,
     /// Provider for API calls.
     provider: Provider,
-    /// Message history for the model.
-    model_messages: Vec<Message>,
+    /// Message history for the model — shared via Arc to avoid expensive clones.
+    model_messages: std::sync::Arc<Vec<Message>>,
     /// Start time for session.
     #[allow(dead_code)]
     session_start: Instant,
@@ -261,7 +263,7 @@ pub(crate) struct App {
 struct SessionBranch {
     name: String,
     messages: Vec<ChatMessage>,
-    model_messages: Vec<Message>,
+    model_messages: std::sync::Arc<Vec<Message>>,
     #[allow(dead_code)]
     created_at: chrono::DateTime<Utc>,
 }
@@ -508,9 +510,10 @@ impl App {
             pending_batch: None,
             batch_selected: 0,
             stream_rx: None,
+            stream_task: None,
             memory,
             provider,
-            model_messages: vec![system_msg.clone()],
+            model_messages: std::sync::Arc::new(vec![system_msg.clone()]),
             session_start: Instant::now(),
             tokens_used: 0,
             tool_calls_count: 0,
@@ -521,7 +524,7 @@ impl App {
             branches: vec![SessionBranch {
                 name: "main".to_string(),
                 messages: Vec::new(),
-                model_messages: vec![system_msg.clone()],
+                model_messages: std::sync::Arc::new(vec![system_msg.clone()]),
                 created_at: Utc::now(),
             }],
             active_branch: 0,
@@ -630,7 +633,7 @@ impl App {
         let branch = SessionBranch {
             name: name.to_string(),
             messages: self.messages.clone(),
-            model_messages: self.model_messages.clone(),
+            model_messages: Arc::clone(&self.model_messages),
             created_at: Utc::now(),
         };
         self.branches.push(branch);
@@ -652,7 +655,7 @@ impl App {
         self.save_current_branch();
         let branch = &self.branches[index];
         self.messages = branch.messages.clone();
-        self.model_messages = branch.model_messages.clone();
+        self.model_messages = Arc::clone(&branch.model_messages);
         self.active_branch = index;
         self.add_system_message(format!("Switched to branch '{}' ({})", branch.name, index));
         Ok(())
@@ -661,7 +664,7 @@ impl App {
     fn save_current_branch(&mut self) {
         if let Some(branch) = self.branches.get_mut(self.active_branch) {
             branch.messages = self.messages.clone();
-            branch.model_messages = self.model_messages.clone();
+            branch.model_messages = Arc::clone(&self.model_messages);
         }
     }
 
@@ -853,10 +856,10 @@ impl App {
         let _ = self.memory.save_message(&memory_msg);
 
         if let Some(images) = images {
-            self.model_messages
+            Arc::make_mut(&mut self.model_messages)
                 .push(Message::with_image("user", content, images));
         } else {
-            self.model_messages.push(Message {
+            Arc::make_mut(&mut self.model_messages).push(Message {
                 role: "user".to_string(),
                 content,
                 images: None,
@@ -898,7 +901,7 @@ impl App {
         };
         let _ = self.memory.save_message(&memory_msg);
 
-        self.model_messages.push(Message {
+        Arc::make_mut(&mut self.model_messages).push(Message {
             role: "assistant".to_string(),
             content,
             images: None,
@@ -960,9 +963,9 @@ impl App {
             .first()
             .filter(|m| m.role == "system")
             .cloned();
-        self.model_messages.clear();
+        Arc::make_mut(&mut self.model_messages).clear();
         if let Some(sys) = system {
-            self.model_messages.push(sys);
+            Arc::make_mut(&mut self.model_messages).push(sys);
         }
     }
 
@@ -999,7 +1002,7 @@ impl App {
                 multi_model_responses: Vec::new(),
                 reasoning: None,
             });
-            self.model_messages.push(Message {
+            Arc::make_mut(&mut self.model_messages).push(Message {
                 role: m.role.clone(),
                 content: m.content.clone(),
                 images: None,
@@ -1013,9 +1016,9 @@ impl App {
     }
 
     fn truncate_messages_if_needed(&mut self) {
-        const MAX_MESSAGES: usize = 300;
+        const MAX_MESSAGES: usize = 200;
         const KEEP_FIRST: usize = 2;
-        const KEEP_LAST: usize = 200;
+        const KEEP_LAST: usize = 150;
         if self.messages.len() <= MAX_MESSAGES {
             return;
         }
@@ -1040,8 +1043,8 @@ impl App {
     /// accumulates tool results, system messages, and assistant responses that
     /// never get cleaned up otherwise.
     fn truncate_model_messages_if_needed(&mut self) {
-        const MAX_MODEL_MESSAGES: usize = 100;
-        const KEEP_LAST: usize = 80;
+        const MAX_MODEL_MESSAGES: usize = 50;
+        const KEEP_LAST: usize = 40;
         if self.model_messages.len() <= MAX_MODEL_MESSAGES {
             return;
         }
@@ -1066,7 +1069,7 @@ impl App {
         });
         // Keep last N messages
         new_messages.extend(self.model_messages.iter().rev().take(keep_last).rev().cloned());
-        self.model_messages = new_messages;
+        self.model_messages = Arc::new(new_messages);
     }
 
     fn rebuild_system_prompt_with_skills(&mut self, user_query: &str) {
@@ -1191,17 +1194,17 @@ impl App {
         };
 
         if !self.model_messages.is_empty() {
-            self.model_messages[0] = system_msg.clone();
+            Arc::make_mut(&mut self.model_messages)[0] = system_msg.clone();
         } else {
-            self.model_messages.push(system_msg.clone());
+            Arc::make_mut(&mut self.model_messages).push(system_msg.clone());
         }
 
         // Also update the active branch's system message
         if let Some(branch) = self.branches.get_mut(self.active_branch) {
             if !branch.model_messages.is_empty() {
-                branch.model_messages[0] = system_msg;
+                Arc::make_mut(&mut branch.model_messages)[0] = system_msg;
             } else {
-                branch.model_messages.push(system_msg);
+                Arc::make_mut(&mut branch.model_messages).push(system_msg);
             }
         }
     }
@@ -1219,7 +1222,7 @@ impl App {
         }
         // Keep system message and last 2 exchanges
         let keep = self.model_messages.len().saturating_sub(4).max(1);
-        let to_summarize: Vec<Message> = self.model_messages.drain(1..keep).collect();
+        let to_summarize: Vec<Message> = Arc::make_mut(&mut self.model_messages).drain(1..keep).collect();
 
         let summary = format!(
             "[Context Summary — {} messages summarized]\nPrevious topics discussed: {}",
@@ -1235,7 +1238,7 @@ impl App {
                 .join("; ")
         );
 
-        self.model_messages.insert(
+        Arc::make_mut(&mut self.model_messages).insert(
             1,
             Message {
                 role: "system".to_string(),
@@ -1475,18 +1478,18 @@ impl App {
         let provider = self.provider.clone();
         let model = self.model.clone();
         let model_config = self.model_config.clone();
-        let model_messages = self.model_messages.clone();
+        let model_messages = Arc::clone(&self.model_messages);
         let is_multi_model = self.multi_model_mode;
         let config = self.config.clone();
         let security_engine = self.security_engine.clone();
         let session_id = self.session_id.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let _ = stream_model_response_task(
-                tx,
-                provider,
-                model,
-                model_config,
-                model_messages,
+            tx,
+            provider,
+            model,
+            model_config,
+            (*model_messages).clone(),
                 is_multi_model,
                 config,
                 security_engine,
@@ -1494,6 +1497,7 @@ impl App {
             )
             .await;
         });
+        self.stream_task = Some(handle);
     }
 
 }
@@ -1591,6 +1595,10 @@ async fn run_app(
             app.is_reasoning = false;
             app.reasoning_content.clear();
             app.stream_rx = None;
+            // Abort the background task to prevent memory leak from orphaned task
+            if let Some(handle) = app.stream_task.take() {
+                handle.abort();
+            }
             app.add_system_message(format!(
                 "⚠️ Response stalled for {} minutes — stream reset so you can keep chatting. \
                  Type 'continue' to retry the last turn. \
@@ -1937,11 +1945,11 @@ fn approve_pending_tool(app: &mut App, label: &str) {
 
         let provider = app.provider.clone();
         let model = app.model.clone();
-        let model_messages = app.model_messages.clone();
+        let model_messages = (*app.model_messages).clone();
         let security_engine = app.security_engine.clone();
         let stall_timeout = app.config.autonomy.stream_stall_timeout_secs;
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let _ = execute_approved_tool_task(
                 tx,
                 provider,
@@ -1953,6 +1961,7 @@ fn approve_pending_tool(app: &mut App, label: &str) {
             )
             .await;
         });
+        app.stream_task = Some(handle);
     } else {
         app.mode = AppMode::Normal;
         app.tool_approval_shown_at = None;
@@ -3430,7 +3439,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                                 reasoning: m.reasoning.clone(),
                             })
                             .collect(),
-                        model_messages: Vec::new(),
+                        model_messages: std::sync::Arc::new(Vec::new()),
                         created_at: b.created_at,
                     })
                     .collect();
@@ -3441,7 +3450,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 app.model = imported_model;
                 app.tokens_used = export.metadata.tokens_used;
                 app.tool_calls_count = export.metadata.tool_calls_count;
-                app.model_messages = export.to_model_messages();
+                app.model_messages = Arc::new(export.to_model_messages());
                 app.scroll = 0;
                 app.follow_tail = true;
 
@@ -3878,18 +3887,18 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     let provider = app.provider.clone();
                     let model = app.model.clone();
                     let model_config = app.model_config.clone();
-                    let model_messages = app.model_messages.clone();
+                    let model_messages = Arc::clone(&app.model_messages);
                     let is_multi_model = app.multi_model_mode;
                     let config = app.config.clone();
                     let security_engine = app.security_engine.clone();
                     let session_id = app.session_id.clone();
-                    tokio::spawn(async move {
+                    let handle = tokio::spawn(async move {
                         let _ = stream_model_response_task(
-                            tx,
-                            provider,
-                            model,
-                            model_config,
-                            model_messages,
+            tx,
+            provider,
+            model,
+            model_config,
+            (*model_messages).clone(),
                             is_multi_model,
                             config,
                             security_engine,
@@ -3897,6 +3906,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         )
                         .await;
                     });
+                    app.stream_task = Some(handle);
                 }
                 return Ok(());
             }
@@ -3910,6 +3920,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     app.reasoning_content.clear();
                     app.is_reasoning = false;
                     app.stream_rx = None; // drop receiver → background task's tx.send() will fail
+                    // Abort the background task to prevent memory leak from orphaned task
+                    if let Some(handle) = app.stream_task.take() {
+                        handle.abort();
+                    }
                 }
             app.add_system_message(response.to_string());
             return Ok(());
@@ -3950,7 +3964,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         match crate::tools::Tool::execute(&test_tool, &format!("run {}", path_display)) {
             Ok(result) => {
                 app.add_system_message(result.clone());
-                app.model_messages.push(Message {
+                Arc::make_mut(&mut app.model_messages).push(Message {
                     role: "user".to_string(),
                     content: format!("Test results: {}", result),
                     images: None,
@@ -4081,7 +4095,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     app.stream_rx = Some(rx);
 
     // ── Phase 1: Enrich system prompt with memory + skills ────────────────
-    let mut model_messages = app.model_messages.clone();
+    let mut model_messages = (*app.model_messages).clone();
 
     // ── Phase 1b: Context compression if threshold exceeded ────────────────
     // HARD GUARDRAIL: If estimated tokens exceed 95% of context window,
@@ -4151,7 +4165,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     let security_engine = app.security_engine.clone();
     let session_id = app.session_id.clone();
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let _ = stream_model_response_task(
             tx,
             provider,
@@ -4165,6 +4179,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         )
         .await;
     });
+    app.stream_task = Some(handle);
 
     Ok(())
 }
@@ -5845,7 +5860,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 "approved",
             );
 
-            app.model_messages.push(Message {
+            Arc::make_mut(&mut app.model_messages).push(Message {
                 role: "assistant".to_string(),
                 content: format!("TOOL:{} {}", suggestion.tool_name, suggestion.args),
                 images: None,
@@ -5853,7 +5868,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 tool_calls: None,
                 reasoning_content: None,
             });
-            app.model_messages.push(Message {
+            Arc::make_mut(&mut app.model_messages).push(Message {
                 role: "user".to_string(),
                 content: format!("Tool result: {}", sanitized),
                 images: None,
@@ -5862,7 +5877,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 reasoning_content: None,
             });
 
-            let follow_up = ChatRequest::new(app.model.clone(), app.model_messages.clone(), true);
+            let follow_up = ChatRequest::new(app.model.clone(), (*app.model_messages).clone(), true);
 
             match app.provider.chat_stream(follow_up).await {
                 Ok((chunks, _metrics)) => {
