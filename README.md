@@ -16,7 +16,7 @@ AI coding agent in your terminal. Rust. Open source.
 - **Any model provider** — Works with any OpenAI-compatible API. OpenRouter, llama-swap, xAI, local servers. Not locked to anyone.
 - **Autonomous agent mode** — Plans, executes, verifies, retries. You approve the plan, it does the work.
 
-Also: smart model routing, self-improvement analytics, Discord/Telegram gateways, MCP client, 24 TUI themes, 4-layer security.
+Also: smart model routing, self-improvement analytics, Discord/Telegram bots, MCP client, 3 TUI themes, 4-layer security.
 
 ## Install
 
@@ -55,7 +55,8 @@ Set one API key environment variable before starting: `OPENAI_API_KEY`, `ANTHROP
 |-----|--------|
 | `Ctrl+A` | Toggle autonomous mode |
 | `Ctrl+T` | Cycle themes |
-| `Ctrl+V` | Multi-model comparison overlay |
+| `/multi` | Toggle multi-model mode |
+| `/compare` | Show multi-model comparison |
 | `↑/↓` | Navigate history |
 
 ## Tools
