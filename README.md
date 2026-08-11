@@ -16,8 +16,6 @@ AI coding agent in your terminal. Rust. Open source.
 - **Any model provider** — Works with any OpenAI-compatible API. OpenRouter, llama-swap, xAI, local servers. Not locked to anyone.
 - **Autonomous agent mode** — Plans, executes, verifies, retries. You approve the plan, it does the work.
 
-Also: smart model routing, self-improvement analytics, Discord/Telegram bots, MCP client, 3 TUI themes, 4-layer security.
-
 ## Install
 
 ```bash
