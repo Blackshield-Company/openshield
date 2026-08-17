@@ -311,7 +311,7 @@ openshark mcp tools <name>    # List tools from server
 name = "filesystem"
 type = "stdio"
 command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/synthalorian 🎹🤺"]
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/synth"]
 
 [[mcp.servers]]
 name = "github"
