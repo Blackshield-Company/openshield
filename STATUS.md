@@ -192,7 +192,7 @@ Type these directly in the TUI for instant answers from memory:
 ## Running
 
 ```bash
-cd /home/synth/projects/openshark
+cd /home/synthalorian 🎹🤺/projects/openshark
 cargo run -- headless --autonomous "implement feature X" --output results.txt
 cargo run -- headless --autonomous "fix the bug in src/main.rs" --model gpt-4
 cargo run -- headless --yolo "refactor auth module" --json
