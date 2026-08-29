@@ -178,13 +178,65 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             } else {
                 let clean_content = strip_think_tags(&content);
                 if clean_content.trim().is_empty() {
-                    // Never persist an empty assistant message — in the transcript
-                    // it reads as a silent mid-turn death. Surface it instead.
-                    app.add_system_message(
-                        "⚠️ Model returned an empty response. The turn ended without a reply — try re-sending."
-                            .to_string(),
-                    );
+                    // Empty completion — re-prompt ONCE via the circuit breaker
+                    // instead of dead-ending the turn. Reasoning models can burn
+                    // the whole completion budget on reasoning_content and return
+                    // empty content; a silent dead turn forces the user to notice
+                    // and retry manually.
+                    app.empty_response_count += 1;
+                    if app.empty_response_count < 2 {
+                        app.add_system_message(
+                            "⚠️ Response was empty — re-prompting...".to_string(),
+                        );
+                        // Never inject an empty assistant turn — it poisons the
+                        // next request. Nudge as user only.
+                        std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
+                            role: "user".to_string(),
+                            content: "Your previous response came back empty. Provide a complete reply to the conversation above.".to_string(),
+                            images: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                            reasoning_content: None,
+                        });
+                        app.is_streaming = true;
+                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                        app.stream_rx = Some(rx);
+                        let provider = app.provider.clone();
+                        let model = app.model.clone();
+                        let model_config = app.model_config.clone();
+                        let model_messages = (*app.model_messages).clone();
+                        let is_multi_model = app.multi_model_mode;
+                        let config = app.config.clone();
+                        let security_engine = app.security_engine.clone();
+                        let session_id = app.session_id.clone();
+                        let handle = tokio::spawn(async move {
+                            let _ = stream_model_response_task(
+                                tx,
+                                provider,
+                                model,
+                                model_config,
+                                model_messages,
+                                is_multi_model,
+                                config,
+                                security_engine,
+                                session_id,
+                            )
+                            .await;
+                        });
+                        app.stream_task = Some(handle);
+                    } else {
+                        // Second consecutive empty — give up gracefully. Never
+                        // persist an empty assistant message (in the transcript it
+                        // reads as a silent mid-turn death, and in history it
+                        // poisons the next request).
+                        app.add_system_message(
+                            "⚠️ Model returned an empty response twice. The turn ended without a reply — try re-sending."
+                                .to_string(),
+                        );
+                        app.empty_response_count = 0;
+                    }
                 } else {
+                    app.empty_response_count = 0;
                     app.add_assistant_message(clean_content.clone(), reasoning_to_save, None);
                 }
                 if app.should_auto_continue(&clean_content) {
@@ -325,7 +377,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             let trimmed = content.trim();
             if trimmed.is_empty() {
                 app.empty_response_count += 1;
-                if app.empty_response_count >= 1 {
+                if app.empty_response_count >= 2 {
                     app.add_system_message(
                         "⚠️ Model returned empty synthesis. Showing raw tool results:".to_string(),
                     );
@@ -347,14 +399,9 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                     app.add_system_message(
                         "⚠️ Response was empty — re-prompting for synthesis...".to_string(),
                     );
-                    std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
-                        role: "assistant".to_string(),
-                        content: content.clone(),
-                        images: None,
-                        tool_call_id: None,
-                        tool_calls: None,
-                        reasoning_content: None,
-                    });
+                    // Never inject an empty assistant turn into model_messages —
+                    // a blank assistant message poisons the NEXT request (provider
+                    // 400s or further empty completions). Nudge as user only.
                     std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                         role: "user".to_string(),
                         content: "Provide a COMPLETE synthesis of the tool results. Explain what was found, what it means, and the next step.".to_string(),
