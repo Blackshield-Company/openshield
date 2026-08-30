@@ -33,7 +33,7 @@ impl ResponseCache {
     pub fn new() -> Result<Self> {
         let cache_dir = dirs::cache_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine cache directory"))?
-            .join("openshark");
+            .join("openshield");
 
         fs::create_dir_all(&cache_dir)
             .with_context(|| format!("Failed to create cache dir: {:?}", cache_dir))?;
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_cache_set_and_get() {
-        let cache_dir = dirs::cache_dir().unwrap().join("openshark");
+        let cache_dir = dirs::cache_dir().unwrap().join("openshield");
         let cache_file = cache_dir.join(format!("test_cache_set_get_{}.json", std::process::id()));
         let _ = std::fs::remove_file(&cache_file);
 
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_cache_persistence() {
-        let cache_dir = dirs::cache_dir().unwrap().join("openshark");
+        let cache_dir = dirs::cache_dir().unwrap().join("openshield");
         let cache_file = cache_dir.join(format!("test_cache_{}.json", std::process::id()));
         let _ = std::fs::remove_file(&cache_file);
 

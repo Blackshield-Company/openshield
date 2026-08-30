@@ -1141,7 +1141,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
         let db_path = format!(
-            "/tmp/openshark_memory_test_{}_{}.db",
+            "/tmp/openshield_memory_test_{}_{}.db",
             std::process::id(),
             count
         );

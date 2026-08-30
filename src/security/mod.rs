@@ -1,4 +1,4 @@
-//! OpenShark Security Architecture
+//! OpenShield Security Architecture
 //!
 //! Layered security model:
 //!   L1 - Infrastructure Isolation: sandbox/working dir, process isolation
@@ -144,7 +144,7 @@ impl Default for SecurityConfig {
                 "/etc/passwd".to_string(),
                 "~/.ssh".to_string(),
                 "~/.gnupg".to_string(),
-                "~/.config/openshark".to_string(),
+                "~/.config/openshield".to_string(),
                 "~/.hermes".to_string(),
             ],
             allowed_paths: vec![],
@@ -194,7 +194,7 @@ impl SecurityConfig {
     pub fn load() -> Result<Self> {
         let config_dir = dirs::config_dir()
             .context("No config directory found")?
-            .join("openshark");
+            .join("openshield");
         let path = config_dir.join("security.toml");
 
         let mut config = if path.exists() {
@@ -225,7 +225,7 @@ impl SecurityConfig {
     pub fn save(&self) -> Result<()> {
         let config_dir = dirs::config_dir()
             .context("No config directory found")?
-            .join("openshark");
+            .join("openshield");
         std::fs::create_dir_all(&config_dir)?;
 
         let path = config_dir.join("security.toml");
@@ -326,12 +326,14 @@ impl SecurityEngine {
 
     /// Set autonomous mode on the security engine.
     pub fn set_autonomous_mode(&self, enabled: bool) {
-        self.autonomous_mode.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.autonomous_mode
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Set yolo mode on the security engine.
     pub fn set_yolo_mode(&self, enabled: bool) {
-        self.yolo_mode.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.yolo_mode
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Main security gate: checks a tool call before execution.
@@ -339,7 +341,9 @@ impl SecurityEngine {
     /// so the model can curl, redirect output, etc. without blocking.
     /// When yolo_mode is true, auto-approves ALL tools except sudo/sensitive.
     pub fn check_tool_call(&self, tool_name: &str, args: &str) -> SecurityDecision {
-        let autonomous_mode = self.autonomous_mode.load(std::sync::atomic::Ordering::Relaxed);
+        let autonomous_mode = self
+            .autonomous_mode
+            .load(std::sync::atomic::Ordering::Relaxed);
         let yolo_mode = self.yolo_mode.load(std::sync::atomic::Ordering::Relaxed);
         self.check_tool_call_with_mode(tool_name, args, autonomous_mode, yolo_mode)
     }

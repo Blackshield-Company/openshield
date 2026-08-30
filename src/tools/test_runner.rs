@@ -82,7 +82,7 @@ fn validate_test_path(path: &str) -> Result<()> {
             anyhow::bail!(
                 "Path '{}' is in a blocked directory ({}). \
                  These directories contain system/package files, not project tests. \
-                 Run OpenShark from your project directory or set working_directory in config.",
+                 Run OpenShield from your project directory or set working_directory in config.",
                 path,
                 blocked
             );
@@ -564,7 +564,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = format!(
-            "/tmp/openshark_testrunner_test_{}_{}",
+            "/tmp/openshield_testrunner_test_{}_{}",
             std::process::id(),
             count
         );

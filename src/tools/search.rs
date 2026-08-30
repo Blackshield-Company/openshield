@@ -54,7 +54,9 @@ impl Tool for SearchTool {
         }
 
         if pattern_parts.len() >= 2 {
-            path = pattern_parts.pop().expect("pattern_parts has at least 2 elements");
+            path = pattern_parts
+                .pop()
+                .expect("pattern_parts has at least 2 elements");
         }
         let pattern = pattern_parts.join(" ");
 
@@ -187,7 +189,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = format!(
-            "/tmp/openshark_search_test_{}_{}",
+            "/tmp/openshield_search_test_{}_{}",
             std::process::id(),
             count
         );

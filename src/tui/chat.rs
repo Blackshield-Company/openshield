@@ -78,7 +78,11 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
                 args,
                 ok,
                 crate::security::RiskLevel::Low,
-                if ok { "approved" } else { "tool-reported-failure" },
+                if ok {
+                    "approved"
+                } else {
+                    "tool-reported-failure"
+                },
             );
 
             std::sync::Arc::make_mut(&mut app.model_messages).push(Message {

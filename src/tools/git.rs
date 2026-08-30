@@ -32,10 +32,7 @@ impl Tool for GitTool {
 
         // Check if the target is a git repo before running any command
         if !Self::in_repo_at(&work_dir) {
-            return Ok(format!(
-                "Not a git repository: {}",
-                work_dir.display()
-            ));
+            return Ok(format!("Not a git repository: {}", work_dir.display()));
         }
 
         let parts: Vec<&str> = args.splitn(2, ' ').collect();
@@ -47,7 +44,9 @@ impl Tool for GitTool {
         let rest = parts.get(1).unwrap_or(&"");
 
         let output = match cmd {
-            "status" => Self::git_cmd(&work_dir).args(["status", "--short"]).output(),
+            "status" => Self::git_cmd(&work_dir)
+                .args(["status", "--short"])
+                .output(),
             "diff" => {
                 let mut c = Self::git_cmd(&work_dir);
                 c.arg("diff");
@@ -75,7 +74,9 @@ impl Tool for GitTool {
                 if rest.is_empty() {
                     return Ok("Usage: git commit <message>".to_string());
                 }
-                Self::git_cmd(&work_dir).args(["commit", "-m", rest]).output()
+                Self::git_cmd(&work_dir)
+                    .args(["commit", "-m", rest])
+                    .output()
             }
             "add" => {
                 if rest.is_empty() {
@@ -83,7 +84,9 @@ impl Tool for GitTool {
                 }
                 Self::git_cmd(&work_dir).args(["add", rest]).output()
             }
-            "show" => Self::git_cmd(&work_dir).args(["show", "--stat", rest]).output(),
+            "show" => Self::git_cmd(&work_dir)
+                .args(["show", "--stat", rest])
+                .output(),
             "stage-all" => Self::git_cmd(&work_dir).args(["add", "-A"]).output(),
             "push" => {
                 let mut c = Self::git_cmd(&work_dir);
@@ -97,7 +100,9 @@ impl Tool for GitTool {
                 if rest.is_empty() {
                     return Ok("Usage: git branch-create <name>".to_string());
                 }
-                Self::git_cmd(&work_dir).args(["checkout", "-b", rest]).output()
+                Self::git_cmd(&work_dir)
+                    .args(["checkout", "-b", rest])
+                    .output()
             }
             _ => {
                 return Ok(format!("Unknown git command: {}\n{}", cmd, self.usage()));
@@ -237,7 +242,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_git_test_{}_{}", std::process::id(), count);
+        let dir = format!("/tmp/openshield_git_test_{}_{}", std::process::id(), count);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Command::new("git")
@@ -277,7 +282,7 @@ mod tests {
 
         // Non-repo path reports cleanly with the path included
         let bad = tool
-            .execute("--repo /tmp/openshark_definitely_not_a_repo_xyz status")
+            .execute("--repo /tmp/openshield_definitely_not_a_repo_xyz status")
             .unwrap();
         assert!(
             bad.starts_with("Not a git repository"),

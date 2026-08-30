@@ -181,21 +181,22 @@ impl BookmarkManager {
     pub fn load_from_file(&mut self, session_id: &str) {
         let path = match dirs::config_dir() {
             Some(dir) => dir
-                .join("openshark")
+                .join("openshield")
                 .join("bookmarks")
                 .join(format!("{}.json", session_id)),
             None => return, // Silently skip if config dir unavailable
         };
         if let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data) {
-                self.bookmarks = bookmarks;
-            }
+            && let Ok(bookmarks) = serde_json::from_str::<Vec<Bookmark>>(&data)
+        {
+            self.bookmarks = bookmarks;
+        }
     }
 
     /// Save bookmarks to the session file.
     pub fn save_to_file(&self, session_id: &str) {
         let dir = match dirs::config_dir() {
-            Some(dir) => dir.join("openshark").join("bookmarks"),
+            Some(dir) => dir.join("openshield").join("bookmarks"),
             None => return, // Silently skip if config dir unavailable
         };
         let _ = std::fs::create_dir_all(&dir);

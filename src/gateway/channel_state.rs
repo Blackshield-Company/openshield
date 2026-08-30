@@ -64,7 +64,7 @@ impl ChannelState {
         let soul = crate::agent::soul::load_soul_from_config(config);
         let skills_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshark")
+            .join("openshield")
             .join("skills");
         let skill_registry = SkillRegistry::new(skills_dir).ok();
         let skills_prompt = skill_registry
@@ -249,7 +249,10 @@ impl ChannelStateStore {
 
     /// Get or create channel state.
     pub fn get_or_create(&self, channel_id: u64) -> ChannelState {
-        let mut states = self.states.lock().expect("ChannelStateRegistry mutex poisoned");
+        let mut states = self
+            .states
+            .lock()
+            .expect("ChannelStateRegistry mutex poisoned");
         states
             .entry(channel_id)
             .or_insert_with(|| ChannelState::new(&self.config))
@@ -258,20 +261,29 @@ impl ChannelStateStore {
 
     /// Update channel state.
     pub fn update(&self, channel_id: u64, state: ChannelState) {
-        let mut states = self.states.lock().expect("ChannelStateRegistry mutex poisoned");
+        let mut states = self
+            .states
+            .lock()
+            .expect("ChannelStateRegistry mutex poisoned");
         states.insert(channel_id, state);
     }
 
     /// Remove channel state (for /new).
     pub fn remove(&self, channel_id: u64) {
-        let mut states = self.states.lock().expect("ChannelStateRegistry mutex poisoned");
+        let mut states = self
+            .states
+            .lock()
+            .expect("ChannelStateRegistry mutex poisoned");
         states.remove(&channel_id);
     }
 
     /// Check if a channel has state.
     #[allow(dead_code)]
     pub fn has(&self, channel_id: u64) -> bool {
-        let states = self.states.lock().expect("ChannelStateRegistry mutex poisoned");
+        let states = self
+            .states
+            .lock()
+            .expect("ChannelStateRegistry mutex poisoned");
         states.contains_key(&channel_id)
     }
 }

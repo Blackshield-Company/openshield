@@ -100,16 +100,16 @@ impl SessionExport {
     }
 }
 
-/// Export a session to the default location (~/.local/share/openshark/sessions/).
+/// Export a session to the default location (~/.local/share/openshield/sessions/).
 pub fn export_to_default(export: &SessionExport) -> Result<std::path::PathBuf> {
     let dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshark")
+        .join("openshield")
         .join("sessions");
     std::fs::create_dir_all(&dir).context("Failed to create sessions directory")?;
 
     let filename = format!(
-        "openshark_session_{}_{}.json",
+        "openshield_session_{}_{}.json",
         export.session_id,
         export.exported_at.format("%Y%m%d_%H%M%S")
     );
@@ -122,7 +122,7 @@ pub fn export_to_default(export: &SessionExport) -> Result<std::path::PathBuf> {
 pub fn list_exports() -> Result<Vec<(std::path::PathBuf, SessionExport)>> {
     let dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshark")
+        .join("openshield")
         .join("sessions");
 
     if !dir.exists() {

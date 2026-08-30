@@ -3,7 +3,7 @@
 //! Users can pin specific files with `/ctx <path>` and they'll be
 //! included in every system prompt until cleared with `/ctx clear`.
 //!
-//! Persisted per-session to `~/.config/openshark/context/<session_id>.json`.
+//! Persisted per-session to `~/.config/openshield/context/<session_id>.json`.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -142,7 +142,7 @@ impl SmartContext {
     fn storage_path(session_id: &str) -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("openshark")
+            .join("openshield")
             .join("context")
             .join(format!("{}.json", session_id))
     }

@@ -1,4 +1,4 @@
-//! OpenShark AI Harness — Streaming Events
+//! OpenShield AI Harness — Streaming Events
 //!
 //! Events emitted by the harness engine during a streaming turn. These are
 //! converted by the TUI into its own `StreamEvent` types.

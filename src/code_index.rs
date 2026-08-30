@@ -104,7 +104,10 @@ impl CodeIndex {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        *self.last_refresh.lock().expect("CodeIndex last_refresh mutex poisoned") = now;
+        *self
+            .last_refresh
+            .lock()
+            .expect("CodeIndex last_refresh mutex poisoned") = now;
 
         Ok(map.symbols.len())
     }
@@ -201,7 +204,10 @@ impl CodeIndex {
                 }
                 count += 1;
             }
-            tracing::info!("Background code index refresh stopped after {} cycles", count);
+            tracing::info!(
+                "Background code index refresh stopped after {} cycles",
+                count
+            );
         });
     }
 }
@@ -239,7 +245,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         format!(
-            "/tmp/openshark_code_index_test_{}_{}.db",
+            "/tmp/openshield_code_index_test_{}_{}.db",
             std::process::id(),
             id
         )

@@ -483,7 +483,7 @@ mod tests {
         let mut compressor = ContextCompressor::new(config);
 
         let mut messages = vec![
-            make_msg("system", "You are OpenShark."),
+            make_msg("system", "You are OpenShield."),
             make_msg("user", "Hello"),
             make_msg("assistant", "Hi!"),
             make_msg("user", "What's new?"),
@@ -491,7 +491,7 @@ mod tests {
             make_msg("user", "Tell me a joke."),
             make_msg(
                 "assistant",
-                "Why did the shark cross the ocean? To get to the other tide.",
+                "Why did the shield cross the repo? To guard the other side.",
             ),
         ];
 
@@ -512,7 +512,7 @@ mod tests {
 
         // System message should still be first
         assert_eq!(messages[0].role, "system");
-        assert!(messages[0].content.contains("OpenShark"));
+        assert!(messages[0].content.contains("OpenShield"));
 
         // Last messages should be preserved
         assert_eq!(messages[messages.len() - 2].role, "user");

@@ -37,16 +37,16 @@ pub struct PersonaRegistry {
     active_idx: usize,
 }
 
-/// Stock OpenShark persona — the shipped identity.
-fn openshark_persona(is_default: bool) -> Persona {
+/// Stock OpenShield persona — the shipped identity.
+fn openshield_persona(is_default: bool) -> Persona {
     Persona {
-        id: "openshark".to_string(),
-        name: "openshark".to_string(),
-        display_name: "OpenShark".to_string(),
-        emoji: "🦈".to_string(),
+        id: "openshield".to_string(),
+        name: "openshield".to_string(),
+        display_name: "OpenShield".to_string(),
+        emoji: "🛡".to_string(),
         tagline: "The harness that learns. The agent that decides.".to_string(),
-        soul: "Apex predator of the digital depths. Relentless, precise, always hunting.".to_string(),
-        system_prompt: "You are OpenShark 🦈, an autonomous AI coding agent. You are relentless, precise, and hungry for shipping code. You don't overthink — you use model instincts, make decisions, and get better every session.".to_string(),
+        soul: "Blackshield sentinel of the codebase. Relentless, precise, and sworn to verified work.".to_string(),
+        system_prompt: "You are OpenShield 🛡, an autonomous AI coding agent. You are disciplined, precise, and defensive about code quality. You don't overthink — you verify, make decisions, and get better every session.".to_string(),
         voice: AgentVoice::Direct,
         is_default,
     }
@@ -90,14 +90,14 @@ impl PersonaRegistry {
     /// Build the registry from the configured agent identity.
     ///
     /// The default persona is always the user's configured `[agent]` identity —
-    /// OpenShark out of the box, or whatever a user sets in their local
+    /// OpenShield out of the box, or whatever a user sets in their local
     /// config.toml. Custom identities live only in user config
     /// and are never compiled into the shipped binary.
     pub fn new(identity: &crate::config::AgentIdentity) -> Self {
         let mut personas: Vec<Persona>;
 
-        if identity.name == "openshark" {
-            personas = vec![openshark_persona(true)];
+        if identity.name == "openshield" {
+            personas = vec![openshield_persona(true)];
         } else {
             // Custom configured identity becomes the default persona.
             let system_prompt =
@@ -118,8 +118,8 @@ impl PersonaRegistry {
                     voice: AgentVoice::Direct,
                     is_default: true,
                 },
-                // Stock OpenShark stays available as an alternate.
-                openshark_persona(false),
+                // Stock OpenShield stays available as an alternate.
+                openshield_persona(false),
             ];
         }
 
@@ -142,9 +142,11 @@ impl PersonaRegistry {
     /// Switch to a persona by name (case-insensitive).
     pub fn switch_to(&mut self, name: &str) -> Option<&Persona> {
         let name_lower = name.to_lowercase();
-        if let Some(idx) = self.personas.iter().position(|p| {
-            p.name.to_lowercase() == name_lower || p.id.to_lowercase() == name_lower
-        }) {
+        if let Some(idx) = self
+            .personas
+            .iter()
+            .position(|p| p.name.to_lowercase() == name_lower || p.id.to_lowercase() == name_lower)
+        {
             self.active_idx = idx;
             Some(&self.personas[idx])
         } else {
@@ -157,9 +159,16 @@ impl PersonaRegistry {
         self.personas
             .iter()
             .map(|p| {
-                let marker = if p.id == self.active().id { "▸ " } else { "  " };
+                let marker = if p.id == self.active().id {
+                    "▸ "
+                } else {
+                    "  "
+                };
                 let default_marker = if p.is_default { " 🔒" } else { "" };
-                format!("{}{} {} — {}{}", marker, p.emoji, p.display_name, p.tagline, default_marker)
+                format!(
+                    "{}{} {} — {}{}",
+                    marker, p.emoji, p.display_name, p.tagline, default_marker
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -176,9 +185,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_registry_is_openshark() {
+    fn test_default_registry_is_openshield() {
         let registry = PersonaRegistry::default();
-        assert_eq!(registry.active().name, "openshark");
+        assert_eq!(registry.active().name, "openshield");
         assert!(registry.active().is_default);
     }
 
@@ -190,8 +199,8 @@ mod tests {
         identity.emoji = "🧪".to_string();
         let mut registry = PersonaRegistry::new(&identity);
         assert_eq!(registry.active().name, "testclaw");
-        // Stock openshark remains available as an alternate
-        assert!(registry.switch_to("openshark").is_some());
+        // Stock openshield remains available as an alternate
+        assert!(registry.switch_to("openshield").is_some());
     }
 
     #[test]

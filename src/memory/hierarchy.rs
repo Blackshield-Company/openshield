@@ -281,7 +281,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
         let db_path = format!(
-            "/tmp/openshark_hierarchy_test_{}_{}.db",
+            "/tmp/openshield_hierarchy_test_{}_{}.db",
             std::process::id(),
             count
         );

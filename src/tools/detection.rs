@@ -72,7 +72,11 @@ pub fn detect_tool_suggestions(text: &str) -> Vec<ToolSuggestion> {
     detect_markdown_tool_blocks(text, &mut suggestions);
     detect_natural_language(text, &mut suggestions);
 
-    suggestions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    suggestions.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     suggestions
 }

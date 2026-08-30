@@ -1,7 +1,7 @@
-//! Native MCP (Model Context Protocol) client for OpenShark.
+//! Native MCP (Model Context Protocol) client for OpenShield.
 //!
 //! Provides stdio + SSE transport, JSON-RPC 2.0 framing, tool discovery,
-//! and tool execution. Integrates with OpenShark's tool system.
+//! and tool execution. Integrates with OpenShield's tool system.
 
 pub mod protocol;
 pub mod transport;
@@ -63,7 +63,7 @@ impl McpConnection {
             protocol_version: MCP_PROTOCOL_VERSION.to_string(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "openshark".to_string(),
+                name: "openshield".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         };

@@ -218,7 +218,15 @@ pub fn build_rendered_lines(app: &crate::tui::App, width: usize) -> (Vec<String>
     all_lines.push(format_info_line("Branch", "main", inner_width));
 
     // Separator
-    all_lines.push(format!("{}─{}", ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }), ansi_reset()));
+    all_lines.push(format!(
+        "{}─{}",
+        ansi_fg(crate::tui::theme::Color::Rgb {
+            r: 138,
+            g: 143,
+            b: 152
+        }),
+        ansi_reset()
+    ));
 
     // Messages
     for (idx, msg) in app.messages.iter().enumerate() {
@@ -245,8 +253,16 @@ pub fn build_rendered_lines(app: &crate::tui::App, width: usize) -> (Vec<String>
 }
 
 fn format_info_line(label: &str, value: &str, width: usize) -> String {
-    let label_color = ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 });
-    let value_color = ansi_fg(crate::tui::theme::Color::Rgb { r: 220, g: 220, b: 220 });
+    let label_color = ansi_fg(crate::tui::theme::Color::Rgb {
+        r: 138,
+        g: 143,
+        b: 152,
+    });
+    let value_color = ansi_fg(crate::tui::theme::Color::Rgb {
+        r: 216,
+        g: 211,
+        b: 200,
+    });
     let reset = ansi_reset();
     let label_w = 10usize;
     let value_w = width.saturating_sub(label_w + 2);
@@ -276,22 +292,38 @@ fn format_message_for_selection(
     let (role_icon, role_color, role_name) = match msg.role.as_str() {
         "user" => (
             "👤",
-            crate::tui::theme::Color::Rgb { r: 255, g: 215, b: 0 },
+            crate::tui::theme::Color::Rgb {
+                r: 201,
+                g: 162,
+                b: 39,
+            },
             "You",
         ),
         "assistant" => (
-            "🦈",
-            crate::tui::theme::Color::Rgb { r: 255, g: 77, b: 158 },
-            "Shark",
+            "🛡",
+            crate::tui::theme::Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            },
+            "OpenShield",
         ),
         "system" => (
             "📋",
-            crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 },
+            crate::tui::theme::Color::Rgb {
+                r: 138,
+                g: 143,
+                b: 152,
+            },
             "System",
         ),
         _ => (
             "❓",
-            crate::tui::theme::Color::Rgb { r: 220, g: 220, b: 220 },
+            crate::tui::theme::Color::Rgb {
+                r: 216,
+                g: 211,
+                b: 200,
+            },
             "Unknown",
         ),
     };
@@ -299,10 +331,18 @@ fn format_message_for_selection(
     let header = if is_selected {
         format!(
             "{}▶ {} {} {}{}{}",
-            ansi_fg(crate::tui::theme::Color::Rgb { r: 255, g: 215, b: 0 }),
+            ansi_fg(crate::tui::theme::Color::Rgb {
+                r: 201,
+                g: 162,
+                b: 39
+            }),
             role_icon,
             role_name,
-            ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }),
+            ansi_fg(crate::tui::theme::Color::Rgb {
+                r: 138,
+                g: 143,
+                b: 152
+            }),
             " [COPY]",
             ansi_reset()
         )
@@ -312,7 +352,11 @@ fn format_message_for_selection(
             ansi_fg(role_color),
             role_icon,
             role_name,
-            ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }),
+            ansi_fg(crate::tui::theme::Color::Rgb {
+                r: 138,
+                g: 143,
+                b: 152
+            }),
             ansi_reset()
         )
     };
@@ -323,7 +367,11 @@ fn format_message_for_selection(
         for w in wrapped {
             lines.push(format!(
                 "{}{}{}",
-                ansi_fg(crate::tui::theme::Color::Rgb { r: 220, g: 220, b: 220 }),
+                ansi_fg(crate::tui::theme::Color::Rgb {
+                    r: 216,
+                    g: 211,
+                    b: 200
+                }),
                 w,
                 ansi_reset()
             ));
@@ -333,7 +381,11 @@ fn format_message_for_selection(
     for response in &msg.multi_model_responses {
         lines.push(format!(
             "{}  ↳ {} ({}ms, {}tok){}",
-            ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }),
+            ansi_fg(crate::tui::theme::Color::Rgb {
+                r: 138,
+                g: 143,
+                b: 152
+            }),
             response.model_name,
             response.latency_ms,
             response.tokens,
@@ -344,7 +396,11 @@ fn format_message_for_selection(
             for w in wrapped {
                 lines.push(format!(
                     "{}    {}{}",
-                    ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }),
+                    ansi_fg(crate::tui::theme::Color::Rgb {
+                        r: 138,
+                        g: 143,
+                        b: 152
+                    }),
                     w,
                     ansi_reset()
                 ));
@@ -358,9 +414,17 @@ fn format_message_for_selection(
 fn format_streaming_for_selection(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let header = format!(
-        "{}🦈 Shark {}(streaming…){}",
-        ansi_fg(crate::tui::theme::Color::Rgb { r: 255, g: 77, b: 158 }),
-        ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }),
+        "{}🛡 Shield {}(streaming…){}",
+        ansi_fg(crate::tui::theme::Color::Rgb {
+            r: 193,
+            g: 18,
+            b: 31
+        }),
+        ansi_fg(crate::tui::theme::Color::Rgb {
+            r: 138,
+            g: 143,
+            b: 152
+        }),
         ansi_reset()
     );
     lines.push(header);
@@ -370,7 +434,11 @@ fn format_streaming_for_selection(content: &str, width: usize) -> Vec<String> {
         for w in wrapped {
             lines.push(format!(
                 "{}{}{}",
-                ansi_fg(crate::tui::theme::Color::Rgb { r: 220, g: 220, b: 220 }),
+                ansi_fg(crate::tui::theme::Color::Rgb {
+                    r: 216,
+                    g: 211,
+                    b: 200
+                }),
                 w,
                 ansi_reset()
             ));
@@ -383,8 +451,16 @@ fn format_reasoning_for_selection(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let header = format!(
         "{}💭 Reasoning {}(thinking…){}",
-        ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 120, b: 160 }),
-        ansi_fg(crate::tui::theme::Color::Rgb { r: 100, g: 100, b: 120 }),
+        ansi_fg(crate::tui::theme::Color::Rgb {
+            r: 138,
+            g: 143,
+            b: 152
+        }),
+        ansi_fg(crate::tui::theme::Color::Rgb {
+            r: 138,
+            g: 143,
+            b: 152
+        }),
         ansi_reset()
     );
     lines.push(header);
@@ -394,7 +470,11 @@ fn format_reasoning_for_selection(content: &str, width: usize) -> Vec<String> {
         for w in wrapped {
             lines.push(format!(
                 "{}{}{}",
-                ansi_fg(crate::tui::theme::Color::Rgb { r: 140, g: 140, b: 160 }),
+                ansi_fg(crate::tui::theme::Color::Rgb {
+                    r: 140,
+                    g: 140,
+                    b: 160
+                }),
                 w,
                 ansi_reset()
             ));
@@ -448,7 +528,10 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
 /// Draw the drag-selection highlight over the chat feed. Uses the same
 /// coordinate math as the copy-on-release extraction so the visible
 /// highlight always matches what lands in the clipboard.
-pub fn draw_selection_overlay(out: &mut impl std::io::Write, app: &crate::tui::App) -> std::io::Result<()> {
+pub fn draw_selection_overlay(
+    out: &mut impl std::io::Write,
+    app: &crate::tui::App,
+) -> std::io::Result<()> {
     use crossterm::{
         cursor::MoveTo,
         queue,
@@ -470,15 +553,24 @@ pub fn draw_selection_overlay(out: &mut impl std::io::Write, app: &crate::tui::A
         height: 24,
     });
     let content_top = chat_rect.y.saturating_add(1);
-    let content_bottom = chat_rect.y.saturating_add(chat_rect.height).saturating_sub(1);
+    let content_bottom = chat_rect
+        .y
+        .saturating_add(chat_rect.height)
+        .saturating_sub(1);
     let content_left = chat_rect.x.saturating_add(1);
-    let content_right = chat_rect.x.saturating_add(chat_rect.width).saturating_sub(1);
+    let content_right = chat_rect
+        .x
+        .saturating_add(chat_rect.width)
+        .saturating_sub(1);
     let left_pad = content_left as usize;
     let chat_width = chat_rect.width.saturating_sub(2) as usize;
 
     let (top, bottom) = (start.1.min(end.1), start.1.max(end.1));
     let (left, right) = (start.0.min(end.0), start.0.max(end.0));
-    let (l, r) = (left.max(content_left).min(content_right), right.max(content_left).min(content_right));
+    let (l, r) = (
+        left.max(content_left).min(content_right),
+        right.max(content_left).min(content_right),
+    );
     if l >= r {
         return Ok(());
     }

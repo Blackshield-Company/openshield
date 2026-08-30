@@ -1,20 +1,20 @@
 #![allow(dead_code)]
 
-/// Cyberpunk neon theme for OpenShark.
-/// Deep purple background with gold/yellow accents — inspired by Hermes TUI.
+/// Blackshield theme system for OpenShield.
 ///
-/// This module uses raw ANSI color codes (via crossterm) instead of ratatui's
-/// Style system. Colors are represented as crossterm::style::Color for direct
-/// terminal output.
+/// Blood, steel, bone, and void — the same palette as the Blackshield
+/// Mercenary desktop theme. This module uses raw ANSI color codes (via
+/// crossterm) instead of ratatui's Style system.
 pub use crossterm::style::Color;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
+    pub name: &'static str,
     pub bg: Color,
     pub fg: Color,
-    pub accent: Color,         // Cyan — primary highlights
-    pub accent_secondary: Color, // Gold/Yellow — wordmark, important text
-    pub accent_tertiary: Color,  // Pink/Magenta — secondary highlights
+    pub accent: Color,
+    pub accent_secondary: Color,
+    pub accent_tertiary: Color,
     pub muted: Color,
     pub border: Color,
     pub border_focused: Color,
@@ -23,101 +23,217 @@ pub struct Theme {
     pub warning: Color,
     pub selection: Color,
     pub highlight: Color,
-    pub shark: Color,          // Gold for the shark branding
+    pub shield: Color,
 }
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::neon_purple()
+        Self::blackshield()
     }
 }
 
 impl Theme {
     pub fn by_name(name: &str) -> Option<Self> {
         match name {
-            "neon_purple" | "default" => Some(Self::neon_purple()),
-            "dark_ocean" => Some(Self::dark_ocean()),
+            "blackshield" | "default" => Some(Self::blackshield()),
+            "steel_blue" => Some(Self::steel_blue()),
             "high_contrast" => Some(Self::high_contrast()),
             _ => None,
         }
     }
 
     pub fn names() -> Vec<&'static str> {
-        vec!["neon_purple", "dark_ocean", "high_contrast"]
+        vec!["blackshield", "steel_blue", "high_contrast"]
     }
 
     pub fn name(&self) -> &'static str {
-        "neon_purple"
+        self.name
     }
 
     pub fn border_unfocused(&self) -> Color {
         self.border
     }
 
-    pub const fn neon_purple() -> Self {
+    pub const fn blackshield() -> Self {
         Self {
-            // OpenShark true colors — deep purple background
-            bg: Color::Rgb { r: 45, g: 27, b: 78 },                // #2D1B4E
-            fg: Color::Rgb { r: 220, g: 220, b: 220 },             // #dcdcdc
-            accent: Color::Rgb { r: 0, g: 255, b: 255 },           // #00ffff cyan
-            accent_secondary: Color::Rgb { r: 255, g: 215, b: 0 },   // #ffd700 gold
-            accent_tertiary: Color::Rgb { r: 255, g: 77, b: 158 },   // #ff4d9e pink
-            muted: Color::Rgb { r: 140, g: 120, b: 160 },          // #8c78a0 muted purple-gray
-            border: Color::Rgb { r: 138, g: 43, b: 226 },          // #8a2be2 electric purple
-            border_focused: Color::Rgb { r: 0, g: 255, b: 255 },    // #00ffff cyan
-            error: Color::Rgb { r: 255, g: 80, b: 80 },             // #ff5050
-            success: Color::Rgb { r: 80, g: 255, b: 120 },          // #50ff78
-            warning: Color::Rgb { r: 255, g: 200, b: 60 },         // #ffc83c
-            selection: Color::Rgb { r: 60, g: 30, b: 80 },          // #3c1e50
-            highlight: Color::Rgb { r: 255, g: 77, b: 158 },        // #ff4d9e pink
-            shark: Color::Rgb { r: 255, g: 77, b: 158 },             // #ff4d9e pink shark
+            name: "blackshield",
+            bg: Color::Rgb {
+                r: 13,
+                g: 13,
+                b: 17,
+            }, // void #0D0D11
+            fg: Color::Rgb {
+                r: 216,
+                g: 211,
+                b: 200,
+            }, // bone #D8D3C8
+            accent: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            }, // blood #C1121F
+            accent_secondary: Color::Rgb {
+                r: 201,
+                g: 162,
+                b: 39,
+            }, // war-gold #C9A227
+            accent_tertiary: Color::Rgb {
+                r: 91,
+                g: 127,
+                b: 166,
+            }, // steel-blue #5B7FA6
+            muted: Color::Rgb {
+                r: 138,
+                g: 143,
+                b: 152,
+            }, // ash #8A8F98
+            border: Color::Rgb {
+                r: 26,
+                g: 26,
+                b: 32,
+            }, // steel-light #1A1A20
+            border_focused: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            }, // blood
+            error: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            }, // blood
+            success: Color::Rgb {
+                r: 106,
+                g: 153,
+                b: 78,
+            }, // field-green #6A994E
+            warning: Color::Rgb {
+                r: 201,
+                g: 162,
+                b: 39,
+            }, // war-gold
+            selection: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            }, // blood
+            highlight: Color::Rgb {
+                r: 255,
+                g: 107,
+                b: 114,
+            }, // blood-bright #FF6B72
+            shield: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            }, // blood shield
         }
     }
 
-    pub fn dark_ocean() -> Self {
+    pub const fn steel_blue() -> Self {
         Self {
-            bg: Color::Rgb { r: 10, g: 15, b: 30 },
-            fg: Color::Rgb { r: 200, g: 200, b: 210 },
-            accent: Color::Rgb { r: 0, g: 200, b: 255 },
-            accent_secondary: Color::Rgb { r: 255, g: 180, b: 60 },
-            accent_tertiary: Color::Rgb { r: 200, g: 50, b: 255 },
-            muted: Color::Rgb { r: 60, g: 70, b: 90 },
-            border: Color::Rgb { r: 80, g: 100, b: 120 },
-            border_focused: Color::Rgb { r: 0, g: 200, b: 255 },
-            error: Color::Rgb { r: 255, g: 80, b: 80 },
-            success: Color::Rgb { r: 80, g: 255, b: 120 },
-            warning: Color::Rgb { r: 255, g: 200, b: 60 },
-            selection: Color::Rgb { r: 30, g: 40, b: 60 },
-            highlight: Color::Rgb { r: 0, g: 200, b: 255 },
-            shark: Color::Rgb { r: 255, g: 180, b: 60 },
+            name: "steel_blue",
+            bg: Color::Rgb {
+                r: 13,
+                g: 13,
+                b: 17,
+            },
+            fg: Color::Rgb {
+                r: 216,
+                g: 211,
+                b: 200,
+            },
+            accent: Color::Rgb {
+                r: 123,
+                g: 157,
+                b: 196,
+            }, // steel-blue-bright #7B9DC4
+            accent_secondary: Color::Rgb {
+                r: 201,
+                g: 162,
+                b: 39,
+            },
+            accent_tertiary: Color::Rgb {
+                r: 164,
+                g: 80,
+                b: 139,
+            }, // royal-purple #A4508B
+            muted: Color::Rgb {
+                r: 138,
+                g: 143,
+                b: 152,
+            },
+            border: Color::Rgb {
+                r: 26,
+                g: 26,
+                b: 32,
+            },
+            border_focused: Color::Rgb {
+                r: 123,
+                g: 157,
+                b: 196,
+            },
+            error: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            },
+            success: Color::Rgb {
+                r: 106,
+                g: 153,
+                b: 78,
+            },
+            warning: Color::Rgb {
+                r: 201,
+                g: 162,
+                b: 39,
+            },
+            selection: Color::Rgb {
+                r: 22,
+                g: 22,
+                b: 28,
+            }, // steel #16161C
+            highlight: Color::Rgb {
+                r: 123,
+                g: 157,
+                b: 196,
+            },
+            shield: Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31,
+            },
         }
     }
 
-    pub fn high_contrast() -> Self {
+    pub const fn high_contrast() -> Self {
         Self {
+            name: "high_contrast",
             bg: Color::Black,
             fg: Color::White,
-            accent: Color::Cyan,
+            accent: Color::Red,
             accent_secondary: Color::Yellow,
-            accent_tertiary: Color::Magenta,
+            accent_tertiary: Color::Cyan,
             muted: Color::Grey,
             border: Color::White,
-            border_focused: Color::Yellow,
+            border_focused: Color::Red,
             error: Color::Red,
             success: Color::Green,
             warning: Color::Yellow,
             selection: Color::DarkGrey,
-            highlight: Color::Yellow,
-            shark: Color::Yellow,
+            highlight: Color::White,
+            shield: Color::Red,
         }
     }
 }
 
-// Global theme instance (set at startup)
-static mut CURRENT_THEME: Theme = Theme::neon_purple();
+// Global theme instance (set at startup). Blackshield is the default.
+static mut CURRENT_THEME: Theme = Theme::blackshield();
 
 pub fn set_theme(theme: Theme) {
-    unsafe { CURRENT_THEME = theme; }
+    unsafe {
+        CURRENT_THEME = theme;
+    }
 }
 
 pub fn current_theme() -> Theme {
@@ -241,8 +357,8 @@ pub fn highlight_color(text: &str) -> String {
     bold(text, current_theme().highlight)
 }
 
-pub fn shark_color(text: &str) -> String {
-    bold(text, current_theme().shark)
+pub fn shield_color(text: &str) -> String {
+    bold(text, current_theme().shield)
 }
 
 pub fn title_color(text: &str) -> String {

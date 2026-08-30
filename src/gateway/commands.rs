@@ -11,7 +11,7 @@ pub async fn register_commands(
     let commands = vec![
         // ─── Core Chat ───
         CreateCommand::new("chat")
-            .description("Chat with OpenShark")
+            .description("Chat with OpenShield")
             .add_option(
                 CreateCommandOption::new(CommandOptionType::String, "message", "Your message")
                     .required(true),
@@ -92,7 +92,7 @@ pub async fn register_commands(
                     .required(true),
             ),
         // ─── Status / Info ───
-        CreateCommand::new("status").description("Check OpenShark status"),
+        CreateCommand::new("status").description("Check OpenShield status"),
         CreateCommand::new("stats").description("Show usage statistics"),
         // ─── Settings ───
         CreateCommand::new("settings")

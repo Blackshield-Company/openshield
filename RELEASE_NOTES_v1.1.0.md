@@ -1,4 +1,4 @@
-# OpenShark v1.1.0 Release Notes
+# OpenShield v1.1.0 Release Notes
 
 **Release Date:** 2026-06-02
 
@@ -8,7 +8,7 @@
 Fuzzy-searchable command overlay with 16 built-in commands. Type `/` in the input box or hit `Ctrl+P` anywhere. Navigate with ↑/↓, filter with typing, Enter to execute, Esc to close. No more memorizing slash commands.
 
 ### Session Bookmarks (`Ctrl+Shift+B`)
-Save and restore named checkpoints of your session state. Perfect for branching conversations or preserving important context before experimenting. Persistent JSON storage per session in `~/.config/openshark/bookmarks/`.
+Save and restore named checkpoints of your session state. Perfect for branching conversations or preserving important context before experimenting. Persistent JSON storage per session in `~/.config/openshield/bookmarks/`.
 
 ### Inline Image Display
 Pasted images now show rich metadata — format, dimensions, file size — plus an ASCII art placeholder box. Supports PNG, JPEG, GIF, WebP, and BMP with header-based dimension detection.

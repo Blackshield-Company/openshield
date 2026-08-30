@@ -2,11 +2,11 @@ use super::Tool;
 use anyhow::{Context, Result};
 use serde_json::json;
 
-/// Android system access tool — calls the OpenShark Mobile app services.
+/// Android system access tool — calls the OpenShield Mobile app services.
 ///
 /// The mobile app runs two embedded HTTP servers:
 ///   - AndroidBridgeService (port 9877) — files, SMS, contacts, calendar, clipboard, battery, WiFi, apps, device info
-///   - OpenSharkAccessibilityService (port 9878) — UI automation: tree, tap, swipe, click, input, key events, screenshots
+///   - OpenShieldAccessibilityService (port 9878) — UI automation: tree, tap, swipe, click, input, key events, screenshots
 ///
 /// This tool tries the HTTP APIs first, then falls back to shell commands.
 ///
@@ -41,7 +41,7 @@ impl Tool for AndroidTool {
     }
 
     fn description(&self) -> &str {
-        "Full Android device control via OpenShark Mobile services. Files, SMS, contacts, calendar, clipboard, battery, apps, UI automation (tap, swipe, click, type), screenshots, key events."
+        "Full Android device control via OpenShield Mobile services. Files, SMS, contacts, calendar, clipboard, battery, apps, UI automation (tap, swipe, click, type), screenshots, key events."
     }
 
     fn execute(&self, args: &str) -> Result<String> {
@@ -106,7 +106,8 @@ fn bridge_post(path: &str, body: serde_json::Value) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
-    let resp = client.post(&format!("{}{}", BRIDGE_URL, path))
+    let resp = client
+        .post(&format!("{}{}", BRIDGE_URL, path))
         .json(&body)
         .send()?;
     if !resp.status().is_success() {
@@ -121,7 +122,10 @@ fn a11y_get(path: &str) -> Result<String> {
         .build()?;
     let resp = client.get(&format!("{}{}", A11Y_URL, path)).send()?;
     if !resp.status().is_success() {
-        anyhow::bail!("Accessibility service error: {}", resp.text().unwrap_or_default());
+        anyhow::bail!(
+            "Accessibility service error: {}",
+            resp.text().unwrap_or_default()
+        );
     }
     Ok(resp.text()?)
 }
@@ -130,11 +134,15 @@ fn a11y_post(path: &str, body: serde_json::Value) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
-    let resp = client.post(&format!("{}{}", A11Y_URL, path))
+    let resp = client
+        .post(&format!("{}{}", A11Y_URL, path))
         .json(&body)
         .send()?;
     if !resp.status().is_success() {
-        anyhow::bail!("Accessibility service error: {}", resp.text().unwrap_or_default());
+        anyhow::bail!(
+            "Accessibility service error: {}",
+            resp.text().unwrap_or_default()
+        );
     }
     Ok(resp.text()?)
 }
@@ -147,15 +155,21 @@ fn handle_files(operation: &str, args: &str) -> Result<String> {
     match operation {
         "list" | "ls" => {
             let path = if args.is_empty() { "/sdcard" } else { args };
-            bridge_get(&format!("/android/files?path={}&action=list", url_encode(path)))
-                .or_else(|_| run_shell(&format!("ls -la '{}'", shell_escape(path))))
+            bridge_get(&format!(
+                "/android/files?path={}&action=list",
+                url_encode(path)
+            ))
+            .or_else(|_| run_shell(&format!("ls -la '{}'", shell_escape(path))))
         }
         "read" | "cat" => {
             if args.is_empty() {
                 return Ok("Usage: android files read <path>".to_string());
             }
-            bridge_get(&format!("/android/files?path={}&action=read", url_encode(args)))
-                .or_else(|_| run_shell(&format!("cat '{}'", shell_escape(args))))
+            bridge_get(&format!(
+                "/android/files?path={}&action=read",
+                url_encode(args)
+            ))
+            .or_else(|_| run_shell(&format!("cat '{}'", shell_escape(args))))
         }
         "write" => {
             let parts: Vec<&str> = args.splitn(2, ' ').collect();
@@ -163,8 +177,13 @@ fn handle_files(operation: &str, args: &str) -> Result<String> {
                 return Ok("Usage: android files write <path> <content>".to_string());
             }
             let body = json!({"path": parts[0], "content": parts[1]});
-            bridge_post("/android/files/write", body)
-                .or_else(|_| run_shell(&format!("echo '{}' > '{}'", shell_escape(parts[1]), shell_escape(parts[0]))))
+            bridge_post("/android/files/write", body).or_else(|_| {
+                run_shell(&format!(
+                    "echo '{}' > '{}'",
+                    shell_escape(parts[1]),
+                    shell_escape(parts[0])
+                ))
+            })
         }
         "delete" | "rm" => {
             if args.is_empty() {
@@ -192,8 +211,13 @@ fn handle_sms(operation: &str, args: &str) -> Result<String> {
                 return Ok("Usage: android sms send <number> <text>".to_string());
             }
             let body = json!({"number": parts[0], "text": parts[1]});
-            bridge_post("/android/sms/send", body)
-                .or_else(|_| run_shell(&format!("termux-sms-send -n {} '{}'", parts[0], shell_escape(parts[1]))))
+            bridge_post("/android/sms/send", body).or_else(|_| {
+                run_shell(&format!(
+                    "termux-sms-send -n {} '{}'",
+                    parts[0],
+                    shell_escape(parts[1])
+                ))
+            })
         }
         _ => Ok("SMS operations: list [limit], send <number> <text>".to_string()),
     }
@@ -222,8 +246,7 @@ fn handle_calendar(operation: &str, args: &str) -> Result<String> {
 
 fn handle_clipboard(operation: &str, args: &str) -> Result<String> {
     match operation {
-        "get" => bridge_get("/android/clipboard")
-            .or_else(|_| run_shell("termux-clipboard-get")),
+        "get" => bridge_get("/android/clipboard").or_else(|_| run_shell("termux-clipboard-get")),
         "set" => {
             let body = json!({"text": args});
             bridge_post("/android/clipboard", body)
@@ -242,8 +265,7 @@ fn handle_camera(operation: &str) -> Result<String> {
 }
 
 fn handle_location() -> Result<String> {
-    bridge_get("/android/location")
-        .or_else(|_| run_shell("termux-location"))
+    bridge_get("/android/location").or_else(|_| run_shell("termux-location"))
 }
 
 fn handle_battery() -> Result<String> {
@@ -254,8 +276,7 @@ fn handle_battery() -> Result<String> {
 }
 
 fn handle_wifi() -> Result<String> {
-    bridge_get("/android/wifi")
-        .or_else(|_| run_shell("termux-wifi-connectioninfo"))
+    bridge_get("/android/wifi").or_else(|_| run_shell("termux-wifi-connectioninfo"))
 }
 
 fn handle_apps(operation: &str, args: &str) -> Result<String> {
@@ -270,7 +291,9 @@ fn handle_apps(operation: &str, args: &str) -> Result<String> {
             bridge_post("/android/apps/open", body)
                 .or_else(|_| run_shell(&format!("am start -n {}/.MainActivity 2>/dev/null || am start -a android.intent.action.MAIN -p {}", args, args)))
         }
-        "screenshot" => run_shell("screencap -p /sdcard/Pictures/screenshot.png && echo /sdcard/Pictures/screenshot.png"),
+        "screenshot" => run_shell(
+            "screencap -p /sdcard/Pictures/screenshot.png && echo /sdcard/Pictures/screenshot.png",
+        ),
         "info" => {
             if args.is_empty() {
                 return Ok("Usage: android apps info <package.name>".to_string());
@@ -290,7 +313,9 @@ fn handle_device(operation: &str) -> Result<String> {
     match operation {
         "info" => bridge_get("/android/device"),
         "storage" => run_shell("df -h /sdcard /data 2>/dev/null || df -h"),
-        "display" => run_shell("dumpsys display | grep -E 'DisplayDeviceInfo|width|height|density' | head -10"),
+        "display" => run_shell(
+            "dumpsys display | grep -E 'DisplayDeviceInfo|width|height|density' | head -10",
+        ),
         _ => Ok("Device operations: info, storage, display".to_string()),
     }
 }
@@ -373,7 +398,9 @@ fn handle_ui(operation: &str, args: &str) -> Result<String> {
             });
             let mut body = json!({"text": text, "clear": true});
             if let Some(t) = target {
-                body.as_object_mut().unwrap().insert("target".to_string(), t);
+                body.as_object_mut()
+                    .unwrap()
+                    .insert("target".to_string(), t);
             }
             a11y_post("/ui/input", body)
         }
@@ -408,22 +435,29 @@ fn run_shell(cmd: &str) -> Result<String> {
         result.push_str(&String::from_utf8_lossy(&output.stdout));
     }
     if !output.stderr.is_empty() && result.trim().is_empty() {
-        result.push_str(&format!("[stderr]: {}", String::from_utf8_lossy(&output.stderr)));
+        result.push_str(&format!(
+            "[stderr]: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(result)
 }
 
 fn shell_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('`', "\\`")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('`', "\\`")
 }
 
 fn url_encode(s: &str) -> String {
-    s.replace(' ', "%20").replace('+', "%2B").replace('&', "%26")
+    s.replace(' ', "%20")
+        .replace('+', "%2B")
+        .replace('&', "%26")
 }
 
 const SELF_HELP: &str = r#"Android device control tool.
 
-Requires OpenShark Mobile app running with services enabled.
+Requires OpenShield Mobile app running with services enabled.
 
 Data/API (port 9877):
   files list [path]          — List files

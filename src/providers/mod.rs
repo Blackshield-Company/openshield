@@ -496,22 +496,28 @@ impl Provider {
                     .to_string();
 
                 // Extract tool_calls if present
-                let tool_calls = raw["choices"][0]["message"]["tool_calls"].as_array().map(|arr| {
-                    arr.iter().filter_map(|tc| {
-                        let id = tc["id"].as_str()?.to_string();
-                        let tool_type = tc["type"].as_str().unwrap_or("function").to_string();
-                        let function_name = tc["function"]["name"].as_str()?.to_string();
-                        let function_args = tc["function"]["arguments"].as_str()?.to_string();
-                        Some(ToolCallRequest {
-                            id,
-                            r#type: tool_type,
-                            function: ToolCallFunction {
-                                name: function_name,
-                                arguments: function_args,
-                            },
-                        })
-                    }).collect::<Vec<_>>()
-                });
+                let tool_calls = raw["choices"][0]["message"]["tool_calls"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|tc| {
+                                let id = tc["id"].as_str()?.to_string();
+                                let tool_type =
+                                    tc["type"].as_str().unwrap_or("function").to_string();
+                                let function_name = tc["function"]["name"].as_str()?.to_string();
+                                let function_args =
+                                    tc["function"]["arguments"].as_str()?.to_string();
+                                Some(ToolCallRequest {
+                                    id,
+                                    r#type: tool_type,
+                                    function: ToolCallFunction {
+                                        name: function_name,
+                                        arguments: function_args,
+                                    },
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    });
 
                 if let Some(reasoning) = raw["choices"][0]["message"]["reasoning_content"].as_str()
                     && !reasoning.is_empty()
@@ -960,10 +966,11 @@ impl Provider {
             // FIXED: Use a fixed deadline so empty keepalive chunks don't reset the timer
             let stream_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
             loop {
-                let remaining = stream_deadline.saturating_duration_since(std::time::Instant::now());
+                let remaining =
+                    stream_deadline.saturating_duration_since(std::time::Instant::now());
                 if remaining.is_zero() {
                     let _ = tx.send(StreamChunk::Content(
-                        "[⏱ Stream timed out after 120s of inactivity]".to_string()
+                        "[⏱ Stream timed out after 120s of inactivity]".to_string(),
                     ));
                     break;
                 }
@@ -979,7 +986,7 @@ impl Provider {
                     Ok(None) => break, // stream ended normally
                     Err(_) => {
                         let _ = tx.send(StreamChunk::Content(
-                            "[⏱ Stream timed out after 120s of inactivity]".to_string()
+                            "[⏱ Stream timed out after 120s of inactivity]".to_string(),
                         ));
                         break;
                     }
@@ -1025,34 +1032,60 @@ impl Provider {
                                     // or arguments that must be concatenated.
                                     if let Some(tcs) = tool_calls {
                                         for tc in tcs {
-                                            if let Some(idx) = tc.get("index").and_then(|i| i.as_u64()) {
+                                            if let Some(idx) =
+                                                tc.get("index").and_then(|i| i.as_u64())
+                                            {
                                                 let idx_u32 = idx as u32;
-                                                let entry = pending_tool_calls.entry(idx_u32).or_insert_with(|| AccumulatedToolCall {
-                                                    id: String::new(),
-                                                    name: String::new(),
-                                                    arguments: String::new(),
-                                                });
-                                                if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                                let entry = pending_tool_calls
+                                                    .entry(idx_u32)
+                                                    .or_insert_with(|| AccumulatedToolCall {
+                                                        id: String::new(),
+                                                        name: String::new(),
+                                                        arguments: String::new(),
+                                                    });
+                                                if let Some(id) =
+                                                    tc.get("id").and_then(|i| i.as_str())
+                                                {
                                                     entry.id.push_str(id);
                                                 }
-                                                if let Some(name) = tc.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+                                                if let Some(name) = tc
+                                                    .get("function")
+                                                    .and_then(|f| f.get("name"))
+                                                    .and_then(|n| n.as_str())
+                                                {
                                                     entry.name.push_str(name);
                                                 }
-                                                if let Some(args) = tc.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
+                                                if let Some(args) = tc
+                                                    .get("function")
+                                                    .and_then(|f| f.get("arguments"))
+                                                    .and_then(|a| a.as_str())
+                                                {
                                                     entry.arguments.push_str(args);
                                                 }
-                                            } else if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                                            } else if let Some(id) =
+                                                tc.get("id").and_then(|i| i.as_str())
+                                            {
                                                 // Fallback for providers that omit index
-                                                let entry = pending_tool_calls.entry(0).or_insert_with(|| AccumulatedToolCall {
-                                                    id: String::new(),
-                                                    name: String::new(),
-                                                    arguments: String::new(),
-                                                });
+                                                let entry = pending_tool_calls
+                                                    .entry(0)
+                                                    .or_insert_with(|| AccumulatedToolCall {
+                                                        id: String::new(),
+                                                        name: String::new(),
+                                                        arguments: String::new(),
+                                                    });
                                                 entry.id.push_str(id);
-                                                if let Some(name) = tc.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+                                                if let Some(name) = tc
+                                                    .get("function")
+                                                    .and_then(|f| f.get("name"))
+                                                    .and_then(|n| n.as_str())
+                                                {
                                                     entry.name.push_str(name);
                                                 }
-                                                if let Some(args) = tc.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
+                                                if let Some(args) = tc
+                                                    .get("function")
+                                                    .and_then(|f| f.get("arguments"))
+                                                    .and_then(|a| a.as_str())
+                                                {
                                                     entry.arguments.push_str(args);
                                                 }
                                             }
@@ -1090,7 +1123,10 @@ impl Provider {
                                                 });
                                             }
                                             let _ = tx.send(StreamChunk::Finish(fr.to_string()));
-                                        } else if fr == "stop" || fr == "length" || fr == "content_filter" {
+                                        } else if fr == "stop"
+                                            || fr == "length"
+                                            || fr == "content_filter"
+                                        {
                                             // Flush any remaining tool calls before sending stop
                                             for (_idx, tc) in pending_tool_calls.drain() {
                                                 let _ = tx.send(StreamChunk::ToolCall {

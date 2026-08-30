@@ -1,4 +1,4 @@
-# OpenShark Master Roadmap — v1.3 to v2.0
+# OpenShield Master Roadmap — v1.3 to v2.0
 
 > **Goal:** Close every gap against Claude Code, Codex CLI, Cline, and Aider.
 > **Approach:** Tier-by-tier implementation. Each feature is isolated, testable, and committed independently.
@@ -129,7 +129,7 @@ Background `/headless` sessions use git worktrees so they don't stomp working tr
 **Implementation:**
 ```rust
 async fn run_in_worktree(task: &str) -> Result<()> {
-    let worktree_path = create_worktree(&format!("openshark-{}", uuid::Uuid::new_v4()))?;
+    let worktree_path = create_worktree(&format!("openshield-{}", uuid::Uuid::new_v4()))?;
     let result = run_task_in_dir(task, &worktree_path).await;
     remove_worktree(&worktree_path)?;
     result
@@ -179,7 +179,7 @@ async fn identify_relevant_files(request: &str, repo_map: &RepoMap) -> Vec<PathB
 
 ## TIER 2 — Power Features (v1.4)
 
-*High impact, high effort. These differentiate OpenShark from basic harnesses.*
+*High impact, high effort. These differentiate OpenShield from basic harnesses.*
 
 ### 2.1 Dynamic Workflows / Multi-Agent Orchestration
 **Status:** Not started | **Effort:** High | **Source:** Claude Code (`ultracode`)
@@ -404,7 +404,7 @@ System notifications when background tasks complete.
 ### 3.2 JSON / NDJSON Output Mode
 **Status:** ✅ Shipped in v1.6 (headless --json, --ndjson) | **Effort:** Low | **Source:** Claude Code, Cline
 
-`openshark -p "prompt" --json` for scripting/piping.
+`openshield -p "prompt" --json` for scripting/piping.
 
 **Files:**
 - Modify: `src/json_output.rs` — ensure full compatibility
@@ -426,7 +426,7 @@ Persistent named agent teams with shared state.
 ### 3.4 Co-Authored-By Attribution
 **Status:** Not started | **Effort:** Low | **Source:** Aider
 
-Git commits tagged with `Co-authored-by: OpenShark <openshark@local>`.
+Git commits tagged with `Co-authored-by: OpenShield <openshield@local>`.
 
 **Files:**
 - Modify: `src/tui/mod.rs` — append `Co-authored-by` to commit message
@@ -447,7 +447,7 @@ File watcher triggers agent when files change.
 ### 3.6 AI Checks for CI/CD
 **Status:** Not started | **Effort:** Medium | **Source:** Continue
 
-Markdown-based PR checks. `.openshark/checks/` directory.
+Markdown-based PR checks. `.openshield/checks/` directory.
 
 **Files:**
 - Create: `src/checks/mod.rs` — check runner
@@ -504,7 +504,7 @@ Built-in recurring tasks. Could leverage Hermes cron.
 ### 4.5 Hub Daemon / Zen Mode
 **Effort:** High | **Source:** Cline
 
-Background task management daemon. `openshark --zen`.
+Background task management daemon. `openshield --zen`.
 
 ### 4.6 OpenTelemetry
 **Effort:** Medium | **Source:** Claude Code
@@ -514,7 +514,7 @@ Full metrics, traces, logs pipeline.
 ### 4.7 Python SDK
 **Effort:** High | **Source:** Codex CLI
 
-`pip install openshark` — programmatic API. PyO3 or HTTP API.
+`pip install openshield` — programmatic API. PyO3 or HTTP API.
 
 ### 4.8 Benchmark Mode
 **Effort:** Medium | **Source:** Aider

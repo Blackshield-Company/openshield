@@ -1,13 +1,13 @@
-//! OpenShark library crate root.
+//! OpenShield library crate root.
 //!
-//! Exposes the same modules as the `openshark` binary so embedders
-//! (e.g. the Tauri Android backend) can host OpenShark in-process:
+//! Exposes the same modules as the `openshield` binary so embedders
+//! (e.g. the Tauri Android backend) can host OpenShield in-process:
 //! start the API server, run chat/agent turns, and manage config
 //! without spawning an external binary.
 //!
 //! The TUI and other desktop-only pieces are excluded on Android.
 
-/// The current version of OpenShark.
+/// The current version of OpenShield.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod agent;
@@ -59,8 +59,8 @@ pub mod api;
 pub fn debug_log(msg: &str) {
     let path = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshark")
-        .join("openshark.log");
+        .join("openshield")
+        .join("openshield.log");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -74,7 +74,7 @@ pub fn debug_log(msg: &str) {
     }
 }
 
-/// Start the OpenShark HTTP + WebSocket API server in-process.
+/// Start the OpenShield HTTP + WebSocket API server in-process.
 ///
 /// This is the embedding entry point used by the Android app: the Tauri
 /// backend calls it once at startup and the WebView talks to loopback.
@@ -86,10 +86,7 @@ pub fn debug_log(msg: &str) {
 /// Runs until the bind fails or the process exits; intended to be spawned
 /// onto the host's tokio runtime.
 #[cfg(feature = "web-api")]
-pub async fn serve_in_process(
-    config_dir: &std::path::Path,
-    addr: &str,
-) -> anyhow::Result<()> {
+pub async fn serve_in_process(config_dir: &std::path::Path, addr: &str) -> anyhow::Result<()> {
     let config = config::Config::load_from_dir(config_dir)?;
     let state = api::AppState {
         config: std::sync::Arc::new(config),

@@ -178,14 +178,14 @@ pub(crate) fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<
             let file_idx = if has_operation { 1 } else { 0 };
             let old_idx = if has_operation { 2 } else { 1 };
             let new_idx = if has_operation { 3 } else { 2 };
-            
+
             let file = parts.get(file_idx).cloned().unwrap_or_default();
             if file.is_empty() {
                 return None;
             }
             let old_str = parts.get(old_idx).cloned().unwrap_or_default();
             let new_str = parts.get(new_idx).cloned().unwrap_or_default();
-            
+
             let op = if !operation.is_empty() {
                 operation
             } else if old_str.is_empty() && !new_str.is_empty() {
@@ -195,11 +195,23 @@ pub(crate) fn extract_args_from_json(json_str: &str, tool_name: &str) -> Option<
             } else {
                 "read".to_string()
             };
-            
+
             match op.as_str() {
-                "write" => return Some((tool_name.to_string(), format!("write {} {}", file, new_str))),
-                "replace" => return Some((tool_name.to_string(), format!("replace {} {} ||| {}", file, old_str, new_str))),
-                "patch" => return Some((tool_name.to_string(), format!("patch {} {} ||| {}", file, old_str, new_str))),
+                "write" => {
+                    return Some((tool_name.to_string(), format!("write {} {}", file, new_str)));
+                }
+                "replace" => {
+                    return Some((
+                        tool_name.to_string(),
+                        format!("replace {} {} ||| {}", file, old_str, new_str),
+                    ));
+                }
+                "patch" => {
+                    return Some((
+                        tool_name.to_string(),
+                        format!("patch {} {} ||| {}", file, old_str, new_str),
+                    ));
+                }
                 _ => return Some((tool_name.to_string(), format!("read {}", file))),
             }
         }

@@ -1,8 +1,10 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, enable_raw_mode, disable_raw_mode};
 use crossterm::cursor::{Hide, Show};
-use crossterm::{execute};
-use std::io::{stdout};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::execute;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use std::io::stdout;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -297,13 +299,16 @@ impl SessionPerformance {
         self.total_latency_ms.push(metrics.total_latency_ms);
         // Cap unbounded vectors to prevent RAM growth over long sessions
         if self.first_token_ms.len() > MAX_PERF_ENTRIES {
-            self.first_token_ms.drain(0..self.first_token_ms.len() - MAX_PERF_ENTRIES);
+            self.first_token_ms
+                .drain(0..self.first_token_ms.len() - MAX_PERF_ENTRIES);
         }
         if self.total_latency_ms.len() > MAX_PERF_ENTRIES {
-            self.total_latency_ms.drain(0..self.total_latency_ms.len() - MAX_PERF_ENTRIES);
+            self.total_latency_ms
+                .drain(0..self.total_latency_ms.len() - MAX_PERF_ENTRIES);
         }
         if self.tool_exec_ms.len() > MAX_PERF_ENTRIES {
-            self.tool_exec_ms.drain(0..self.tool_exec_ms.len() - MAX_PERF_ENTRIES);
+            self.tool_exec_ms
+                .drain(0..self.tool_exec_ms.len() - MAX_PERF_ENTRIES);
         }
         self.requests += 1;
     }
@@ -405,7 +410,7 @@ impl App {
         // Load input history
         let history_file = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshark")
+            .join("openshield")
             .join("input_history.txt");
         let input_history = if history_file.exists() {
             std::fs::read_to_string(&history_file)
@@ -544,7 +549,7 @@ impl App {
             skill_registry: {
                 let skills_dir = dirs::config_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("openshark")
+                    .join("openshield")
                     .join("skills");
                 SkillRegistry::new(skills_dir).ok()
             },
@@ -556,12 +561,12 @@ impl App {
             },
             code_index: {
                 let config_dir = dirs::config_dir()
-                    .map(|d| d.join("openshark"))
-                    .unwrap_or_else(|| std::path::PathBuf::from(".openshark"));
+                    .map(|d| d.join("openshield"))
+                    .unwrap_or_else(|| std::path::PathBuf::from(".openshield"));
                 let db_path = config_dir.join("code_index.db");
                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                 match crate::code_index::CodeIndex::open(
-                    db_path.to_str().unwrap_or(".openshark/code_index.db"),
+                    db_path.to_str().unwrap_or(".openshield/code_index.db"),
                     cwd.to_str().unwrap_or("."),
                 ) {
                     Ok(index) => {
@@ -787,7 +792,7 @@ impl App {
         // 2. Dynamic models from local provider's /v1/models endpoint
         // Skip dynamic model fetching in the TUI — it requires async and we're in a sync context.
         // The static models from config are sufficient for the selector.
-        // Dynamic models can be refreshed via the CLI `openshark models` command.
+        // Dynamic models can be refreshed via the CLI `openshield models` command.
 
         for (i, (display, _provider_name, _ctx_len)) in all_models.iter().enumerate() {
             let indicator = if self.model == display.split(" (").next().unwrap_or("") {
@@ -1028,7 +1033,10 @@ impl App {
         new_messages.extend(self.messages.iter().take(keep_first).cloned());
         new_messages.push(ChatMessage {
             role: "system".to_string(),
-            content: format!("[... {} older messages truncated to save memory]", self.messages.len() - keep_first - keep_last),
+            content: format!(
+                "[... {} older messages truncated to save memory]",
+                self.messages.len() - keep_first - keep_last
+            ),
             images: None,
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
@@ -1049,7 +1057,9 @@ impl App {
             return;
         }
         // Find the first non-system message index to preserve system prompts
-        let first_non_system = self.model_messages.iter()
+        let first_non_system = self
+            .model_messages
+            .iter()
             .position(|m| m.role != "system")
             .unwrap_or(0);
         // Keep system messages (0..first_non_system) + last KEEP_LAST messages
@@ -1061,14 +1071,24 @@ impl App {
         // Add truncation notice
         new_messages.push(Message {
             role: "system".to_string(),
-            content: format!("[... {} older messages truncated to save memory — context compressed]", self.model_messages.len() - system_count - keep_last),
+            content: format!(
+                "[... {} older messages truncated to save memory — context compressed]",
+                self.model_messages.len() - system_count - keep_last
+            ),
             images: None,
             tool_call_id: None,
             tool_calls: None,
             reasoning_content: None,
         });
         // Keep last N messages
-        new_messages.extend(self.model_messages.iter().rev().take(keep_last).rev().cloned());
+        new_messages.extend(
+            self.model_messages
+                .iter()
+                .rev()
+                .take(keep_last)
+                .rev()
+                .cloned(),
+        );
         self.model_messages = Arc::new(new_messages);
     }
 
@@ -1178,14 +1198,14 @@ impl App {
                   If the task is complete, provide a final summary and say TASK_COMPLETE on its own line. \
                   Do NOT ask the user 'should I continue?' or 'just say the word' — just keep working until the task is done. \
                   No manifesto. No preamble. Just execute.{}{}{}{}{}",
-                 soul_prompt,
-                 fs_capabilities,
-                 tool_descriptions,
-                 plan_instruction,
-                 effort_instruction,
-                 context_mode_block,
-                 pinned_context_block,
-                 skills_block
+                soul_prompt,
+                fs_capabilities,
+                tool_descriptions,
+                plan_instruction,
+                effort_instruction,
+                context_mode_block,
+                pinned_context_block,
+                skills_block
             ),
             images: None,
             tool_call_id: None,
@@ -1222,7 +1242,9 @@ impl App {
         }
         // Keep system message and last 2 exchanges
         let keep = self.model_messages.len().saturating_sub(4).max(1);
-        let to_summarize: Vec<Message> = Arc::make_mut(&mut self.model_messages).drain(1..keep).collect();
+        let to_summarize: Vec<Message> = Arc::make_mut(&mut self.model_messages)
+            .drain(1..keep)
+            .collect();
 
         let summary = format!(
             "[Context Summary — {} messages summarized]\nPrevious topics discussed: {}",
@@ -1469,9 +1491,10 @@ impl App {
             return;
         }
         self.auto_continue_count += 1;
-        self.add_system_message(
-            format!("🤖 Auto-continuing (attempt {}/{})", self.auto_continue_count, MAX_AUTO_CONTINUES),
-        );
+        self.add_system_message(format!(
+            "🤖 Auto-continuing (attempt {}/{})",
+            self.auto_continue_count, MAX_AUTO_CONTINUES
+        ));
         self.add_user_message("continue".to_string());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.stream_rx = Some(rx);
@@ -1485,11 +1508,11 @@ impl App {
         let session_id = self.session_id.clone();
         let handle = tokio::spawn(async move {
             let _ = stream_model_response_task(
-            tx,
-            provider,
-            model,
-            model_config,
-            (*model_messages).clone(),
+                tx,
+                provider,
+                model,
+                model_config,
+                (*model_messages).clone(),
                 is_multi_model,
                 config,
                 security_engine,
@@ -1499,7 +1522,6 @@ impl App {
         });
         self.stream_task = Some(handle);
     }
-
 }
 
 pub async fn run(config: Config) -> Result<()> {
@@ -1543,10 +1565,7 @@ pub async fn run(config: Config) -> Result<()> {
     result
 }
 
-async fn run_app(
-    app: &mut App,
-    last_tick: &mut Instant,
-) -> Result<()> {
+async fn run_app(app: &mut App, last_tick: &mut Instant) -> Result<()> {
     loop {
         draw_ui(app)?;
 
@@ -1563,7 +1582,9 @@ async fn run_app(
             if rx.is_closed() {
                 // Stream ended unexpectedly — background task died or sender was dropped
                 if app.is_streaming {
-                    crate::debug_log("stream channel closed while is_streaming=true (background task died without sending Done)");
+                    crate::debug_log(
+                        "stream channel closed while is_streaming=true (background task died without sending Done)",
+                    );
                     app.is_streaming = false;
                     app.stream_start_time = None;
                     app.add_system_message(
@@ -1701,14 +1722,14 @@ async fn run_app(
                                         app.mouse_state.selection_end,
                                     )
                                 {
-                                    let (start_col, start_row) = (start.0 as usize, start.1 as usize);
+                                    let (start_col, start_row) =
+                                        (start.0 as usize, start.1 as usize);
                                     let (end_col, end_row) = (end.0 as usize, end.1 as usize);
                                     if (end_row as isize - start_row as isize).abs() > 0
                                         || (end_col as isize - start_col as isize).abs() > 0
                                     {
-                                        let chat_rect = app
-                                            .chat_area_rect
-                                            .unwrap_or(crate::tui::mouse::Rect {
+                                        let chat_rect =
+                                            app.chat_area_rect.unwrap_or(crate::tui::mouse::Rect {
                                                 x: 0,
                                                 y: 1,
                                                 width: 80,
@@ -1721,7 +1742,9 @@ async fn run_app(
                                         let (all_lines, scroll) =
                                             mouse::build_rendered_lines(app, chat_width + 2);
                                         let visible_scroll = scroll.min(
-                                            all_lines.len().saturating_sub(chat_rect.height as usize),
+                                            all_lines
+                                                .len()
+                                                .saturating_sub(chat_rect.height as usize),
                                         );
                                         let text = mouse::extract_rectangular_text(
                                             &all_lines,
@@ -2315,7 +2338,7 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             ));
             app.add_system_message("".to_string());
             app.add_system_message(
-                "Add to ~/.config/openshark/config.toml under [keybindings] to customize."
+                "Add to ~/.config/openshield/config.toml under [keybindings] to customize."
                     .to_string(),
             );
             app.add_system_message("Example: toggle_sidebar = \"ctrl+f\"".to_string());
@@ -2470,7 +2493,8 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     const MAX_HISTORY: usize = 500;
                     app.input_history.push(input.clone());
                     if app.input_history.len() > MAX_HISTORY {
-                        app.input_history.drain(0..app.input_history.len() - MAX_HISTORY);
+                        app.input_history
+                            .drain(0..app.input_history.len() - MAX_HISTORY);
                     }
                     app.history_index = None;
                     app.history_draft = None;
@@ -2776,7 +2800,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "help" {
         app.add_system_message(
-            "OpenShark Commands\n\
+            "OpenShield Commands\n\
             \n\
             Chat commands:\n\
             • help              — Show this help\n\
@@ -2784,7 +2808,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • history           — Show chat history\n\
             • context           — Show current context\n\
             • clear             — Clear chat\n\
-            • exit              — Exit OpenShark\n\
+            • exit              — Exit OpenShield\n\
             \n\
             Model commands:\n\
             • /models           — List available models\n\
@@ -2866,7 +2890,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             .ok()
             .and_then(|o| {
                 let s = String::from_utf8_lossy(&o.stdout);
-                if s.trim().is_empty() { None } else { Some(s.trim().to_string()) }
+                if s.trim().is_empty() {
+                    None
+                } else {
+                    Some(s.trim().to_string())
+                }
             })
             .unwrap_or_else(|| "(none)".to_string());
         let dir = std::env::current_dir()
@@ -2912,10 +2940,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 let mut out = String::from("🗂 Recent Sessions\n");
                 let mut shown = 0;
                 for s in list.iter().take(15) {
-                    let msgs = app
-                        .memory
-                        .get_session_messages(&s.id)
-                        .unwrap_or_default();
+                    let msgs = app.memory.get_session_messages(&s.id).unwrap_or_default();
                     let preview = msgs
                         .iter()
                         .rev()
@@ -2956,7 +2981,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 .ok()
                 .and_then(|list| list.into_iter().next())
         } else {
-            app.add_system_message("💡 Usage: /resume <id-prefix|latest> — see /sessions".to_string());
+            app.add_system_message(
+                "💡 Usage: /resume <id-prefix|latest> — see /sessions".to_string(),
+            );
             return Ok(());
         };
         match target {
@@ -2974,8 +3001,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         };
                         app.add_system_message(format!("📂 Resumed session #{}{}", &id[..8], note));
                     }
-                    Err(e) => app
-                        .add_system_message(format!("⚠ Couldn't resume #{}: {}", &id[..8], e)),
+                    Err(e) => {
+                        app.add_system_message(format!("⚠ Couldn't resume #{}: {}", &id[..8], e))
+                    }
                 }
             }
             None => app.add_system_message("💡 No past sessions found.".to_string()),
@@ -3009,14 +3037,14 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         };
                         app.add_system_message(format!("📂 Resumed session #{}{}", &id[..8], note));
                     }
-                    Err(e) => app
-                        .add_system_message(format!("⚠ Couldn't resume #{}: {}", &id[..8], e)),
+                    Err(e) => {
+                        app.add_system_message(format!("⚠ Couldn't resume #{}: {}", &id[..8], e))
+                    }
                 }
             }
-            None => app.add_system_message(format!(
-                "❌ No session matching '{}'. See /sessions",
-                want
-            )),
+            None => {
+                app.add_system_message(format!("❌ No session matching '{}'. See /sessions", want))
+            }
         }
         return Ok(());
     }
@@ -3768,7 +3796,8 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     if input == "/yolo" {
         app.yolo_mode = !app.yolo_mode;
         app.security_engine.set_yolo_mode(app.yolo_mode);
-        app.security_engine.set_autonomous_mode(app.yolo_mode || app.autonomous_mode);
+        app.security_engine
+            .set_autonomous_mode(app.yolo_mode || app.autonomous_mode);
         let status = if app.yolo_mode { "ON ✅" } else { "OFF ❌" };
         app.add_system_message(format!(
             "🤘 YOLO mode is {} — tool calls will {}be auto-approved.",
@@ -3894,11 +3923,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                     let session_id = app.session_id.clone();
                     let handle = tokio::spawn(async move {
                         let _ = stream_model_response_task(
-            tx,
-            provider,
-            model,
-            model_config,
-            (*model_messages).clone(),
+                            tx,
+                            provider,
+                            model,
+                            model_config,
+                            (*model_messages).clone(),
                             is_multi_model,
                             config,
                             security_engine,
@@ -3912,19 +3941,29 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             }
             // For stop/cancel/abort/pause, actually terminate the active stream so the user
             // can regain control instead of the background task continuing silently.
-            if (*word == "stop" || *word == "cancel" || *word == "cancel that" || *word == "nevermind" || *word == "never mind" || *word == "abort" || *word == "wait" || *word == "hold on" || *word == "hold up" || *word == "pause")
-                && (app.is_streaming || app.stream_rx.is_some()) {
-                    app.is_streaming = false;
-                    app.stream_start_time = None;
-                    app.streaming_content.clear();
-                    app.reasoning_content.clear();
-                    app.is_reasoning = false;
-                    app.stream_rx = None; // drop receiver → background task's tx.send() will fail
-                    // Abort the background task to prevent memory leak from orphaned task
-                    if let Some(handle) = app.stream_task.take() {
-                        handle.abort();
-                    }
+            if (*word == "stop"
+                || *word == "cancel"
+                || *word == "cancel that"
+                || *word == "nevermind"
+                || *word == "never mind"
+                || *word == "abort"
+                || *word == "wait"
+                || *word == "hold on"
+                || *word == "hold up"
+                || *word == "pause")
+                && (app.is_streaming || app.stream_rx.is_some())
+            {
+                app.is_streaming = false;
+                app.stream_start_time = None;
+                app.streaming_content.clear();
+                app.reasoning_content.clear();
+                app.is_reasoning = false;
+                app.stream_rx = None; // drop receiver → background task's tx.send() will fail
+                // Abort the background task to prevent memory leak from orphaned task
+                if let Some(handle) = app.stream_task.take() {
+                    handle.abort();
                 }
+            }
             app.add_system_message(response.to_string());
             return Ok(());
         }
@@ -4024,7 +4063,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
         }
 
         app.mode = AppMode::Agent;
-        app.add_system_message(format!("🦈 Agent Mode: {}", task));
+        app.add_system_message(format!("🛡 Agent Mode: {}", task));
 
         // Use the coding agent for autonomous plan/edit/test/commit loop
         let agent_config = AgentConfig {
@@ -4331,7 +4370,12 @@ async fn execute_tool_chain(
         // Truncate to prevent RAM explosion before follow-up
         if follow_messages.len() > 20 {
             let system_msg = follow_messages.first().cloned();
-            let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
+            let tail = follow_messages
+                .iter()
+                .rev()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>();
             follow_messages.clear();
             if let Some(sys) = system_msg {
                 follow_messages.push(sys);
@@ -4341,7 +4385,8 @@ async fn execute_tool_chain(
             }
             follow_messages.push(Message {
                 role: "system".to_string(),
-                content: "[Context truncated due to length. Only recent messages shown.]".to_string(),
+                content: "[Context truncated due to length. Only recent messages shown.]"
+                    .to_string(),
                 images: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -4403,26 +4448,44 @@ async fn execute_tool_chain(
                 }
 
                 // If model finished with tool_calls, execute them inline
-                if follow_finish == Some("tool_calls".to_string()) && !follow_tool_calls.is_empty() {
+                if follow_finish == Some("tool_calls".to_string()) && !follow_tool_calls.is_empty()
+                {
                     let executor = AsyncToolExecutor::new();
                     for fchunk in follow_tool_calls {
-                        if let StreamChunk::ToolCall { id, name, arguments: args } = fchunk {
+                        if let StreamChunk::ToolCall {
+                            id,
+                            name,
+                            arguments: args,
+                        } = fchunk
+                        {
                             let tool_args = extract_args_from_json(&args, &name)
                                 .map(|(_, extracted)| extracted)
                                 .unwrap_or_else(|| args.clone());
 
                             match security_engine.check_tool_call(&name, &tool_args) {
                                 crate::security::SecurityDecision::Allow => {
-                                    match executor.execute_with_timeout_simple(name.clone(), tool_args.clone(), 30000).await {
+                                    match executor
+                                        .execute_with_timeout_simple(
+                                            name.clone(),
+                                            tool_args.clone(),
+                                            30000,
+                                        )
+                                        .await
+                                    {
                                         Ok(result) => {
-                                            let sanitized = security_engine.sanitize_output(&name, &result);
+                                            let sanitized =
+                                                security_engine.sanitize_output(&name, &result);
                                             let _ = tx.send(StreamEvent::ToolResult {
                                                 name: name.clone(),
                                                 args: tool_args.clone(),
                                                 result: sanitized.clone(),
                                                 success: true,
                                             });
-                                            let call_id = if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() };
+                                            let call_id = if id.is_empty() {
+                                                Uuid::new_v4().to_string()
+                                            } else {
+                                                id.clone()
+                                            };
                                             follow_messages.push(Message {
                                                 role: "assistant".to_string(),
                                                 content: follow_content.clone(),
@@ -4432,10 +4495,11 @@ async fn execute_tool_chain(
                                                     crate::providers::ToolCallRequest {
                                                         id: call_id.clone(),
                                                         r#type: "function".to_string(),
-                                                        function: crate::providers::ToolCallFunction {
-                                                            name: name.clone(),
-                                                            arguments: args.clone(),
-                                                        },
+                                                        function:
+                                                            crate::providers::ToolCallFunction {
+                                                                name: name.clone(),
+                                                                arguments: args.clone(),
+                                                            },
                                                     },
                                                 ]),
                                                 reasoning_content: Some(follow_reasoning.clone()),
@@ -4460,7 +4524,11 @@ async fn execute_tool_chain(
                                                 role: "tool".to_string(),
                                                 content: format!("Error: {}", e),
                                                 images: None,
-                                                tool_call_id: Some(if id.is_empty() { Uuid::new_v4().to_string() } else { id.clone() }),
+                                                tool_call_id: Some(if id.is_empty() {
+                                                    Uuid::new_v4().to_string()
+                                                } else {
+                                                    id.clone()
+                                                }),
                                                 tool_calls: None,
                                                 reasoning_content: None,
                                             });
@@ -4468,16 +4536,24 @@ async fn execute_tool_chain(
                                     }
                                 }
                                 crate::security::SecurityDecision::Deny { reason } => {
-                                    let _ = tx.send(StreamEvent::SystemMessage(format!("🚫 Tool '{}' blocked: {}", name, reason)));
+                                    let _ = tx.send(StreamEvent::SystemMessage(format!(
+                                        "🚫 Tool '{}' blocked: {}",
+                                        name, reason
+                                    )));
                                 }
-                                crate::security::SecurityDecision::RequireApproval { reason: _, risk_level: _ } => {
+                                crate::security::SecurityDecision::RequireApproval {
+                                    reason: _,
+                                    risk_level: _,
+                                } => {
                                     let _ = tx.send(StreamEvent::SystemMessage(format!("⏸️ Tool '{}' requires approval (not yet implemented for native tool calls)", name)));
                                 }
                             }
                         }
                     }
                     // After handling inline tool calls, re-prompt for synthesis
-                    let _ = tx.send(StreamEvent::SystemMessage("▶ Synthesizing tool results...".to_string()));
+                    let _ = tx.send(StreamEvent::SystemMessage(
+                        "▶ Synthesizing tool results...".to_string(),
+                    ));
                     follow_messages.push(Message {
                         role: "user".to_string(),
                         content: "All tool results are above. Provide a final summary of what was accomplished. Do NOT call more tools.".to_string(),
@@ -4486,7 +4562,8 @@ async fn execute_tool_chain(
                         tool_calls: None,
                         reasoning_content: None,
                     });
-                    let synthesis_req = ChatRequest::new(model.to_string(), follow_messages.clone(), true);
+                    let synthesis_req =
+                        ChatRequest::new(model.to_string(), follow_messages.clone(), true);
                     let _ = tx.send(StreamEvent::Start);
                     match provider.chat_stream_realtime(synthesis_req).await {
                         Ok((mut synth_rx, _)) => {
@@ -4500,7 +4577,9 @@ async fn execute_tool_chain(
                                     match tokio::time::timeout(
                                         std::time::Duration::from_secs(stall_timeout_secs),
                                         synth_rx.recv(),
-                                    ).await {
+                                    )
+                                    .await
+                                    {
                                         Ok(Some(chunk)) => Some(chunk),
                                         Ok(None) => None,
                                         Err(_) => None,
@@ -4508,20 +4587,28 @@ async fn execute_tool_chain(
                                 }
                             } {
                                 match schunk {
-                                    StreamChunk::Content(c) => { synth_content.push_str(&c); }
-                                    StreamChunk::Reasoning(r) => { synth_reasoning.push_str(&r); }
+                                    StreamChunk::Content(c) => {
+                                        synth_content.push_str(&c);
+                                    }
+                                    StreamChunk::Reasoning(r) => {
+                                        synth_reasoning.push_str(&r);
+                                    }
                                     _ => {}
                                 }
                             }
                             if synth_content.trim().is_empty() {
-                                let _ = tx.send(StreamEvent::FollowUp("Task completed. Results shown above.".to_string()));
+                                let _ = tx.send(StreamEvent::FollowUp(
+                                    "Task completed. Results shown above.".to_string(),
+                                ));
                             } else {
                                 let _ = tx.send(StreamEvent::FollowUp(synth_content));
                             }
                             let _ = tx.send(StreamEvent::Done);
                         }
                         Err(_) => {
-                            let _ = tx.send(StreamEvent::FollowUp("Task completed. Tool results shown above.".to_string()));
+                            let _ = tx.send(StreamEvent::FollowUp(
+                                "Task completed. Tool results shown above.".to_string(),
+                            ));
                             let _ = tx.send(StreamEvent::Done);
                         }
                     }
@@ -4547,7 +4634,12 @@ async fn execute_tool_chain(
                     });
                     if retry_messages.len() > 20 {
                         let system_msg = retry_messages.first().cloned();
-                        let tail = retry_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
+                        let tail = retry_messages
+                            .iter()
+                            .rev()
+                            .take(10)
+                            .cloned()
+                            .collect::<Vec<_>>();
                         retry_messages.clear();
                         if let Some(sys) = system_msg {
                             retry_messages.push(sys);
@@ -4557,7 +4649,9 @@ async fn execute_tool_chain(
                         }
                         retry_messages.push(Message {
                             role: "system".to_string(),
-                            content: "[Context truncated due to length. Only recent messages shown.]".to_string(),
+                            content:
+                                "[Context truncated due to length. Only recent messages shown.]"
+                                    .to_string(),
                             images: None,
                             tool_call_id: None,
                             tool_calls: None,
@@ -4580,7 +4674,9 @@ async fn execute_tool_chain(
                                     match tokio::time::timeout(
                                         std::time::Duration::from_secs(stall_timeout_secs),
                                         retry_rx.recv(),
-                                    ).await {
+                                    )
+                                    .await
+                                    {
                                         Ok(Some(chunk)) => Some(chunk),
                                         Ok(None) => None,
                                         Err(_) => None,
@@ -4600,14 +4696,17 @@ async fn execute_tool_chain(
                                 }
                             }
                             if retry_content.trim().is_empty() {
-                                let _ = tx.send(StreamEvent::Error("Model returned empty retry response.".to_string()));
+                                let _ = tx.send(StreamEvent::Error(
+                                    "Model returned empty retry response.".to_string(),
+                                ));
                             } else {
                                 let _ = tx.send(StreamEvent::FollowUp(retry_content));
                             }
                             let _ = tx.send(StreamEvent::Done);
                         }
                         Err(e) => {
-                            let _ = tx.send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
+                            let _ = tx
+                                .send(StreamEvent::Error(format!("Retry follow-up failed: {}", e)));
                             let _ = tx.send(StreamEvent::Done);
                         }
                     }
@@ -4655,7 +4754,12 @@ async fn execute_tool_chain(
                 // Prevent RAM explosion: truncate message history after 5 turns
                 if turn >= 5 && follow_messages.len() > 20 {
                     let system_msg = follow_messages.first().cloned();
-                    let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
+                    let tail = follow_messages
+                        .iter()
+                        .rev()
+                        .take(10)
+                        .cloned()
+                        .collect::<Vec<_>>();
                     follow_messages.clear();
                     if let Some(sys) = system_msg {
                         follow_messages.push(sys);
@@ -4852,7 +4956,6 @@ async fn stream_model_response_task(
         }
     }
 }
-
 
 #[allow(dead_code)]
 async fn stream_model_response_task_legacy(
@@ -5332,7 +5435,7 @@ async fn handle_slash_result(
                             output_file: None,
                         };
                         let security = match crate::security::SecurityEngine::new(
-                            crate::security::SecurityConfig::default()
+                            crate::security::SecurityConfig::default(),
                         ) {
                             Ok(s) => s,
                             Err(e) => {
@@ -5340,7 +5443,9 @@ async fn handle_slash_result(
                                 return;
                             }
                         };
-                        match crate::headless::run_headless(config, provider, model, security, None).await {
+                        match crate::headless::run_headless(config, provider, model, security, None)
+                            .await
+                        {
                             Ok(summary) => {
                                 tracing::info!("[headless] Complete: {}", summary);
                                 // Clean up worktree after completion
@@ -5734,7 +5839,10 @@ async fn handle_slash_result(
             if name.is_empty() {
                 // List all personas
                 let list = app.persona_registry.format_list();
-                app.add_system_message(format!("**Agent Personas**\n{}\n\nUse `/agent <name>` to switch.", list));
+                app.add_system_message(format!(
+                    "**Agent Personas**\n{}\n\nUse `/agent <name>` to switch.",
+                    list
+                ));
             } else {
                 let switched = app
                     .persona_registry
@@ -5743,10 +5851,16 @@ async fn handle_slash_result(
                 match switched {
                     Some((emoji, display_name, tagline)) => {
                         app.rebuild_system_prompt();
-                        app.add_system_message(format!("{} Switched to **{}**\n_{}_", emoji, display_name, tagline));
+                        app.add_system_message(format!(
+                            "{} Switched to **{}**\n_{}_",
+                            emoji, display_name, tagline
+                        ));
                     }
                     None => {
-                        app.add_system_message(format!("❌ Agent `{}` not found. Use `/agentlist` to see available agents.", name));
+                        app.add_system_message(format!(
+                            "❌ Agent `{}` not found. Use `/agentlist` to see available agents.",
+                            name
+                        ));
                     }
                 }
             }
@@ -5880,7 +5994,8 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 reasoning_content: None,
             });
 
-            let follow_up = ChatRequest::new(app.model.clone(), (*app.model_messages).clone(), true);
+            let follow_up =
+                ChatRequest::new(app.model.clone(), (*app.model_messages).clone(), true);
 
             match app.provider.chat_stream(follow_up).await {
                 Ok((chunks, _metrics)) => {
@@ -6005,7 +6120,12 @@ async fn execute_approved_tool_task(
                 // Truncate to prevent RAM explosion before follow-up
                 if follow_messages.len() > 20 {
                     let system_msg = follow_messages.first().cloned();
-                    let tail = follow_messages.iter().rev().take(10).cloned().collect::<Vec<_>>();
+                    let tail = follow_messages
+                        .iter()
+                        .rev()
+                        .take(10)
+                        .cloned()
+                        .collect::<Vec<_>>();
                     follow_messages.clear();
                     if let Some(sys) = system_msg {
                         follow_messages.push(sys);
@@ -6015,7 +6135,8 @@ async fn execute_approved_tool_task(
                     }
                     follow_messages.push(Message {
                         role: "system".to_string(),
-                        content: "[Context truncated due to length. Only recent messages shown.]".to_string(),
+                        content: "[Context truncated due to length. Only recent messages shown.]"
+                            .to_string(),
                         images: None,
                         tool_call_id: None,
                         tool_calls: None,
@@ -6079,9 +6200,13 @@ async fn execute_approved_tool_task(
                                 reasoning_content: None,
                             });
 
-                            match executor.execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000).await {
+                            match executor
+                                .execute_with_timeout_simple(tool_name.clone(), args.clone(), 30000)
+                                .await
+                            {
                                 Ok(result) => {
-                                    let sanitized = security_engine.sanitize_output(tool_name, &result);
+                                    let sanitized =
+                                        security_engine.sanitize_output(tool_name, &result);
                                     let _ = tx.send(StreamEvent::ToolResult {
                                         name: tool_name.clone(),
                                         args: args.clone(),
@@ -6251,7 +6376,7 @@ async fn auto_commit_changes(app: &mut App) -> Result<()> {
         Ok(msg) => msg,
         Err(_) => {
             format!(
-                "openshark: auto-commit at {}",
+                "openshield: auto-commit at {}",
                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
             )
         }
@@ -6330,11 +6455,11 @@ async fn create_worktree(project_path: &str, task: &str) -> anyhow::Result<Strin
         })
         .take(40)
         .collect();
-    let branch_name = format!("openshark-headless-{}", sanitized);
-    let worktree_path = format!("{}/.openshark-worktrees/{}", project_path, branch_name);
+    let branch_name = format!("openshield-headless-{}", sanitized);
+    let worktree_path = format!("{}/.openshield-worktrees/{}", project_path, branch_name);
 
     // Ensure the worktrees directory exists
-    let _ = tokio::fs::create_dir_all(format!("{}/.openshark-worktrees", project_path)).await;
+    let _ = tokio::fs::create_dir_all(format!("{}/.openshield-worktrees", project_path)).await;
 
     // Create worktree from current HEAD
     let output = tokio::process::Command::new("git")

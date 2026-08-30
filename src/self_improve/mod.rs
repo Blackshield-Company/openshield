@@ -120,7 +120,7 @@ pub async fn trigger_analysis(config: &Config) -> Result<()> {
     let memory = MemoryStore::new(&config.memory_db_path)?;
     let sessions = memory.get_recent_sessions(100)?;
 
-    println!("🦈 Self-Improvement Analysis");
+    println!("🛡 Self-Improvement Analysis");
     println!("Analyzing last {} sessions...", sessions.len());
     println!();
 
@@ -837,7 +837,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = format!("/tmp/openshark_test_{}_{}.db", std::process::id(), count);
+        let db_path = format!("/tmp/openshield_test_{}_{}.db", std::process::id(), count);
         let _ = std::fs::remove_file(&db_path);
         MemoryStore::new(std::path::Path::new(&db_path)).unwrap()
     }
@@ -854,7 +854,7 @@ mod tests {
             agent: crate::config::AgentIdentity::default(),
             gateway: crate::gateway::GatewayConfig::default(),
             user_name: "user".to_string(),
-            theme: "synthwave84".to_string(),
+            theme: "blackshield".to_string(),
             filesystem: crate::config::FilesystemConfig::default(),
             autonomy: crate::config::AutonomyConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
