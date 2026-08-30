@@ -4709,7 +4709,10 @@ async fn stream_model_response_task(
     let _is_multi_model = is_multi_model;
 
     // Extract the last user message as the turn input and pass the rest as history.
-    let mut history = model_messages.clone();
+    // NOTE: model_messages is already an owned deep clone made by the caller —
+    // take it by value instead of cloning a SECOND full copy per turn. In long
+    // sessions (large history) that second clone was pure heap churn.
+    let mut history = model_messages;
     let user_message = if let Some(pos) = history.iter().rposition(|m| m.role == "user") {
         let msg = history.remove(pos);
         msg.content

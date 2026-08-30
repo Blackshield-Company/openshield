@@ -349,9 +349,20 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 evolution.track_tool_outcome(&name, success, 0);
             }
 
+            // Cap tool results entering model_messages: uncapped results
+            // (multi-MB sqlite dumps, file reads) bloat history, and every
+            // subsequent turn deep-clones that history for the stream task.
+            // 10K chars keeps the model's context useful while bounding churn.
+            const MAX_TOOL_RESULT_CHARS: usize = 10_000;
+            let capped_result = if result.chars().count() > MAX_TOOL_RESULT_CHARS {
+                let truncated: String = result.chars().take(MAX_TOOL_RESULT_CHARS).collect();
+                format!("{}…[truncated, {} chars total]", truncated, result.chars().count())
+            } else {
+                result.clone()
+            };
             std::sync::Arc::make_mut(&mut app.model_messages).push(Message {
                 role: "user".to_string(),
-                content: format!("Tool result: {}", result),
+                content: format!("Tool result: {}", capped_result),
                 images: None,
                 tool_call_id: None,
                 tool_calls: None,
