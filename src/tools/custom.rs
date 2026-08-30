@@ -1,6 +1,6 @@
 //! Custom user-defined tools loaded from config.
 //!
-//! Users can define simple tools in `~/.config/openshark/custom_tools.toml`:
+//! Users can define simple tools in `~/.config/openshield/custom_tools.toml`:
 //!
 //! ```toml
 //! [[tool]]
@@ -111,7 +111,7 @@ static CUSTOM_TOOLS: Mutex<Vec<Arc<dyn Tool>>> = Mutex::new(Vec::new());
 pub fn load_custom_tools() -> Vec<Arc<dyn Tool>> {
     let config_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshark");
+        .join("openshield");
     let path = config_dir.join("custom_tools.toml");
 
     if !path.exists() {

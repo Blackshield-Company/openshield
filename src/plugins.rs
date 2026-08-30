@@ -1,8 +1,8 @@
 //! Plugin / Hook System — Register custom tools at runtime.
 //!
-//! Loads `.openshark/hooks/` directory for user-defined tool scripts.
+//! Loads `.openshield/hooks/` directory for user-defined tool scripts.
 //! Scripts are executable files named `<tool_name>.sh` or `<tool_name>.py`.
-//! Plugin / Hook System — Load custom tools from `.openshark/hooks/`
+//! Plugin / Hook System — Load custom tools from `.openshield/hooks/`
 
 #![allow(dead_code)]
 
@@ -80,13 +80,13 @@ impl PluginRegistry {
         Self::default()
     }
 
-    /// Scan `~/.config/openshark/hooks/` and `.openshark/hooks/` for plugin scripts.
+    /// Scan `~/.config/openshield/hooks/` and `.openshield/hooks/` for plugin scripts.
     pub fn load_from_disk(&mut self) -> Result<usize> {
         let mut count = 0;
 
         let dirs = [
-            dirs::config_dir().map(|d| d.join("openshark").join("hooks")),
-            Some(PathBuf::from(".openshark/hooks")),
+            dirs::config_dir().map(|d| d.join("openshield").join("hooks")),
+            Some(PathBuf::from(".openshield/hooks")),
         ];
 
         for dir in dirs.iter().flatten() {
@@ -161,7 +161,7 @@ impl PluginRegistry {
     }
 
     pub fn create_scaffold(&self, name: &str) -> Result<PathBuf> {
-        let hook_dir = PathBuf::from(".openshark/hooks");
+        let hook_dir = PathBuf::from(".openshield/hooks");
         std::fs::create_dir_all(&hook_dir)?;
         let path = hook_dir.join(format!("{}.sh", name));
         let template = "#!/bin/bash\n# desc: User-defined plugin: {name}\n# Args are passed via stdin\n\nread -r args\necho \"Running {name} with args: $args\"\n".to_string();
@@ -248,7 +248,7 @@ pub fn list_plugins_cli() {
         Ok(count) => {
             if count == 0 {
                 println!("📭 No plugins found.");
-                println!("Create one: openshark plugins create <name>");
+                println!("Create one: openshield plugins create <name>");
             } else {
                 println!("🔌 {} plugin(s) loaded:", count);
                 for p in registry.list() {

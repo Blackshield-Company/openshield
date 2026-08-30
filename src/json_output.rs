@@ -1,4 +1,4 @@
-//! JSON / NDJSON Output Mode for OpenShark
+//! JSON / NDJSON Output Mode for OpenShield
 //!
 //! Structured output for piping into other tools.
 //! JSON Output Mode — Structured NDJSON output for headless/CI usage
@@ -126,7 +126,8 @@ mod tests {
             duration_secs: 10,
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         };
-        let json = serde_json::to_string(&event).expect("Output event serialization should not fail");
+        let json =
+            serde_json::to_string(&event).expect("Output event serialization should not fail");
         assert!(json.contains("\"type\":\"complete\""));
         assert!(json.contains("5"));
     }
@@ -139,7 +140,8 @@ mod tests {
             turn: 1,
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         };
-        let json = serde_json::to_string(&event).expect("Output event serialization should not fail");
+        let json =
+            serde_json::to_string(&event).expect("Output event serialization should not fail");
         assert!(json.contains("assistant"));
         assert!(json.contains("hello"));
     }

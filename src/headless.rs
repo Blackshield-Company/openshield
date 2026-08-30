@@ -1,6 +1,6 @@
-//! Headless / CI-CD mode for OpenShark
+//! Headless / CI-CD mode for OpenShield
 //!
-//! Run OpenShark non-interactively: `openshark --autonomous "implement feature X"`
+//! Run OpenShield non-interactively: `openshield --autonomous "implement feature X"`
 //! Outputs structured JSON or plain text for piping into other tools.
 //!
 //! Features:
@@ -412,8 +412,8 @@ fn emit(tx: &Option<mpsc::UnboundedSender<HeadlessEvent>>, event: HeadlessEvent)
 
 /// Auto-commit any changes after a successful autonomous run.
 async fn auto_commit_changes(task: &str) -> Result<String> {
-    use crate::tools::git::GitTool;
     use crate::tools::Tool;
+    use crate::tools::git::GitTool;
 
     let git = GitTool;
 
@@ -424,7 +424,7 @@ async fn auto_commit_changes(task: &str) -> Result<String> {
     let _ = git.execute("add .")?;
 
     let commit_msg = format!(
-        "openshark: {}\n\nAutonomous changes by OpenShark coding agent.",
+        "openshield: {}\n\nAutonomous changes by OpenShield coding agent.",
         task.lines().next().unwrap_or(task).trim()
     );
 
@@ -434,8 +434,8 @@ async fn auto_commit_changes(task: &str) -> Result<String> {
 
 /// Auto-run tests to verify changes after a successful autonomous run.
 async fn auto_run_tests() -> Result<String> {
-    use crate::tools::test_runner::TestTool;
     use crate::tools::Tool;
+    use crate::tools::test_runner::TestTool;
 
     let test_tool = TestTool;
     match test_tool.execute("run") {
@@ -481,8 +481,8 @@ mod tests {
             model: "gpt-4".to_string(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         };
-        let json = serde_json::to_string(&event)
-            .expect("Headless event serialization should not fail");
+        let json =
+            serde_json::to_string(&event).expect("Headless event serialization should not fail");
         assert!(json.contains("\"type\":\"start\""));
         assert!(json.contains("test"));
     }
@@ -509,12 +509,12 @@ mod tests {
     #[test]
     fn test_system_prompt_autonomous() {
         let prompt = crate::harness::engine::HarnessEngine::build_system_prompt_static();
-        assert!(prompt.contains("OpenShark"));
+        assert!(prompt.contains("OpenShield"));
     }
 
     #[test]
     fn test_system_prompt_guarded() {
         let prompt = crate::harness::engine::HarnessEngine::build_system_prompt_static();
-        assert!(prompt.contains("OpenShark"));
+        assert!(prompt.contains("OpenShield"));
     }
 }

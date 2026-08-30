@@ -1,13 +1,13 @@
 # AI Coding Harness Research — Feature Matrix
 
 Research conducted: 2026-06-02 | Updated: 2026-06-03
-Harnesses analyzed: Claude Code, Codex CLI, Cline, Aider, Continue, OpenShark (self)
+Harnesses analyzed: Claude Code, Codex CLI, Cline, Aider, Continue, OpenShield (self)
 
 ---
 
 ## LEGEND
 
-- [x] = Implemented in OpenShark v1.2+
+- [x] = Implemented in OpenShield v1.2+
 - [ ] = Not yet implemented
 - ~[ ]~ = Partially implemented / MVP version exists
 
@@ -18,11 +18,11 @@ Harnesses analyzed: Claude Code, Codex CLI, Cline, Aider, Continue, OpenShark (s
 ### Core Features
 - **Agentic coding** with natural language commands
 - [x] **Plan/Act mode toggle** — `/plan` explores, `/act` executes
-- [x] **Auto mode** — autonomous execution (`/yolo` in OpenShark)
+- [x] **Auto mode** — autonomous execution (`/yolo` in OpenShield)
 - [ ] **Dynamic workflows** (`ultracode`) — orchestrates 10s-100s of background agents
 - [x] **Background agents** — `/headless` spawns detached sessions
 - [ ] **Git worktree isolation** for background sessions
-- [x] **Plugin system** — `~/.config/openshark/hooks/` auto-loaded
+- [x] **Plugin system** — `~/.config/openshield/hooks/` auto-loaded
 - [x] **MCP native support** — stdio + HTTP, auto-discovery
 - [x] **Skills** with YAML frontmatter
 - [x] **Hooks** — SessionStart, PostToolUse, Stop, MessageDisplay
@@ -163,7 +163,7 @@ Harnesses analyzed: Claude Code, Codex CLI, Cline, Aider, Continue, OpenShark (s
 
 ---
 
-## 6. OPENSHARK — v1.2.0 (Current)
+## 6. OPENSHIELD — v1.2.0 (Current)
 
 ### What We Have
 - [x] Multi-provider chat (OpenAI, Anthropic, Google, OpenRouter, local)
@@ -232,11 +232,11 @@ Harnesses analyzed: Claude Code, Codex CLI, Cline, Aider, Continue, OpenShark (s
 
 #### TIER 3 — Medium Impact, Medium Effort
 - [ ] **Desktop notifications** — system notifications for completions
-- [ ] **JSON/NDJSON output mode** — `openshark -p "prompt" --json`
+- [ ] **JSON/NDJSON output mode** — `openshield -p "prompt" --json`
 - [ ] **Team workflows** — persistent named agent teams
 - [ ] **Co-authored-by attribution** — git commits tagged
 - [ ] **Watch mode** — file watcher triggers agent
-- [ ] **AI checks for CI/CD** — `.openshark/checks/` directory
+- [ ] **AI checks for CI/CD** — `.openshield/checks/` directory
 - [ ] **Config JSON schema** — validate config against schema
 - [ ] **PostHog / analytics** — opt-in usage analytics
 
@@ -249,7 +249,7 @@ Harnesses analyzed: Claude Code, Codex CLI, Cline, Aider, Continue, OpenShark (s
 - [ ] **OpenTelemetry** — metrics, traces, logs
 - [ ] **Remote control / mobile bridge**
 - [ ] **Managed settings / enterprise policies**
-- [ ] **Python SDK** — `pip install openshark`
+- [ ] **Python SDK** — `pip install openshield`
 - [ ] **Benchmark mode** — systematic eval
 - [ ] **Auto-updater** — built-in update mechanism
 - [ ] **Shell completions** — bash, zsh, fish

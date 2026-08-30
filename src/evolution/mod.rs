@@ -1,4 +1,4 @@
-//! OpenShark Self-Evolution System
+//! OpenShield Self-Evolution System
 //!
 //! This module wires together memory, skills, routing, and self-improvement
 //! to create an agent that learns from every interaction and adapts its behavior.
@@ -98,7 +98,7 @@ impl EvolutionEngine {
 
         let skills_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshark")
+            .join("openshield")
             .join("skills")
             .join("user");
 
@@ -108,7 +108,8 @@ impl EvolutionEngine {
 
         // Load adaptive state from memory or use defaults
         let adaptive_state = Arc::new(Mutex::new(
-            Self::load_adaptive_state(&memory.lock().expect("Evolution memory mutex poisoned")).unwrap_or_default(),
+            Self::load_adaptive_state(&memory.lock().expect("Evolution memory mutex poisoned"))
+                .unwrap_or_default(),
         ));
 
         Ok(Self {

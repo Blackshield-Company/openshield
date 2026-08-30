@@ -1,4 +1,4 @@
-//! Checkpoints / Undo system for OpenShark
+//! Checkpoints / Undo system for OpenShield
 //!
 //! Git-based checkpoints that save the working tree state before agent edits.
 //! Users can manually save checkpoints with `/checkpoint`, undo with `/undo`,
@@ -132,7 +132,7 @@ impl CheckpointStack {
 /// Create a git stash checkpoint.
 /// Returns the stash ref (e.g. "stash@{0}") on success.
 pub fn stash_checkpoint(name: &str) -> Result<String> {
-    let msg = format!("openshark-checkpoint: {}", name);
+    let msg = format!("openshield-checkpoint: {}", name);
     let output = Command::new("git")
         .args(["stash", "push", "-m", &msg, "--include-untracked"])
         .output()
@@ -210,7 +210,7 @@ pub fn restore_stash(stash_ref: &str) -> Result<String> {
 /// Create a named checkpoint using a temp branch.
 /// This is more durable than stash for long-lived checkpoints.
 pub fn branch_checkpoint(name: &str) -> Result<String> {
-    let branch_name = format!("openshark-checkpoint/{}", name);
+    let branch_name = format!("openshield-checkpoint/{}", name);
     let output = Command::new("git")
         .args(["checkout", "-b", &branch_name])
         .output()
@@ -234,7 +234,7 @@ pub fn branch_checkpoint(name: &str) -> Result<String> {
         .args([
             "commit",
             "-m",
-            &format!("openshark checkpoint: {}", name),
+            &format!("openshield checkpoint: {}", name),
             "--no-verify",
         ])
         .output()
@@ -402,7 +402,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_cp_test_{}_{}", std::process::id(), count);
+        let dir = format!("/tmp/openshield_cp_test_{}_{}", std::process::id(), count);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Command::new("git")

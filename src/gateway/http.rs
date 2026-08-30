@@ -1,14 +1,14 @@
-//! HTTP Gateway for OpenShark Mobile
+//! HTTP Gateway for OpenShield Mobile
 //!
-//! Axum-based HTTP server that exposes OpenShark's core functionality
+//! Axum-based HTTP server that exposes OpenShield's core functionality
 //! over a local REST API + SSE streaming. Designed for Android/Termux
 //! standalone operation.
 
 use axum::{
+    Json, Router,
     extract::{Query, State},
     response::sse::{Event, Sse},
     routing::{get, post},
-    Json, Router,
 };
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
@@ -132,7 +132,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/chat", post(handle_chat))
         .route("/v1/models", get(handle_models))
-        .route("/v1/memory", get(handle_memory_search).post(handle_memory_save))
+        .route(
+            "/v1/memory",
+            get(handle_memory_search).post(handle_memory_save),
+        )
         .route("/v1/status", get(handle_status))
         .route("/v1/tools/execute", post(handle_tool_execute))
         .route("/v1/health", get(handle_health))
@@ -144,8 +147,12 @@ async fn handle_chat(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ChatRequestBody>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let session_id = body.session_id.unwrap_or_else(|| "mobile-default".to_string());
-    let model = body.model.unwrap_or_else(|| state.config.default_model.clone());
+    let session_id = body
+        .session_id
+        .unwrap_or_else(|| "mobile-default".to_string());
+    let model = body
+        .model
+        .unwrap_or_else(|| state.config.default_model.clone());
     let system_prompt = body.system_prompt;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<ChatResponseChunk>();
@@ -153,7 +160,16 @@ async fn handle_chat(
     // Spawn the chat processing in a background task.
     let state_clone = Arc::clone(&state);
     tokio::spawn(async move {
-        if let Err(e) = process_chat(state_clone, body.message, model, session_id, system_prompt, tx).await {
+        if let Err(e) = process_chat(
+            state_clone,
+            body.message,
+            model,
+            session_id,
+            system_prompt,
+            tx,
+        )
+        .await
+        {
             error!("Chat processing error: {}", e);
         }
     });
@@ -216,7 +232,14 @@ async fn process_chat(
         Ok(memories) if !memories.is_empty() => {
             let context = memories
                 .iter()
-                .map(|m| format!("[{}] {}: {}", m.created_at.format("%Y-%m-%d"), m.role, m.content))
+                .map(|m| {
+                    format!(
+                        "[{}] {}: {}",
+                        m.created_at.format("%Y-%m-%d"),
+                        m.role,
+                        m.content
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             messages.push(Message {
@@ -348,7 +371,9 @@ async fn handle_memory_save(
     State(state): State<Arc<AppState>>,
     Json(body): Json<MemorySaveRequest>,
 ) -> Json<serde_json::Value> {
-    let session_id = body.session_id.unwrap_or_else(|| "mobile-default".to_string());
+    let session_id = body
+        .session_id
+        .unwrap_or_else(|| "mobile-default".to_string());
 
     match state.memory.lock().unwrap().save_message(&MemoryMessage {
         id: uuid::Uuid::new_v4().to_string(),
@@ -365,7 +390,10 @@ async fn handle_memory_save(
 
 /// GET /v1/status — System status.
 async fn handle_status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
-    let models_count: usize = state.config.providers.values()
+    let models_count: usize = state
+        .config
+        .providers
+        .values()
         .map(|p| p.models.len())
         .sum();
 
@@ -379,9 +407,7 @@ async fn handle_status(State(state): State<Arc<AppState>>) -> Json<StatusRespons
 }
 
 /// POST /v1/tools/execute — Execute a tool directly.
-async fn handle_tool_execute(
-    Json(body): Json<ToolExecuteRequest>,
-) -> Json<ToolExecuteResponse> {
+async fn handle_tool_execute(Json(body): Json<ToolExecuteRequest>) -> Json<ToolExecuteResponse> {
     use crate::tools::find_tool;
 
     match find_tool(&body.name) {
@@ -407,7 +433,7 @@ async fn handle_tool_execute(
 
 /// GET /v1/health — Health check.
 async fn handle_health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok", "service": "openshark" }))
+    Json(serde_json::json!({ "status": "ok", "service": "openshield" }))
 }
 
 /// Start the HTTP server.
@@ -416,7 +442,7 @@ pub async fn start_server(config: Config, bind: String, port: u16) -> anyhow::Re
     let app = build_router(state);
 
     let addr = format!("{}:{}", bind, port);
-    info!("OpenShark HTTP server starting on http://{}", addr);
+    info!("OpenShield HTTP server starting on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

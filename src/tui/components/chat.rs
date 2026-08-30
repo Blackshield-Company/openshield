@@ -2,8 +2,8 @@ use std::io::{self, Write};
 
 use crossterm::{
     cursor::MoveTo,
-    style::{Print, ResetColor},
     queue,
+    style::{Print, ResetColor},
 };
 
 use crate::tui::theme::*;
@@ -113,12 +113,7 @@ pub fn draw_unified_feed(
     // there aren't enough lines to fill it. Still no per-line clear needed
     // because the screen was cleared at frame start.
     for row in current_row..height {
-        queue!(
-            out,
-            MoveTo(x + 1, y + row),
-            Print(" "),
-            ResetColor,
-        )?;
+        queue!(out, MoveTo(x + 1, y + row), Print(" "), ResetColor,)?;
     }
 
     Ok(())
@@ -134,30 +129,30 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
         "user" => (
             "👤",
             Color::Rgb {
-                r: 255,
-                g: 215,
-                b: 0,
+                r: 201,
+                g: 162,
+                b: 39,
             },
             "You",
-        ), // Gold
+        ), // War-gold
         "assistant" => (
-            "🦈",
+            "🛡",
             Color::Rgb {
-                r: 255,
-                g: 77,
-                b: 158,
+                r: 193,
+                g: 18,
+                b: 31,
             },
-            "Shark",
-        ), // Pink
+            "OpenShield",
+        ), // Blood
         "system" => (
             "📋",
             Color::Rgb {
-                r: 140,
-                g: 120,
-                b: 160,
+                r: 138,
+                g: 143,
+                b: 152,
             },
             "System",
-        ), // Muted
+        ), // Ash
         _ => (
             "❓",
             Color::Rgb {
@@ -174,16 +169,16 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
         format!(
             "{}▶ {} {} {}{}{}",
             ansi_fg(Color::Rgb {
-                r: 255,
-                g: 215,
-                b: 0,
+                r: 201,
+                g: 162,
+                b: 39,
             }),
             role_icon,
             role_name,
             ansi_fg(Color::Rgb {
-                r: 140,
-                g: 120,
-                b: 160,
+                r: 138,
+                g: 143,
+                b: 152,
             }),
             " [COPY]",
             ansi_reset()
@@ -195,9 +190,9 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
             role_icon,
             role_name,
             ansi_fg(Color::Rgb {
-                r: 140,
-                g: 120,
-                b: 160,
+                r: 138,
+                g: 143,
+                b: 152,
             }),
             ansi_reset()
         )
@@ -211,9 +206,9 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
             lines.push(format!(
                 "{}{}{}",
                 ansi_fg(Color::Rgb {
-                    r: 220,
-                    g: 220,
-                    b: 220,
+                    r: 216,
+                    g: 211,
+                    b: 200,
                 }),
                 w,
                 ansi_reset()
@@ -226,9 +221,9 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
         lines.push(format!(
             "{}  ↳ {} ({}ms, {}tok){}",
             ansi_fg(Color::Rgb {
-                r: 140,
-                g: 120,
-                b: 160,
+                r: 138,
+                g: 143,
+                b: 152,
             }),
             response.model_name,
             response.latency_ms,
@@ -258,7 +253,7 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
 fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let header = format!(
-        "{}🦈 Shark {}(streaming…){}",
+        "{}🛡 Shield {}(streaming…){}",
         ansi_fg(Color::Rgb {
             r: 255,
             g: 77,
@@ -279,9 +274,9 @@ fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
             lines.push(format!(
                 "{}{}{}",
                 ansi_fg(Color::Rgb {
-                    r: 220,
-                    g: 220,
-                    b: 220,
+                    r: 216,
+                    g: 211,
+                    b: 200,
                 }),
                 w,
                 ansi_reset()

@@ -11,7 +11,7 @@ use crate::providers::{ChatRequest, Message, Provider};
 use crate::skills::{SkillRegistry, format_skills_prompt};
 use crate::tools::{find_tool, get_tools};
 
-/// Routes incoming gateway messages to the OpenShark engine.
+/// Routes incoming gateway messages to the OpenShield engine.
 pub struct MessageRouter {
     pub config: Config,
     memory: MemoryStore,
@@ -26,7 +26,7 @@ impl MessageRouter {
         let channel_states = ChannelStateStore::new(config.clone());
         let skills_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshark")
+            .join("openshield")
             .join("skills");
         let skill_registry = SkillRegistry::new(skills_dir).ok();
 
@@ -461,7 +461,7 @@ Branches are per-channel and last until restart."#;
             }
             "!status" => {
                 let state = self.channel_states.get_or_create(channel_id);
-                let mut lines = vec!["🦈 **OpenShark Status**\n".to_string()];
+                let mut lines = vec!["🛡 **OpenShield Status**\n".to_string()];
                 lines.push(format!("Model: `{}`", state.model));
                 lines.push(format!(
                     "History: {} messages",
@@ -471,7 +471,7 @@ Branches are per-channel and last until restart."#;
                 let _ = reply_tx.send(lines.join("\n"));
             }
             "!help" => {
-                let help = r#"🦈 **OpenShark Keyword Commands**
+                let help = r#"🛡 **OpenShield Keyword Commands**
 
 |**Prefix commands:**
 • `!model` — List models
@@ -551,7 +551,7 @@ Use `/help` for the full slash command list.
                 let custom_tools = crate::tools::custom::get_custom_tools();
                 if custom_tools.is_empty() {
                     let _ = reply_tx.send(
-                        "🔧 No custom tools configured.\n\nCreate `~/.config/openshark/custom_tools.toml`:\n\n```toml\n[[tool]]\nname = \"weather\"\ndescription = \"Get weather for a city\"\ncommand = \"curl -s 'wttr.in/{{args}}?format=3'\"\n```"
+                        "🔧 No custom tools configured.\n\nCreate `~/.config/openshield/custom_tools.toml`:\n\n```toml\n[[tool]]\nname = \"weather\"\ndescription = \"Get weather for a city\"\ncommand = \"curl -s 'wttr.in/{{args}}?format=3'\"\n```"
                             .to_string(),
                     );
                 } else {
@@ -709,7 +709,7 @@ Use `/help` for the full slash command list.
                 "agent" => {
                     if let Some(task) = get_string_option(&cmd.data.options, "task") {
                         let _ = reply_tx.send(format!(
-                            "🦈 Starting agent task: **{}**\nThis may take a moment...",
+                            "🛡 Starting agent task: **{}**\nThis may take a moment...",
                             task
                         ));
 
@@ -880,7 +880,7 @@ Use `/help` for the full slash command list.
                 // ─── Status / Info ───
                 "status" => {
                     let state = self.channel_states.get_or_create(channel_id);
-                    let mut lines = vec!["🦈 **OpenShark Status**\n".to_string()];
+                    let mut lines = vec!["🛡 **OpenShield Status**\n".to_string()];
                     lines.push(format!("Model: `{}`", state.model));
                     lines.push(format!(
                         "History: {} messages (max: {})",
@@ -909,7 +909,7 @@ Use `/help` for the full slash command list.
                     self.memory.get_daily_activity(7),
                 ) {
                     (Ok(stats), Ok(model_stats), Ok(tool_stats), Ok(activity)) => {
-                        let mut lines = vec!["📊 **OpenShark Stats**\n".to_string()];
+                        let mut lines = vec!["📊 **OpenShield Stats**\n".to_string()];
                         lines.push(format!("Total Sessions: {}", stats.total_sessions));
                         lines.push(format!("Total Messages: {}", stats.total_messages));
                         lines.push(format!("Total Tool Calls: {}", stats.total_tool_calls));
@@ -1098,10 +1098,10 @@ Use `/help` for the full slash command list.
 
                 // ─── Help ───
                 "help" => {
-                    let help_text = r#"🦈 **OpenShark Discord Commands**
+                    let help_text = r#"🛡 **OpenShield Discord Commands**
 
 **Chat:**
-• `/chat message:<text>` — Chat with OpenShark
+• `/chat message:<text>` — Chat with OpenShield
 • `/new` — Start fresh conversation
 • `/system prompt:<text>` — Set custom system prompt
 • `/reset` — Reset to defaults
@@ -1240,18 +1240,24 @@ Use `/help` for the full slash command list.
 
         // Security gate — apply security checks before executing any tool
         let security = match crate::security::SecurityEngine::new(
-            crate::security::SecurityConfig::load().unwrap_or_default()
+            crate::security::SecurityConfig::load().unwrap_or_default(),
         ) {
             Ok(s) => s,
             Err(e) => {
-                return Some(format!("🔒 Security engine failed for tool '{}': {}", tool_name, e));
+                return Some(format!(
+                    "🔒 Security engine failed for tool '{}': {}",
+                    tool_name, e
+                ));
             }
         };
 
         match security.check_tool_call(tool_name, args) {
             crate::security::SecurityDecision::Allow => {}
             crate::security::SecurityDecision::RequireApproval { reason, .. } => {
-                return Some(format!("🔒 Tool '{}' requires approval: {}", tool_name, reason));
+                return Some(format!(
+                    "🔒 Tool '{}' requires approval: {}",
+                    tool_name, reason
+                ));
             }
             crate::security::SecurityDecision::Deny { reason } => {
                 return Some(format!("🚫 Tool '{}' blocked: {}", tool_name, reason));

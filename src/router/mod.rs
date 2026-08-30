@@ -458,7 +458,7 @@ pub async fn show_decisions(config: &Config) -> Result<()> {
         .get_recent_sessions(50)
         .context("Failed to load recent sessions")?;
 
-    println!("🦈 Routing Decisions");
+    println!("🛡 Routing Decisions");
     println!(
         "Auto-route: {}",
         if config.auto_route {
@@ -721,14 +721,14 @@ mod tests {
             version: crate::VERSION.to_string(),
             default_model: "k3".to_string(),
             providers,
-            memory_db_path: PathBuf::from("/tmp/test_openshark_router_memory_new.db"),
+            memory_db_path: PathBuf::from("/tmp/test_openshield_router_memory_new.db"),
             tools_enabled: vec!["fs".to_string(), "terminal".to_string()],
             auto_route: true,
             cost_limit_usd: 10.0,
             agent: crate::config::AgentIdentity::default(),
             gateway: crate::gateway::GatewayConfig::default(),
             user_name: "user".to_string(),
-            theme: "synthwave84".to_string(),
+            theme: "blackshield".to_string(),
             filesystem: crate::config::FilesystemConfig::default(),
             autonomy: crate::config::AutonomyConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
@@ -771,14 +771,14 @@ mod tests {
             version: crate::VERSION.to_string(),
             default_model: "tiny-model".to_string(),
             providers,
-            memory_db_path: PathBuf::from("/tmp/test_openshark_router_memory2_new.db"),
+            memory_db_path: PathBuf::from("/tmp/test_openshield_router_memory2_new.db"),
             tools_enabled: vec![],
             auto_route: true,
             cost_limit_usd: 10.0,
             agent: crate::config::AgentIdentity::default(),
             gateway: crate::gateway::GatewayConfig::default(),
             user_name: "user".to_string(),
-            theme: "synthwave84".to_string(),
+            theme: "blackshield".to_string(),
             filesystem: crate::config::FilesystemConfig::default(),
             autonomy: crate::config::AutonomyConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
@@ -1056,7 +1056,7 @@ mod tests {
     async fn test_route_task_chat() {
         let mut config = create_test_config();
         config.memory_db_path = std::path::PathBuf::from(format!(
-            "/tmp/openshark_router_test_chat_{}.db",
+            "/tmp/openshield_router_test_chat_{}.db",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&config.memory_db_path);
@@ -1069,7 +1069,7 @@ mod tests {
     async fn test_route_task_analysis() {
         let mut config = create_test_config();
         config.memory_db_path = std::path::PathBuf::from(format!(
-            "/tmp/openshark_router_test_analysis_{}.db",
+            "/tmp/openshield_router_test_analysis_{}.db",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&config.memory_db_path);
@@ -1241,7 +1241,7 @@ mod tests {
     async fn test_route_task_code() {
         let mut config = create_test_config();
         config.memory_db_path = std::path::PathBuf::from(format!(
-            "/tmp/openshark_router_test_code_{}.db",
+            "/tmp/openshield_router_test_code_{}.db",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&config.memory_db_path);

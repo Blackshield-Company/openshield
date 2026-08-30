@@ -46,20 +46,20 @@ pub struct AgentIdentity {
 impl Default for AgentIdentity {
     fn default() -> Self {
         Self {
-            name: "openshark".to_string(),
-            display_name: "OpenShark".to_string(),
+            name: "openshield".to_string(),
+            display_name: "OpenShield".to_string(),
             role: "autonomous coding agent".to_string(),
-            origin: "Apex predator of the code ocean, forged in the digital depths".to_string(),
-            purpose: "To build, debug, and ship code with surgical accuracy".to_string(),
+            origin: "Blackshield sentinel of the codebase, forged in blood and steel".to_string(),
+            purpose: "To guard quality, build deliberately, and ship verified code".to_string(),
             tagline: "The harness that learns. The agent that decides.".to_string(),
             tone: "Confident, precise, professional with personality".to_string(),
             style: "Direct. No fluff. Gets to the point.".to_string(),
-            greeting: "The water's fine. What are we building?".to_string(),
-            farewell: "Shipped. The hunt continues.".to_string(),
-            emoji: "🦈".to_string(),
+            greeting: "Shields up. What are we building?".to_string(),
+            farewell: "Shipped. The watch continues.".to_string(),
+            emoji: "🛡".to_string(),
             catchphrases: vec![
-                "Fast. Precise. Hungry.".to_string(),
-                "The hunt continues.".to_string(),
+                "Steel. Precision. Resolve.".to_string(),
+                "The watch continues.".to_string(),
                 "Every session makes the harness smarter.".to_string(),
             ],
             behavioral_rules: vec![
@@ -79,7 +79,7 @@ impl Default for AgentIdentity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilesystemConfig {
-    /// Directories OpenShark is allowed to access. Empty = no restriction.
+    /// Directories OpenShield is allowed to access. Empty = no restriction.
     #[serde(default)]
     pub allowed_paths: Vec<String>,
     /// Maximum file size to read in MB.
@@ -236,7 +236,7 @@ pub struct KeybindingsConfig {
 }
 
 fn default_theme() -> String {
-    "synthwave84".to_string()
+    "blackshield".to_string()
 }
 
 fn default_effort() -> String {
@@ -310,7 +310,7 @@ impl Config {
             config
         };
         // Embedded hosts (Android): dirs::data_dir() is None, so Config::default()
-        // falls back to a relative memory_db_path ("./openshark/memory.db") that
+        // falls back to a relative memory_db_path ("./openshield/memory.db") that
         // resolves against a read-only cwd like "/". Rebase it under config_dir.
         if config.memory_db_path.is_relative() {
             config.memory_db_path = config_dir.join("memory.db");
@@ -321,7 +321,7 @@ impl Config {
     pub fn load_or_default() -> Result<Self> {
         let config_dir = dirs::config_dir()
             .context("No config directory found")?
-            .join("openshark");
+            .join("openshield");
 
         let config_path = config_dir.join("config.toml");
 
@@ -357,7 +357,7 @@ impl Config {
                 } else {
                     let config_dir = dirs::config_dir()
                         .unwrap_or_else(|| PathBuf::from("."))
-                        .join("openshark");
+                        .join("openshield");
                     config_dir.join(env_file).to_string_lossy().to_string()
                 };
 
@@ -398,7 +398,7 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let config_dir = dirs::config_dir()
             .context("No config directory found")?
-            .join("openshark");
+            .join("openshield");
         std::fs::create_dir_all(&config_dir)?;
 
         let config_path = config_dir.join("config.toml");
@@ -557,7 +557,7 @@ impl Default for Config {
                 kind: ProviderKind::OpenAiCompatible,
                 headers: {
                     let mut h = HashMap::new();
-                    h.insert("x-kimi-agent-name".to_string(), "OpenShark".to_string());
+                    h.insert("x-kimi-agent-name".to_string(), "OpenShield".to_string());
                     h.insert(
                         "x-kimi-agent-version".to_string(),
                         crate::VERSION.to_string(),
@@ -618,9 +618,9 @@ impl Default for Config {
                     let mut h = HashMap::new();
                     h.insert(
                         "HTTP-Referer".to_string(),
-                        "https://openshark.dev".to_string(),
+                        "https://openshield.dev".to_string(),
                     );
-                    h.insert("X-Title".to_string(), "OpenShark".to_string());
+                    h.insert("X-Title".to_string(), "OpenShield".to_string());
                     h
                 },
                 env_file: Some("openrouter.env".to_string()),
@@ -725,7 +725,7 @@ impl Default for Config {
             providers,
             memory_db_path: dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("openshark")
+                .join("openshield")
                 .join("memory.db"),
             tools_enabled: vec![
                 "fs".to_string(),
@@ -745,7 +745,7 @@ impl Default for Config {
                     guild_ids: vec![],
                     allowed_channels: vec![],
                     require_mention: false,
-                    command_prefix: "!shark".to_string(),
+                    command_prefix: "!shield".to_string(),
                     max_message_length: 2000,
                     typing_indicator: true,
                     multi_model_enabled: false,
@@ -774,7 +774,7 @@ impl Default for Config {
                 mcp: crate::gateway::McpGatewayConfig::default(),
             },
             user_name: "user".to_string(),
-            theme: "synthwave84".to_string(),
+            theme: "blackshield".to_string(),
             filesystem: FilesystemConfig {
                 allowed_paths: vec![],
                 max_file_size_mb: 10,
@@ -826,11 +826,11 @@ mod tests {
         // memory_db_path is relative — load_from_dir must rebase it under the
         // host-provided config dir, or the memory store fails with
         // "Failed to create memory directory" against a read-only cwd.
-        let dir = std::env::temp_dir().join(format!("openshark-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("openshield-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut cfg = Config::default();
-        cfg.memory_db_path = std::path::PathBuf::from("./openshark/memory.db");
+        cfg.memory_db_path = std::path::PathBuf::from("./openshield/memory.db");
         let content = toml::to_string_pretty(&cfg).unwrap();
         std::fs::write(dir.join("config.toml"), content).unwrap();
         let config = Config::load_from_dir(&dir).unwrap();
@@ -885,14 +885,14 @@ mod tests {
             version: crate::VERSION.to_string(),
             default_model: "k3".to_string(),
             providers,
-            memory_db_path: std::path::PathBuf::from("/tmp/test_openshark_memory.db"),
+            memory_db_path: std::path::PathBuf::from("/tmp/test_openshield_memory.db"),
             tools_enabled: vec!["fs".to_string(), "terminal".to_string()],
             auto_route: true,
             cost_limit_usd: 10.0,
             agent: AgentIdentity::default(),
             gateway: crate::gateway::GatewayConfig::default(),
             user_name: "user".to_string(),
-            theme: "synthwave84".to_string(),
+            theme: "blackshield".to_string(),
             filesystem: FilesystemConfig::default(),
             autonomy: AutonomyConfig::default(),
             swarm: crate::swarm::SwarmConfig::default(),
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn test_config_agent_identity() {
         let config = create_test_config();
-        assert_eq!(config.agent.name, "openshark");
+        assert_eq!(config.agent.name, "openshield");
         assert!(!config.agent.behavioral_rules.is_empty());
     }
 

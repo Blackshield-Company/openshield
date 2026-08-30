@@ -1,6 +1,6 @@
 //! MCP Server Mode — Act as an MCP (Model Context Protocol) server
 //!
-//! Other tools can call OpenShark as an MCP server via stdio JSON-RPC.
+//! Other tools can call OpenShield as an MCP server via stdio JSON-RPC.
 //! Implements: initialize, tools/list, tools/call
 
 #![allow(dead_code)]
@@ -19,7 +19,7 @@ pub struct McpServer {
 impl McpServer {
     pub fn new() -> Self {
         Self {
-            name: "openshark".to_string(),
+            name: "openshield".to_string(),
             version: crate::VERSION.to_string(),
         }
     }
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_mcp_server_new() {
         let server = McpServer::new();
-        assert_eq!(server.name, "openshark");
+        assert_eq!(server.name, "openshield");
     }
 
     #[test]
@@ -297,7 +297,8 @@ mod tests {
     fn test_handle_tools_list() {
         let server = McpServer::new();
         let result = server.handle_tools_list();
-        let tools = result.get("tools")
+        let tools = result
+            .get("tools")
             .expect("tools list should contain tools key")
             .as_array()
             .expect("tools should be an array");

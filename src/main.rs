@@ -11,7 +11,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tracing::info;
 
-/// The current version of OpenShark.
+/// The current version of OpenShield.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 mod agent;
@@ -94,8 +94,8 @@ fn parse_embedded_tools_cli(text: &str) -> Vec<(String, String)> {
 }
 
 #[derive(Parser)]
-#[command(name = "openshark")]
-#[command(about = "🦈 The harness that learns. The agent that decides.")]
+#[command(name = "openshield")]
+#[command(about = "🛡 The harness that learns. The agent that decides.")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
@@ -286,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Some(Commands::Tui) | None => {
-            info!("Starting OpenShark TUI");
+            info!("Starting OpenShield TUI");
 
             #[cfg(feature = "discord")]
             // Spawn Discord gateway if enabled
@@ -484,8 +484,16 @@ async fn main() -> anyhow::Result<()> {
             {
                 let server_config = config.clone();
                 tokio::spawn(async move {
-                    info!("Starting OpenShark HTTP server on 127.0.0.1:9876 (mobile app connectivity)");
-                    if let Err(e) = crate::gateway::http::start_server(server_config, "127.0.0.1".to_string(), 9876).await {
+                    info!(
+                        "Starting OpenShield HTTP server on 127.0.0.1:9876 (mobile app connectivity)"
+                    );
+                    if let Err(e) = crate::gateway::http::start_server(
+                        server_config,
+                        "127.0.0.1".to_string(),
+                        9876,
+                    )
+                    .await
+                    {
                         tracing::warn!("HTTP server exited: {}", e);
                     }
                 });
@@ -494,15 +502,15 @@ async fn main() -> anyhow::Result<()> {
             tui::run(config).await?;
         }
         Some(Commands::Setup) => {
-            println!("🦈 OpenShark Setup");
-            println!("Run `openshark` to start the TUI.");
+            println!("🛡 OpenShield Setup");
+            println!("Run `openshield` to start the TUI.");
             config::setup::run().await?;
         }
         Some(Commands::Config) => {
-            println!("🦈 OpenShark Config");
+            println!("🛡 OpenShield Config");
             let config_path = dirs::config_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshark")
+                .join("openshield")
                 .join("config.toml");
             println!("Config file: {}", config_path.display());
             if config_path.exists() {
@@ -511,11 +519,11 @@ async fn main() -> anyhow::Result<()> {
                     Err(e) => println!("❌ Error reading config: {}", e),
                 }
             } else {
-                println!("No config file found. Run `openshark setup` to create one.");
+                println!("No config file found. Run `openshield setup` to create one.");
             }
         }
         Some(Commands::Stats) => {
-            println!("🦈 OpenShark Stats");
+            println!("🛡 OpenShield Stats");
             println!();
 
             let memory = match memory::MemoryStore::new(&config.memory_db_path) {
@@ -695,15 +703,15 @@ async fn main() -> anyhow::Result<()> {
             limit,
         }) => {
             if query.is_empty() && !recent {
-                println!("🦈 Memory Query");
-                println!("Usage: openshark memory <query>");
-                println!("       openshark memory --recent [--limit 5]");
-                println!("       openshark memory <query> --semantic [--limit 10]");
+                println!("🛡 Memory Query");
+                println!("Usage: openshield memory <query>");
+                println!("       openshield memory --recent [--limit 5]");
+                println!("       openshield memory <query> --semantic [--limit 10]");
             } else if recent {
                 let memory = memory::MemoryStore::new(&config.memory_db_path)?;
                 match memory.get_recent_sessions(limit) {
                     Ok(sessions) => {
-                        println!("🦈 Recent Sessions (last {}):", limit);
+                        println!("🛡 Recent Sessions (last {}):", limit);
                         for s in sessions {
                             println!(
                                 "  {} | {} | {} | {}",
@@ -720,11 +728,7 @@ async fn main() -> anyhow::Result<()> {
                 let memory = memory::MemoryStore::new(&config.memory_db_path)?;
                 match memory.semantic_search(&query, limit) {
                     Ok(results) => {
-                        println!(
-                            "🦈 Semantic Search: '{}' ({} results)",
-                            query,
-                            results.len()
-                        );
+                        println!("🛡 Semantic Search: '{}' ({} results)", query, results.len());
                         for (msg, score) in results {
                             let preview = &msg.content[..msg.content.len().min(100)];
                             println!(
@@ -742,7 +746,7 @@ async fn main() -> anyhow::Result<()> {
                 let memory = memory::MemoryStore::new(&config.memory_db_path)?;
                 match memory.search_messages(&query, limit) {
                     Ok(messages) => {
-                        println!("🦈 Memory Search: '{}' ({} results)", query, messages.len());
+                        println!("🛡 Memory Search: '{}' ({} results)", query, messages.len());
                         for msg in messages {
                             let preview = &msg.content[..msg.content.len().min(100)];
                             println!(
@@ -765,16 +769,16 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Agent { task }) => {
             if task.is_empty() {
-                println!("🦈 Agent Mode");
-                println!("Usage: openshark agent <task>");
-                println!("       openshark agent 'fix the bug in src/main.rs'");
+                println!("🛡 Agent Mode");
+                println!("Usage: openshield agent <task>");
+                println!("       openshield agent 'fix the bug in src/main.rs'");
             } else {
                 let agent_config = agent::AgentConfig::default();
                 let agent = agent::Agent::new(agent_config, &config)?;
                 match agent.run_task(&task).await {
                     Ok(result) => {
                         println!(
-                            "\n🦈 Agent Result: {}",
+                            "\n🛡 Agent Result: {}",
                             if result.success {
                                 "✅ Success"
                             } else {
@@ -806,7 +810,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Models) => {
-            println!("🦈 Available Models");
+            println!("🛡 Available Models");
             println!();
             for (provider_name, provider) in &config.providers {
                 println!("Provider: {} ({})", provider_name, provider.base_url);
@@ -840,10 +844,10 @@ async fn main() -> anyhow::Result<()> {
             file,
         }) => {
             if message.is_empty() && file.is_none() {
-                println!("🦈 One-shot Chat");
-                println!("Usage: openshark chat 'your message here'");
-                println!("       openshark chat 'hello' --model k3");
-                println!("       openshark chat 'review this' --file src/main.rs");
+                println!("🛡 One-shot Chat");
+                println!("Usage: openshield chat 'your message here'");
+                println!("       openshield chat 'hello' --model k3");
+                println!("       openshield chat 'review this' --file src/main.rs");
             } else {
                 let model_name = model.as_deref().unwrap_or(&config.default_model);
                 let (provider_name, provider_config) = config
@@ -854,14 +858,14 @@ async fn main() -> anyhow::Result<()> {
                             Some((n, p)) => (n.clone(), p.clone()),
                             None => {
                                 eprintln!(
-                                    "❌ No providers configured. Run `openshark setup` first."
+                                    "❌ No providers configured. Run `openshield setup` first."
                                 );
                                 std::process::exit(1);
                             }
                         }
                     });
 
-                println!("🦈 Chat with {} (via {})", model_name, provider_name);
+                println!("🛡 Chat with {} (via {})", model_name, provider_name);
                 println!();
 
                 let provider = providers::Provider::new(
@@ -933,8 +937,7 @@ async fn main() -> anyhow::Result<()> {
                     },
                 ];
 
-                let request =
-                    providers::ChatRequest::new(model_name.to_string(), messages, true);
+                let request = providers::ChatRequest::new(model_name.to_string(), messages, true);
                 // Native tool calling is NOT enabled in direct mode because chat_stream
                 // (the non-realtime streaming method) does not parse StreamChunk::ToolCall
                 // from SSE deltas. The direct mode relies on text-based TOOL: detection.
@@ -954,7 +957,7 @@ async fn main() -> anyhow::Result<()> {
                         let embedded_tools = parse_embedded_tools_cli(&full_response);
                         if !embedded_tools.is_empty() {
                             let security = match security::SecurityEngine::new(
-                                security::SecurityConfig::load().unwrap_or_default()
+                                security::SecurityConfig::load().unwrap_or_default(),
                             ) {
                                 Ok(s) => s,
                                 Err(e) => {
@@ -967,8 +970,13 @@ async fn main() -> anyhow::Result<()> {
                             for (tool_name, args) in embedded_tools {
                                 match security.check_tool_call(&tool_name, &args) {
                                     security::SecurityDecision::Allow => {}
-                                    security::SecurityDecision::RequireApproval { reason, .. } => {
-                                        println!("🔒 Tool '{}' requires approval: {}", tool_name, reason);
+                                    security::SecurityDecision::RequireApproval {
+                                        reason, ..
+                                    } => {
+                                        println!(
+                                            "🔒 Tool '{}' requires approval: {}",
+                                            tool_name, reason
+                                        );
                                         continue;
                                     }
                                     security::SecurityDecision::Deny { reason } => {
@@ -981,7 +989,8 @@ async fn main() -> anyhow::Result<()> {
                                 match tools::find_tool(&tool_name) {
                                     Some(tool) => match tool.execute(&args) {
                                         Ok(result) => {
-                                            let sanitized = security.sanitize_output(&tool_name, &result);
+                                            let sanitized =
+                                                security.sanitize_output(&tool_name, &result);
                                             println!("✅ Result:\n{}", sanitized);
                                         }
                                         Err(e) => {
@@ -1012,7 +1021,7 @@ async fn main() -> anyhow::Result<()> {
             match cmd.as_str() {
                 "status" => {
                     let sec_config = security::SecurityConfig::load()?;
-                    println!("🔒 OpenShark Security Status");
+                    println!("🔒 OpenShield Security Status");
                     println!("{}", "─".repeat(60));
                     println!("  Version:           {}", sec_config.version);
                     println!("  Working Dir:       {:?}", sec_config.working_directory);
@@ -1136,9 +1145,9 @@ async fn main() -> anyhow::Result<()> {
                 }
                 _ => {
                     println!("🔒 Security Commands");
-                    println!("  openshark security status       - Show security configuration");
-                    println!("  openshark security audit [n]    - Show audit log (default 10)");
-                    println!("  openshark security test [input] - Test security detection");
+                    println!("  openshield security status       - Show security configuration");
+                    println!("  openshield security audit [n]    - Show audit log (default 10)");
+                    println!("  openshield security test [input] - Test security detection");
                 }
             }
         }
@@ -1167,7 +1176,7 @@ async fn main() -> anyhow::Result<()> {
                         println!("  • {} ({})", server.name, transport_type);
                     }
                     println!();
-                    println!("  Run `openshark` (TUI mode) to connect to MCP servers.");
+                    println!("  Run `openshield` (TUI mode) to connect to MCP servers.");
                 }
             }
             "tools" => {
@@ -1178,18 +1187,18 @@ async fn main() -> anyhow::Result<()> {
             }
             _ => {
                 println!("🔌 MCP Commands");
-                println!("  openshark mcp status - Show MCP configuration");
-                println!("  openshark mcp tools  - Show tool discovery info");
+                println!("  openshield mcp status - Show MCP configuration");
+                println!("  openshield mcp tools  - Show tool discovery info");
             }
         },
         Some(Commands::Swarm { cmd, prompt }) => match cmd.as_str() {
             "init" => {
                 if prompt.is_empty() {
                     println!("🐝 Swarm Mode");
-                    println!("Usage: openshark swarm init 'your seed prompt here'");
+                    println!("Usage: openshield swarm init 'your seed prompt here'");
                     println!();
                     println!("Example:");
-                    println!("  openshark swarm init 'Build a REST API with auth'");
+                    println!("  openshield swarm init 'Build a REST API with auth'");
                 } else {
                     println!("🐝 Initializing swarm...");
                     let swarm_config = config.swarm.clone();
@@ -1208,7 +1217,9 @@ async fn main() -> anyhow::Result<()> {
                                 );
                             }
                             println!();
-                            println!("  Run `openshark swarm start` to begin the autonomous loop.");
+                            println!(
+                                "  Run `openshield swarm start` to begin the autonomous loop."
+                            );
                         }
                         Err(e) => println!("❌ Failed to initialize swarm: {}", e),
                     }
@@ -1221,7 +1232,7 @@ async fn main() -> anyhow::Result<()> {
                 match engine.start().await {
                     Ok(()) => {
                         println!("✅ Swarm loop started");
-                        println!("  Run `openshark swarm status` to check progress.");
+                        println!("  Run `openshield swarm status` to check progress.");
                     }
                     Err(e) => println!("❌ Failed to start swarm: {}", e),
                 }
@@ -1243,10 +1254,10 @@ async fn main() -> anyhow::Result<()> {
             }
             _ => {
                 println!("🐝 Swarm Commands");
-                println!("  openshark swarm init 'prompt'  - Initialize swarm with seed prompt");
-                println!("  openshark swarm start           - Start autonomous loop");
-                println!("  openshark swarm stop            - Stop swarm");
-                println!("  openshark swarm status          - Show swarm status");
+                println!("  openshield swarm init 'prompt'  - Initialize swarm with seed prompt");
+                println!("  openshield swarm start           - Start autonomous loop");
+                println!("  openshield swarm stop            - Stop swarm");
+                println!("  openshield swarm status          - Show swarm status");
                 println!();
                 println!("  Roles: {:?}", config.swarm.roles);
             }
@@ -1254,7 +1265,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Tools { cmd }) => match cmd.as_str() {
             "list" | "" => {
                 println!(
-                    "🦈 OpenShark Tools — {} total\n",
+                    "🛡 OpenShield Tools — {} total\n",
                     crate::tools::get_tools().len()
                 );
 
@@ -1275,8 +1286,8 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
             _ => {
-                println!("🦈 Tools Commands");
-                println!("  openshark tools list  - Show all available tools");
+                println!("🛡 Tools Commands");
+                println!("  openshield tools list  - Show all available tools");
             }
         },
         Some(Commands::Doctor { fix, component: _ }) => {
@@ -1309,21 +1320,21 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             _ => {
-                println!("🦈 Plugin Commands");
-                println!("  openshark plugins list           - List all plugins");
-                println!("  openshark plugins create <name>  - Create plugin scaffold");
-                println!("  openshark plugins enable <name>  - Enable a plugin");
-                println!("  openshark plugins disable <name> - Disable a plugin");
+                println!("🛡 Plugin Commands");
+                println!("  openshield plugins list           - List all plugins");
+                println!("  openshield plugins create <name>  - Create plugin scaffold");
+                println!("  openshield plugins enable <name>  - Enable a plugin");
+                println!("  openshield plugins disable <name> - Disable a plugin");
             }
         },
         Some(Commands::Delegate { agent, task }) => {
             if agent.is_empty() || task.is_empty() {
-                println!("🦈 Delegate — Route tasks to external agents");
+                println!("🛡 Delegate — Route tasks to external agents");
                 println!();
-                println!("Usage: openshark delegate <agent> <task>");
-                println!("       openshark delegate claw 'refactor auth module'");
-                println!("       openshark delegate opencode 'fix bug #42'");
-                println!("       openshark delegate claude 'write tests for src/lib.rs'");
+                println!("Usage: openshield delegate <agent> <task>");
+                println!("       openshield delegate claw 'refactor auth module'");
+                println!("       openshield delegate opencode 'fix bug #42'");
+                println!("       openshield delegate claude 'write tests for src/lib.rs'");
                 println!();
                 println!("Available agents:");
                 for a in integrations::registry::available() {
@@ -1335,7 +1346,7 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 match agent.parse::<integrations::registry::Agent>() {
                     Ok(a) => {
-                        println!("🦈 Delegating to {}: {}", a, task);
+                        println!("🛡 Delegating to {}: {}", a, task);
                         match integrations::registry::delegate(a, &task, 300) {
                             Ok(result) => println!("{}", result),
                             Err(e) => println!("❌ Delegation failed: {}", e),
@@ -1347,13 +1358,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Hermes { cmd }) => match cmd.as_str() {
             "status" => {
-                println!("🦈 Hermes Bridge");
+                println!("🛡 Hermes Bridge");
                 println!("{}", "─".repeat(50));
                 let detected = integrations::hermes::detect();
                 println!("  Hermes detected: {}", if detected { "✅" } else { "❌" });
                 if detected {
-                    println!("  Run `openshark hermes sync` to pull memories.");
-                    println!("  Run `openshark hermes push` to push skills.");
+                    println!("  Run `openshield hermes sync` to pull memories.");
+                    println!("  Run `openshield hermes push` to push skills.");
                 } else {
                     println!("  Install Hermes Agent to enable bridge.");
                 }
@@ -1367,10 +1378,10 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => println!("❌ Push failed: {}", e),
             },
             _ => {
-                println!("🦈 Hermes Commands");
-                println!("  openshark hermes status - Show bridge status");
-                println!("  openshark hermes sync   - Pull memories from Hermes");
-                println!("  openshark hermes push   - Push skills to Hermes");
+                println!("🛡 Hermes Commands");
+                println!("  openshield hermes status - Show bridge status");
+                println!("  openshield hermes sync   - Pull memories from Hermes");
+                println!("  openshield hermes push   - Push skills to Hermes");
             }
         },
         Some(Commands::Headless {
@@ -1383,7 +1394,7 @@ async fn main() -> anyhow::Result<()> {
             model,
             output,
         }) => {
-            println!("🦈 OpenShark Headless Mode");
+            println!("🛡 OpenShield Headless Mode");
             let mut cfg = config.clone();
             if let Some(ref m) = model {
                 cfg.default_model = m.clone();
@@ -1406,7 +1417,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let security = match crate::security::SecurityEngine::new(
-                crate::security::SecurityConfig::default()
+                crate::security::SecurityConfig::default(),
             ) {
                 Ok(s) => s,
                 Err(e) => {
@@ -1434,14 +1445,16 @@ async fn main() -> anyhow::Result<()> {
                     }
                     match ev {
                         HeadlessEvent::Start { task, model, .. } => {
-                            println!("🦈 Task: {} (model: {})", task, model);
+                            println!("🛡 Task: {} (model: {})", task, model);
                         }
                         HeadlessEvent::Thought { content, .. } => {
                             if !content.trim().is_empty() {
                                 println!("{}", content);
                             }
                         }
-                        HeadlessEvent::ToolCall { name, args, turn, .. } => {
+                        HeadlessEvent::ToolCall {
+                            name, args, turn, ..
+                        } => {
                             println!("🔧 [turn {}] {} {}", turn, name, args);
                         }
                         HeadlessEvent::ToolResult {
@@ -1487,7 +1500,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::RepoMap { path }) => {
-            println!("🦈 Repo Map");
+            println!("🛡 Repo Map");
             match crate::repo_map::build_repo_map(&path) {
                 Ok(map) => {
                     println!("{}", crate::repo_map::format_repo_map(&map));
@@ -1499,7 +1512,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Lint { path }) => {
-            println!("🦈 Lint");
+            println!("🛡 Lint");
             match crate::linting::detect_linter(&path) {
                 Some(linter) => {
                     println!("Detected linter: {}", linter);
@@ -1531,7 +1544,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::McpServer) => {
-            println!("🦈 OpenShark MCP Server");
+            println!("🛡 OpenShield MCP Server");
             let server = crate::mcp_server::McpServer::new();
             if let Err(e) = server.run_stdio().await {
                 eprintln!("❌ MCP server error: {}", e);
@@ -1539,7 +1552,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Diff) => {
-            println!("🦈 Diff — AI-made changes");
+            println!("🛡 Diff — AI-made changes");
             let git_tool = crate::tools::GitTool;
             match git_tool.execute("diff") {
                 Ok(diff) => {
@@ -1578,36 +1591,36 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Profile { name }) => {
             if name.is_empty() {
-                println!("🦈 Config Profiles");
-                println!("Usage: openshark profile <name>");
+                println!("🛡 Config Profiles");
+                println!("Usage: openshield profile <name>");
                 println!();
-                println!("Profiles are stored in ~/.config/openshark/profiles/");
+                println!("Profiles are stored in ~/.config/openshield/profiles/");
                 println!(
                     "Each profile is a separate config.json with its own model, provider, and settings."
                 );
             } else {
                 let profile_dir = dirs::config_dir()
-                    .map(|d| d.join("openshark").join("profiles"))
-                    .unwrap_or_else(|| PathBuf::from(".openshark/profiles"));
+                    .map(|d| d.join("openshield").join("profiles"))
+                    .unwrap_or_else(|| PathBuf::from(".openshield/profiles"));
                 let profile_path = profile_dir.join(format!("{}.json", name));
                 if profile_path.exists() {
                     println!("✅ Profile '{}' found at {}", name, profile_path.display());
                     println!(
-                        "   To use: set OPENSHARK_PROFILE={} or use --profile flag (coming soon)",
+                        "   To use: set OPENSHIELD_PROFILE={} or use --profile flag (coming soon)",
                         name
                     );
                 } else {
                     println!("📭 Profile '{}' not found.", name);
                     println!("   Create one by copying your config:");
                     println!(
-                        "   cp ~/.config/openshark/config.json {}",
+                        "   cp ~/.config/openshield/config.json {}",
                         profile_path.display()
                     );
                 }
             }
         }
         Some(Commands::Export { name }) => {
-            println!("🦈 Export session to markdown");
+            println!("🛡 Export session to markdown");
             let memory = match memory::MemoryStore::new(&config.memory_db_path) {
                 Ok(m) => m,
                 Err(e) => {
@@ -1651,7 +1664,7 @@ async fn main() -> anyhow::Result<()> {
         }
         #[cfg(feature = "web-api")]
         Some(Commands::Serve { addr }) => {
-            info!("Starting OpenShark API server on {}", addr);
+            info!("Starting OpenShield API server on {}", addr);
             let state = crate::api::AppState {
                 config: Arc::new(config),
                 running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -1664,7 +1677,7 @@ async fn main() -> anyhow::Result<()> {
         }
         #[cfg(feature = "web-api")]
         Some(Commands::Server { port, bind }) => {
-            info!("Starting OpenShark HTTP server on {}:{}", bind, port);
+            info!("Starting OpenShield HTTP server on {}:{}", bind, port);
             if let Err(e) = crate::gateway::http::start_server(config, bind, port).await {
                 eprintln!("❌ HTTP server error: {}", e);
                 std::process::exit(1);
@@ -1676,14 +1689,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Append a line to the persistent debug log at
-/// ~/.local/share/openshark/openshark.log. The TUI runs in an alternate
+/// ~/.local/share/openshield/openshield.log. The TUI runs in an alternate
 /// screen, so stderr output (panics, background task errors) is invisible —
 /// this log is the only way to see what killed a background task.
 pub fn debug_log(msg: &str) {
     let path = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshark")
-        .join("openshark.log");
+        .join("openshield")
+        .join("openshield.log");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

@@ -53,8 +53,8 @@ pub struct DiscordConfig {
     /// Default: false — bot responds to all messages in allowed channels.
     #[serde(default)]
     pub require_mention: bool,
-    /// Prefix for text commands (e.g., "!shark").
-    /// Default: "!shark" — set to empty string to disable prefix commands.
+    /// Prefix for text commands (e.g., "!shield").
+    /// Default: "!shield" — set to empty string to disable prefix commands.
     #[serde(default = "default_prefix")]
     pub command_prefix: String,
     /// Max message length before splitting.
@@ -126,7 +126,7 @@ pub struct MatrixConfig {
     /// Homeserver URL (e.g., https://matrix.org).
     #[serde(default)]
     pub homeserver: Option<String>,
-    /// User ID (e.g., @openshark:matrix.org).
+    /// User ID (e.g., @openshield:matrix.org).
     #[serde(default)]
     pub user_id: Option<String>,
     /// Access token.
@@ -169,7 +169,7 @@ fn default_true() -> bool {
     true
 }
 fn default_prefix() -> String {
-    "!shark".to_string()
+    "!shield".to_string()
 }
 fn default_max_length() -> usize {
     2000

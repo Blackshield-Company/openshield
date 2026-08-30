@@ -1,4 +1,4 @@
-# OpenShark Status — Session Handoff
+# OpenShield Status — Session Handoff
 
 ## What's Built (v1.1.0 — Autonomous Harness)
 
@@ -9,8 +9,8 @@
 | **Native tool calling** | ✅ | Model receives `tool_calls` schema, executes native function calls |
 | Chat with models | ✅ | **Streaming** chat, system prompts, context window |
 | SQLite memory | ✅ | Sessions, messages, tool calls persisted |
-| Memory search CLI | ✅ | `openshark memory <query>` + `--recent [n]` |
-| Semantic memory search | ✅ | `openshark memory <query> --semantic` with hash-based vector embeddings |
+| Memory search CLI | ✅ | `openshield memory <query>` + `--recent [n]` |
+| Semantic memory search | ✅ | `openshield memory <query> --semantic` with hash-based vector embeddings |
 | Memory hierarchy | ✅ | Session → Project → Global context layers |
 | Context injection | ✅ | Auto-injects top 5 relevant past messages into current session |
 | Natural queries | ✅ | "What did we do about auth?" → instant answer |
@@ -20,7 +20,7 @@
 | Config management | ✅ | TOML-based, provider registry with model costs |
 | Session tracking | ✅ | UUID sessions, message history, tool call logging |
 | LSP client | ✅ | JSON-RPC client with rust-analyzer, pylsp, tsserver, gopls, clangd |
-| **Synthwave '84 TUI theme** | ✅ | Deep purple, neon-accented palette with ANSI true-color styling |
+| **Blackshield TUI theme** | ✅ | Blood, steel, bone, and void palette with ANSI true-color styling |
 | **Real routing logic** | ✅ | Multi-factor scoring: success rate (40%), capability match (35%), cost efficiency (25%) |
 | **Self-improvement analysis** | ✅ | Model performance trends, tool failure patterns, session quality metrics, recommendations |
 | **Refactor engine** | ✅ | LSP-based: extract_function, rename_symbol, inline_variable |
@@ -51,7 +51,7 @@ src/
 │   └── mod.rs           # Response cache with TTL and disk persistence
 ├── config/
 │   ├── mod.rs           # Config struct, load/save, defaults
-│   └── setup.rs         # `openshark setup` wizard
+│   └── setup.rs         # `openshield setup` wizard
 ├── lsp/
 │   └── mod.rs           # Lightweight LSP client
 ├── memory/
@@ -80,7 +80,7 @@ src/
 │   └── test_runner.rs   # Auto-detect test framework
 └── tui/
     ├── mod.rs           # Interactive session loop with agent mode, context injection
-    └── theme.rs         # Synthwave '84: ANSI true-color palette
+    └── theme.rs         # Blackshield: ANSI true-color palette
 ```
 
 ## Tools Reference
@@ -124,9 +124,9 @@ Type these directly in the TUI for instant answers from memory:
 - ✅ **Evolution Engine** — Self-adaptive behavior engine that tracks tool outcomes, model performance, and session quality to evolve routing and behavior.
 - ✅ **Matrix Gateway** — Full sync loop scaffold with `MatrixReplySender`, config validation, and unified router integration.
 - ✅ **Slack Gateway** — Socket Mode scaffold with `SlackReplySender`, ready event emission, and full Socket Mode structure.
-- ✅ **Swarm CLI** — `openshark swarm init/start/stop/status` commands for multi-agent orchestration from terminal.
+- ✅ **Swarm CLI** — `openshield swarm init/start/stop/status` commands for multi-agent orchestration from terminal.
 
-- **Headless Autonomous Mode** — `openshark headless --autonomous "task"`
+- **Headless Autonomous Mode** — `openshield headless --autonomous "task"`
   - Native `tool_calls` function calling (no regex parsing)
   - Auto-repo-context: loads repo map + relevant files into prompt
   - Auto-checkpoint: creates git stash before edits
@@ -163,7 +163,7 @@ Type these directly in the TUI for instant answers from memory:
 - [ ] **Session sidebar** — Show active model, token usage, session info in a persistent panel
 
 ### Priority 3: Stats & Observability
-- [ ] **Real stats command** — `openshark stats` currently a stub. Show token usage, cost tracking, session count, model performance
+- [ ] **Real stats command** — `openshield stats` currently a stub. Show token usage, cost tracking, session count, model performance
 - [ ] **Performance metrics** — Track first-token latency, tool execution time, cache hit rate
 - [ ] **Export session data** — JSON/CSV export for analysis
 
@@ -192,7 +192,7 @@ Type these directly in the TUI for instant answers from memory:
 ## Running
 
 ```bash
-cd /home/synth/projects/openshark
+cd /home/synth/projects/openshield
 cargo run -- headless --autonomous "implement feature X" --output results.txt
 cargo run -- headless --autonomous "fix the bug in src/main.rs" --model gpt-4
 cargo run -- headless --yolo "refactor auth module" --json
@@ -208,15 +208,15 @@ cargo run -- test run .           # Run tests (auto-detect framework)
 
 ## Config Location
 
-- Config: `~/.config/openshark/config.toml`
-- Memory: `~/.local/share/openshark/memory.db`
-- Cache: `~/.cache/openshark/response_cache.json`
+- Config: `~/.config/openshield/config.toml`
+- Memory: `~/.local/share/openshield/memory.db`
+- Cache: `~/.cache/openshield/response_cache.json`
 
 ## Test It
 
 ```bash
 # Chat with local model (streaming)
-openshark
+openshield
 > hello
 
 # Use tools directly
@@ -236,9 +236,9 @@ openshark
 > how did we solve the routing issue?
 
 # Check memory persisted
-openshark memory "hello"
-openshark memory "hello" --semantic
-openshark memory --recent 5
+openshield memory "hello"
+openshield memory "hello" --semantic
+openshield memory --recent 5
 ```
 
 ## The Vision Reminder

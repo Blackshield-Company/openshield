@@ -1,6 +1,6 @@
-//! OpenShark AI Harness Core
+//! OpenShield AI Harness Core
 //!
-//! The unified engine that drives OpenShark's agentic behavior.
+//! The unified engine that drives OpenShield's agentic behavior.
 //!
 //! See the `engine`, `event`, and `response` modules for the implementation.
 
@@ -10,4 +10,3 @@ pub mod response;
 
 pub use engine::{HarnessConfig, HarnessEngine};
 pub use event::HarnessEvent;
-

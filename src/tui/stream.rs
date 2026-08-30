@@ -356,7 +356,11 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             const MAX_TOOL_RESULT_CHARS: usize = 10_000;
             let capped_result = if result.chars().count() > MAX_TOOL_RESULT_CHARS {
                 let truncated: String = result.chars().take(MAX_TOOL_RESULT_CHARS).collect();
-                format!("{}…[truncated, {} chars total]", truncated, result.chars().count())
+                format!(
+                    "{}…[truncated, {} chars total]",
+                    truncated,
+                    result.chars().count()
+                )
             } else {
                 result.clone()
             };
@@ -379,7 +383,8 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 // Display with a warning — the background task may have missed these.
                 let display_content = strip_think_tags(&content);
                 app.add_system_message(
-                    "⚠️ Model output tools in final response. These were not re-executed.".to_string(),
+                    "⚠️ Model output tools in final response. These were not re-executed."
+                        .to_string(),
                 );
                 app.add_assistant_message(display_content, None, None);
                 return;
@@ -517,7 +522,11 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 app.add_system_message(msg);
             }
         }
-        StreamEvent::AssistantToolCall { content, reasoning, tool_calls } => {
+        StreamEvent::AssistantToolCall {
+            content,
+            reasoning,
+            tool_calls,
+        } => {
             // Add the assistant message with tool_calls to model_messages so that
             // subsequent tool result messages have a matching tool_call_id.
             std::sync::Arc::make_mut(&mut app.model_messages).push(Message {

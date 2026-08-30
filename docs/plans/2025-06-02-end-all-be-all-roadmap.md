@@ -1,8 +1,8 @@
-# OpenShark: End-All-Be-All Harness — Implementation Roadmap
+# OpenShield: End-All-Be-All Harness — Implementation Roadmap
 
 > **For Hermes:** Use subagent-driven-development skill to implement tasks task-by-task.
 
-**Goal:** Make OpenShark the definitive AI coding harness by closing every gap against competitors (Claude Code, Codex, OpenCode, Hermes, etc.)
+**Goal:** Make OpenShield the definitive AI coding harness by closing every gap against competitors (Claude Code, Codex, OpenCode, Hermes, etc.)
 
 **Architecture:** Incremental improvements to existing Rust TUI + backend. Each feature is isolated, testable, and committed independently.
 
@@ -157,7 +157,7 @@ git commit -m "feat(tui): multi-line input with Shift+Enter"
 **Objective:** The `edit` tool saves a backup before applying changes. `/undo` command restores last backup.
 
 **Files:**
-- Modify: `src/tools/edit.rs` — save `.openshark_backup` before editing
+- Modify: `src/tools/edit.rs` — save `.openshield_backup` before editing
 - Modify: `src/tui/commands.rs` — add `/undo` command handler
 - Modify: `src/tui/app.rs` — add `last_backup: Option<(PathBuf, PathBuf)>`
 
@@ -165,7 +165,7 @@ git commit -m "feat(tui): multi-line input with Shift+Enter"
 
 ```rust
 // In src/tools/edit.rs, before applying patch:
-let backup_path = path.with_extension("openshark_backup");
+let backup_path = path.with_extension("openshield_backup");
 fs::copy(&path, &backup_path)?;
 // Store backup info for undo
 app.last_backup = Some((path.clone(), backup_path));
@@ -329,7 +329,7 @@ git commit -m "feat(session): export and import sessions"
 
 ### Task 2.5: Custom Keybindings
 
-**Objective:** Keybindings configurable in `~/.config/openshark/keybindings.toml`.
+**Objective:** Keybindings configurable in `~/.config/openshield/keybindings.toml`.
 
 **Files:**
 - Create: `src/config/keybindings.rs`
@@ -373,7 +373,7 @@ git commit -m "feat(session): export and import sessions"
 
 ### Task 4.1: Plugin/WASM System
 
-**Objective:** Load `.wasm` plugins from `~/.config/openshark/plugins/`. Plugins register new tools.
+**Objective:** Load `.wasm` plugins from `~/.config/openshield/plugins/`. Plugins register new tools.
 
 **Files:**
 - Create: `src/plugins/mod.rs`

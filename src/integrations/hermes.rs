@@ -52,7 +52,7 @@ pub fn detect() -> bool {
         .unwrap_or(false)
 }
 
-/// Pull memories from Hermes into OpenShark.
+/// Pull memories from Hermes into OpenShield.
 pub fn sync_pull(hermes_home: &str) -> anyhow::Result<String> {
     let expanded = shellexpand::tilde(hermes_home);
     let memory_src = std::path::Path::new(expanded.as_ref()).join("memory");
@@ -68,7 +68,7 @@ pub fn sync_pull(hermes_home: &str) -> anyhow::Result<String> {
     anyhow::bail!("Not yet implemented — Hermes sync is a planned feature")
 }
 
-/// Push OpenShark skills to Hermes.
+/// Push OpenShield skills to Hermes.
 pub fn sync_push(hermes_home: &str) -> anyhow::Result<String> {
     let expanded = shellexpand::tilde(hermes_home);
     let skills_dst = std::path::Path::new(expanded.as_ref()).join("skills");

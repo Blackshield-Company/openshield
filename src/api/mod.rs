@@ -1,6 +1,6 @@
 //! HTTP + WebSocket API for external tool integration.
 //!
-//! Exposes OpenShark's agent, tools, and diagnostics over a REST + WS API
+//! Exposes OpenShield's agent, tools, and diagnostics over a REST + WS API
 //! behind the `web-api` feature flag.
 //!
 //! ## HTTP Endpoints
@@ -177,7 +177,7 @@ pub fn build_router(state: AppState) -> Router {
 pub async fn serve(state: AppState, addr: &str) -> anyhow::Result<()> {
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!("OpenShark API server listening on {}", addr);
+    tracing::info!("OpenShield API server listening on {}", addr);
     axum::serve(listener, app).await?;
     Ok(())
 }

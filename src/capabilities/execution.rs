@@ -57,11 +57,18 @@ impl Tool for CodeExecutionTool {
                 lines.remove(0);
             }
             // Remove last line if it's a code fence
-            if !lines.is_empty() && (lines[lines.len() - 1].trim() == "```" || lines[lines.len() - 1].trim() == "~~~") {
+            if !lines.is_empty()
+                && (lines[lines.len() - 1].trim() == "```"
+                    || lines[lines.len() - 1].trim() == "~~~")
+            {
                 lines.pop();
             }
             lines.join("\n")
-        } else if code.starts_with("python ") || code.starts_with("Python ") || code.starts_with("python\n") || code.starts_with("Python\n") {
+        } else if code.starts_with("python ")
+            || code.starts_with("Python ")
+            || code.starts_with("python\n")
+            || code.starts_with("Python\n")
+        {
             // Strip a leading "python"/"Python" language identifier.
             // Word-boundary guard: never mangle code that merely starts with a
             // variable like `python_version`. Also: strip ONCE — chaining
@@ -82,7 +89,7 @@ impl Tool for CodeExecutionTool {
 
         // Write code to temp file and execute
         let tmp_dir = std::env::temp_dir();
-        let tmp_file = tmp_dir.join(format!("openshark_exec_{}.py", uuid::Uuid::new_v4()));
+        let tmp_file = tmp_dir.join(format!("openshield_exec_{}.py", uuid::Uuid::new_v4()));
 
         std::fs::write(&tmp_file, &code)
             .with_context(|| format!("Failed to write temp file: {:?}", tmp_file))?;
