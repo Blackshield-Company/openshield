@@ -34,6 +34,11 @@ github-native = []
 web-api = ["axum", "tokio-util"]
 
 [dependencies]
+# Allocator — glibc malloc retains freed heap in per-thread arenas, which
+# ratchets VmSize upward in long sessions (observed: 18GB VM after a long
+# autonomous run, mostly swapped, triggering the OOM killer). mimalloc
+# returns memory to the OS aggressively.
+mimalloc = "0.1"
 # Async runtime
 tokio = { version = "1.44", features = ["full"] }
 

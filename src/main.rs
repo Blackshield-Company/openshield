@@ -1,3 +1,9 @@
+// mimalloc: glibc malloc never returns freed arena memory to the OS, so
+// long TUI sessions (large per-turn history clones) ratchet virtual memory
+// until the OOM killer picks us. mimalloc releases aggressively.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::path::PathBuf;
 #[cfg(feature = "web-api")]
 use std::sync::Arc;
