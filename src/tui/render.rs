@@ -7,14 +7,14 @@
 /// - One Clear(ClearType::All) at the start of each normal frame.
 /// - No per-line Clear(UntilNewLine) — that causes visible flicker at 60fps.
 /// - All drawing is queued, then flushed exactly once at the end.
-use std::io::{self, stdout, Write};
+use std::io::{self, Write, stdout};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
+    queue,
     style::{Print, ResetColor, SetForegroundColor},
     terminal::{Clear, ClearType, size},
-    queue,
 };
 
 use crossterm::style::Color;
@@ -135,19 +135,33 @@ fn draw_top_status_bar(
     width: u16,
     _height: u16,
 ) -> io::Result<()> {
-    let gold = Color::Rgb { r: 255, g: 215, b: 0 };
-    let cyan = Color::Rgb { r: 0, g: 255, b: 255 };
-    let green = Color::Rgb { r: 80, g: 255, b: 120 };
-    let muted = Color::Rgb { r: 140, g: 120, b: 160 };
+    let gold = Color::Rgb {
+        r: 201,
+        g: 162,
+        b: 39,
+    };
+    let cyan = Color::Rgb {
+        r: 123,
+        g: 157,
+        b: 196,
+    };
+    let green = Color::Rgb {
+        r: 106,
+        g: 153,
+        b: 78,
+    };
+    let muted = Color::Rgb {
+        r: 138,
+        g: 143,
+        b: 152,
+    };
 
     let model_short = app.model.split('/').next_back().unwrap_or(&app.model);
     let model_part = format!("{}{}{}", ansi_fg(cyan), model_short, ansi_reset());
 
     let ctx_used = app.context_used();
     let ctx_total = app.model_context_length;
-    let ctx_pct = (ctx_used * 100)
-        .checked_div(ctx_total)
-        .unwrap_or(0) as u16;
+    let ctx_pct = (ctx_used * 100).checked_div(ctx_total).unwrap_or(0) as u16;
     let ctx_part = format!(
         "{}ctx {}%{} ({}/{})",
         ansi_fg(muted),
@@ -185,7 +199,7 @@ fn draw_top_status_bar(
     };
 
     let left = format!("{} {} | {}", model_part, ctx_part, progress);
-    let right = format!("{} | 🦈 v{}", status, env!("CARGO_PKG_VERSION"));
+    let right = format!("{} | 🛡 v{}", status, env!("CARGO_PKG_VERSION"));
 
     let left_width = visible_width(&left);
     let right_width = visible_width(&right);
@@ -321,7 +335,12 @@ fn draw_command_palette_overlay(
     } else {
         text_color(&app.command_palette.filter)
     };
-    queue!(out, MoveTo(popup_x + 2, filter_y), Print(&filter_text), ResetColor)?;
+    queue!(
+        out,
+        MoveTo(popup_x + 2, filter_y),
+        Print(&filter_text),
+        ResetColor
+    )?;
 
     // Commands list
     let filtered = app.command_palette.filtered();
@@ -418,7 +437,12 @@ fn draw_bookmark_overlay(
         } else {
             text_color(&app.bookmark_manager.filter)
         };
-        queue!(out, MoveTo(popup_x + 2, filter_y), Print(&filter_text), ResetColor)?;
+        queue!(
+            out,
+            MoveTo(popup_x + 2, filter_y),
+            Print(&filter_text),
+            ResetColor
+        )?;
 
         // Bookmark list
         let filtered = app.bookmark_manager.filtered();

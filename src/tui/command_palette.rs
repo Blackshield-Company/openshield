@@ -122,7 +122,7 @@ impl CommandPalette {
             },
             CommandEntry {
                 name: "/quit".to_string(),
-                description: "Quit OpenShark".to_string(),
+                description: "Quit OpenShield".to_string(),
                 shortcut: Some("Ctrl+Q".to_string()),
             },
         ];

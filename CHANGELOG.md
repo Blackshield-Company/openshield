@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Swarm Mode** — Multi-agent orchestration with 8 built-in roles (Architect, Implementer, Reviewer, Tester, DevOps, Security, Documentation, PM). Consensus memory, autonomous event-driven loops, real LLM integration per agent with isolated context. `openshark swarm init/start/stop/status` CLI commands.
+- **Swarm Mode** — Multi-agent orchestration with 8 built-in roles (Architect, Implementer, Reviewer, Tester, DevOps, Security, Documentation, PM). Consensus memory, autonomous event-driven loops, real LLM integration per agent with isolated context. `openshield swarm init/start/stop/status` CLI commands.
 - **Swarm Real-Time Streaming** — Per-agent chunk streaming with role-colored headers in the TUI. Agent internal monologue visible in real-time, filtered for persona-preamble noise. Broadcast channel architecture for live TUI updates.
 - **Swarm Persona Filter** — Strips "I am the X agent" self-convincing preamble from agent responses. 500+ pattern coverage across all roles, applied per-chunk and to final results.
 - **Swarm Inspector Sidebar** — Fourth sidebar tab (Ctrl+S) showing all active agents with status, content preview, and expandable tool results. Enter to toggle expansion. 📄 icon when code detected.
@@ -42,14 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Matrix Gateway** — Full sync loop scaffold with `MatrixReplySender`, homeserver validation, and unified router integration.
 - **Slack Gateway** — Socket Mode scaffold with `SlackReplySender`, ready event emission, and full Socket Mode connection structure.
 - **Swarm CLI** — Terminal commands for multi-agent orchestration: `init`, `start`, `stop`, `status`.
-- **`openshark tools` CLI** — `openshark tools list` shows all native and capability tools with descriptions.
+- **`openshield tools` CLI** — `openshield tools list` shows all native and capability tools with descriptions.
 
 ### Changed
 
 - **Version bump** — 0.4.0 → 1.0.0 (production-ready release).
 - **Test count** — 246 → 337 comprehensive tests across all modules.
 - **Token estimation** — Switched from word-count to char/4 heuristic for more accurate context usage tracking.
-- **Swarm config gate removed** — `openshark swarm init` no longer requires `enabled = true` in config. Swarm is always available.
+- **Swarm config gate removed** — `openshield swarm init` no longer requires `enabled = true` in config. Swarm is always available.
 
 ### Fixed
 
@@ -86,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Autonomous mode toggle** — `Ctrl+A` switches between safe and full-send security modes.
 - **Personalized chat names** — Configurable `user_name` and `agent.display_name` in TUI.
 - **Natural language control words** — Pre-filter stop/wait/continue/cancel/go before hitting the model API.
-- **24 preset themes** — Synthwave84 default, Omarchy stock, light/dark variants. `Ctrl+T` cycling.
+- **3 TUI themes** — Blackshield default, Steel Blue, and High Contrast. `Ctrl+T` cycling.
 - **Native MCP client** — stdio + SSE transport, JSON-RPC 2.0, tool discovery/execution.
 - **Multi-platform gateway** — Discord ✅, Telegram ✅, Slack 🟡, Matrix 🟡.
 - **Optional multi-model mode** — Off by default, toggleable at runtime via `/multi` or `!multi`.

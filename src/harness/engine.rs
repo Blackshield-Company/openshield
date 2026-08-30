@@ -1,6 +1,6 @@
-//! OpenShark AI Harness — Core Engine
+//! OpenShield AI Harness — Core Engine
 //!
-//! The `HarnessEngine` is the central orchestrator for OpenShark's AI interactions.
+//! The `HarnessEngine` is the central orchestrator for OpenShield's AI interactions.
 //! It manages conversation state, tool calling loops, memory injection, skill triggering,
 //! multi-model queries, and security gating.
 //!
@@ -23,7 +23,8 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::memory::{MemoryStore, Message as MemoryMessage, ToolCall as MemoryToolCall};
 use crate::providers::{
-    AccumulatedToolCall, ChatRequest, Message, Provider, StreamChunk, StreamMetrics, ToolCallRequest,
+    AccumulatedToolCall, ChatRequest, Message, Provider, StreamChunk, StreamMetrics,
+    ToolCallRequest,
 };
 use crate::security::{SecurityDecision, SecurityEngine};
 use crate::skills::{SkillRegistry, format_skills_prompt};
@@ -69,18 +70,19 @@ impl Default for HarnessConfig {
 impl HarnessEngine {
     /// Build a static system prompt used for tests and headless mode.
     ///
-    /// The harness is OpenShark; the soul is the generic OpenShark agent
+    /// The harness is OpenShield; the soul is the generic OpenShield agent
     /// (from AgentIdentity::default). Custom identities live only in the
     /// user's local config.toml, never in the shipped binary.
     #[allow(dead_code)]
     pub fn build_system_prompt_static() -> String {
-        let soul = crate::agent::soul::AgentSoul::from_config(
-            crate::config::AgentIdentity::default(),
-        );
-        let mut prompt = String::from("You are OpenShark, an autonomous AI coding agent.\n\n");
+        let soul =
+            crate::agent::soul::AgentSoul::from_config(crate::config::AgentIdentity::default());
+        let mut prompt = String::from("You are OpenShield, an autonomous AI coding agent.\n\n");
         prompt.push_str(&soul.system_prompt());
         prompt.push_str("\n## AVAILABLE TOOLS\n");
-        prompt.push_str("You have access to tools. When you need to use a tool, respond with a tool call. ");
+        prompt.push_str(
+            "You have access to tools. When you need to use a tool, respond with a tool call. ",
+        );
         prompt.push_str("The system will execute the tool and return the result to you.\n");
         prompt.push_str("## MEMORY\n");
         prompt.push_str("You have access to persistent memory across sessions.\n");
@@ -126,9 +128,8 @@ impl HarnessEngine {
             provider_config.headers.clone(),
         );
 
-        let security_engine = SecurityEngine::new(
-            crate::security::SecurityConfig::load().unwrap_or_default(),
-        )?;
+        let security_engine =
+            SecurityEngine::new(crate::security::SecurityConfig::load().unwrap_or_default())?;
 
         Self::new_with_security(harness_config, app_config, memory, security_engine)
     }
@@ -178,7 +179,7 @@ impl HarnessEngine {
         // Load skill registry
         let skills_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshark")
+            .join("openshield")
             .join("skills");
         let skill_registry = SkillRegistry::new(skills_dir).ok();
 
@@ -227,7 +228,8 @@ impl HarnessEngine {
         // Ensure the session exists in this memory store.
         let _ = memory.create_session(&session_id, &harness_config.primary_model, "harness");
 
-        let mut engine = Self::new_with_security(harness_config, app_config, memory, security_engine)?;
+        let mut engine =
+            Self::new_with_security(harness_config, app_config, memory, security_engine)?;
         engine.session_id = session_id.clone();
         engine.state = HarnessState::new(session_id);
         engine.state.messages = initial_messages;
@@ -235,10 +237,7 @@ impl HarnessEngine {
     }
     /// Run a single turn of the harness loop.
     /// This handles: memory injection → skill triggering → model call → tool execution → response.
-    pub async fn run_turn(
-        &mut self,
-        user_message: &str,
-    ) -> Result<HarnessResponse> {
+    pub async fn run_turn(&mut self, user_message: &str) -> Result<HarnessResponse> {
         self.state.turn_count += 1;
 
         // Build the conversation messages
@@ -319,7 +318,10 @@ impl HarnessEngine {
                 };
 
                 let follow_up = self.primary_provider.chat(follow_up_request).await?;
-                let choice = follow_up.choices.first().context("No response from model")?;
+                let choice = follow_up
+                    .choices
+                    .first()
+                    .context("No response from model")?;
 
                 current_content = choice.message.content.clone();
                 current_reasoning = choice.message.reasoning_content.clone();
@@ -335,7 +337,9 @@ impl HarnessEngine {
                 });
 
                 // If no more tool calls, we're done
-                if choice.message.tool_calls.is_none() || choice.message.tool_calls.as_ref().unwrap().is_empty() {
+                if choice.message.tool_calls.is_none()
+                    || choice.message.tool_calls.as_ref().unwrap().is_empty()
+                {
                     break;
                 }
 
@@ -418,7 +422,8 @@ impl HarnessEngine {
             tools: Some(tools.clone()),
         };
 
-        let (mut rx, mut primary_metrics) = self.primary_provider.chat_stream_realtime(request).await?;
+        let (mut rx, mut primary_metrics) =
+            self.primary_provider.chat_stream_realtime(request).await?;
         let mut primary_content = String::new();
         let mut primary_reasoning = String::new();
         let mut primary_tool_calls: Vec<ToolCallRequest> = Vec::new();
@@ -438,7 +443,11 @@ impl HarnessEngine {
                     primary_content.push_str(&c);
                     let _ = tx.send(HarnessEvent::Chunk(c));
                 }
-                StreamChunk::ToolCall { id, name, arguments } => {
+                StreamChunk::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => {
                     let tool_call_id = id.clone();
                     let tool_call_name = name.clone();
                     let tool_call_args = arguments.clone();
@@ -452,7 +461,11 @@ impl HarnessEngine {
                             },
                         });
                     }
-                    accumulated_tool_call = Some(AccumulatedToolCall { id, name, arguments });
+                    accumulated_tool_call = Some(AccumulatedToolCall {
+                        id,
+                        name,
+                        arguments,
+                    });
                     let _ = tx.send(HarnessEvent::ToolCall {
                         id: tool_call_id,
                         name: tool_call_name,
@@ -488,7 +501,11 @@ impl HarnessEngine {
             model_name: self.config.primary_model.clone(),
             provider_name: "primary".to_string(),
             content: primary_content.clone(),
-            reasoning: if primary_reasoning.is_empty() { None } else { Some(primary_reasoning.clone()) },
+            reasoning: if primary_reasoning.is_empty() {
+                None
+            } else {
+                Some(primary_reasoning.clone())
+            },
             tool_calls: primary_tool_calls.clone(),
             metrics: primary_metrics.clone(),
             finish_reason: primary_finish_reason.clone(),
@@ -570,7 +587,10 @@ impl HarnessEngine {
                         tools: Some(tools.clone()),
                     };
 
-                    let (mut follow_rx, _follow_metrics) = self.primary_provider.chat_stream_realtime(follow_up_request).await?;
+                    let (mut follow_rx, _follow_metrics) = self
+                        .primary_provider
+                        .chat_stream_realtime(follow_up_request)
+                        .await?;
                     let mut follow_content = String::new();
                     let mut follow_reasoning = String::new();
                     let mut follow_tool_calls: Vec<ToolCallRequest> = Vec::new();
@@ -587,7 +607,11 @@ impl HarnessEngine {
                                 follow_content.push_str(&c);
                                 let _ = tx.send(HarnessEvent::Chunk(c));
                             }
-                            StreamChunk::ToolCall { id, name, arguments } => {
+                            StreamChunk::ToolCall {
+                                id,
+                                name,
+                                arguments,
+                            } => {
                                 if let Some(prev) = follow_acc.take() {
                                     follow_tool_calls.push(ToolCallRequest {
                                         id: prev.id,
@@ -598,7 +622,11 @@ impl HarnessEngine {
                                         },
                                     });
                                 }
-                                follow_acc = Some(AccumulatedToolCall { id, name, arguments });
+                                follow_acc = Some(AccumulatedToolCall {
+                                    id,
+                                    name,
+                                    arguments,
+                                });
                             }
                             StreamChunk::Finish(fr) => {
                                 _follow_finish = Some(fr.clone());
@@ -646,7 +674,11 @@ impl HarnessEngine {
                 };
 
                 final_content = follow_content.clone();
-                let final_reasoning = if follow_reasoning.is_empty() { None } else { Some(follow_reasoning.clone()) };
+                let final_reasoning = if follow_reasoning.is_empty() {
+                    None
+                } else {
+                    Some(follow_reasoning.clone())
+                };
 
                 // Skip pushing an empty assistant message with no tool calls —
                 // empty-string content in history can make providers 400 the next turn.
@@ -656,7 +688,11 @@ impl HarnessEngine {
                         content: follow_content.clone(),
                         images: None,
                         tool_call_id: None,
-                        tool_calls: if follow_tool_calls.is_empty() { None } else { Some(follow_tool_calls.clone()) },
+                        tool_calls: if follow_tool_calls.is_empty() {
+                            None
+                        } else {
+                            Some(follow_tool_calls.clone())
+                        },
                         reasoning_content: final_reasoning.clone(),
                     });
                 }
@@ -693,8 +729,11 @@ impl HarnessEngine {
 
         // Query secondary models if enabled
         let secondary = if self.config.multi_model_enabled {
-            let _ = tx.send(HarnessEvent::SystemMessage("Querying secondary models...".to_string()));
-            self.query_secondary_models_streaming(user_message, &tx).await?
+            let _ = tx.send(HarnessEvent::SystemMessage(
+                "Querying secondary models...".to_string(),
+            ));
+            self.query_secondary_models_streaming(user_message, &tx)
+                .await?
         } else {
             Vec::new()
         };
@@ -720,10 +759,7 @@ impl HarnessEngine {
 
     /// Build the conversation messages for this turn, including system prompt,
     /// memory context, and skills.
-    fn build_conversation_messages(
-        &self,
-        user_message: &str,
-    ) -> Result<Vec<Message>> {
+    fn build_conversation_messages(&self, user_message: &str) -> Result<Vec<Message>> {
         let mut messages = Vec::new();
 
         // 1. System prompt with soul + skills
@@ -779,16 +815,15 @@ impl HarnessEngine {
     }
 
     /// Build the system prompt including agent soul and triggered skills.
-    fn build_system_prompt(
-        &self,
-        user_message: &str,
-    ) -> Result<String> {
+    fn build_system_prompt(&self, user_message: &str) -> Result<String> {
         let soul = crate::agent::soul::load_soul_from_config(&self.app_config);
         let mut prompt = soul.system_prompt();
 
         // Add tool instructions
         prompt.push_str("\n\n## AVAILABLE TOOLS\n");
-        prompt.push_str("You have access to tools. When you need to use a tool, respond with a tool call. ");
+        prompt.push_str(
+            "You have access to tools. When you need to use a tool, respond with a tool call. ",
+        );
         prompt.push_str("The system will execute the tool and return the result to you. ");
         prompt.push_str("You can then use that result to formulate your final response.\n");
 
@@ -812,16 +847,16 @@ impl HarnessEngine {
     }
 
     /// Get relevant past messages from memory for context injection.
-    fn get_relevant_memory(
-        &self,
-        query: &str,
-    ) -> Result<Vec<MemoryMessage>> {
+    fn get_relevant_memory(&self, query: &str) -> Result<Vec<MemoryMessage>> {
         let limit = self.config.memory_context_limit;
 
         // Try semantic search first
         let semantic_results = self.memory.semantic_search(query, limit)?;
         if !semantic_results.is_empty() {
-            return Ok(semantic_results.into_iter().map(|(msg, _score)| msg).collect());
+            return Ok(semantic_results
+                .into_iter()
+                .map(|(msg, _score)| msg)
+                .collect());
         }
 
         // Fall back to keyword search
@@ -830,19 +865,23 @@ impl HarnessEngine {
     }
 
     /// Query the primary model and parse the response.
-    async fn query_primary(
-        &self,
-        request: ChatRequest,
-    ) -> Result<ModelResponse> {
+    async fn query_primary(&self, request: ChatRequest) -> Result<ModelResponse> {
         let start = Instant::now();
 
         let response = self.primary_provider.chat(request).await?;
-        let choice = response.choices.first().context("No response from primary model")?;
+        let choice = response
+            .choices
+            .first()
+            .context("No response from primary model")?;
 
         let metrics = StreamMetrics {
             first_token_latency_ms: start.elapsed().as_millis() as u64,
             total_latency_ms: start.elapsed().as_millis() as u64,
-            tokens_generated: response.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0),
+            tokens_generated: response
+                .usage
+                .as_ref()
+                .map(|u| u.completion_tokens)
+                .unwrap_or(0),
             cached: false,
         };
 
@@ -864,10 +903,7 @@ impl HarnessEngine {
     }
 
     /// Query secondary models in parallel for multi-model comparison.
-    async fn query_secondary_models(
-        &self,
-        user_message: &str,
-    ) -> Result<Vec<ModelResponse>> {
+    async fn query_secondary_models(&self, user_message: &str) -> Result<Vec<ModelResponse>> {
         let mut tasks = Vec::new();
 
         for (model_name, provider) in &self.secondary_providers {
@@ -876,11 +912,8 @@ impl HarnessEngine {
             let prov = provider.clone();
 
             let task = tokio::spawn(async move {
-                let request = ChatRequest::new(
-                    model.clone(),
-                    vec![Message::text("user", msg)],
-                    false,
-                );
+                let request =
+                    ChatRequest::new(model.clone(), vec![Message::text("user", msg)], false);
 
                 let start = Instant::now();
                 match prov.chat(request).await {
@@ -895,7 +928,11 @@ impl HarnessEngine {
                             metrics: StreamMetrics {
                                 first_token_latency_ms: start.elapsed().as_millis() as u64,
                                 total_latency_ms: start.elapsed().as_millis() as u64,
-                                tokens_generated: response.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0),
+                                tokens_generated: response
+                                    .usage
+                                    .as_ref()
+                                    .map(|u| u.completion_tokens)
+                                    .unwrap_or(0),
                                 cached: false,
                             },
                             finish_reason: choice.finish_reason.clone(),
@@ -933,11 +970,8 @@ impl HarnessEngine {
             let tx = tx.clone();
 
             let task = tokio::spawn(async move {
-                let request = ChatRequest::new(
-                    model.clone(),
-                    vec![Message::text("user", msg)],
-                    false,
-                );
+                let request =
+                    ChatRequest::new(model.clone(), vec![Message::text("user", msg)], false);
 
                 let start = Instant::now();
                 match prov.chat(request).await {
@@ -946,7 +980,11 @@ impl HarnessEngine {
                         let metrics = StreamMetrics {
                             first_token_latency_ms: start.elapsed().as_millis() as u64,
                             total_latency_ms: start.elapsed().as_millis() as u64,
-                            tokens_generated: response.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0),
+                            tokens_generated: response
+                                .usage
+                                .as_ref()
+                                .map(|u| u.completion_tokens)
+                                .unwrap_or(0),
                             cached: false,
                         };
                         let resp = ModelResponse {
@@ -978,10 +1016,7 @@ impl HarnessEngine {
     }
 
     /// Execute a single tool call with security gating.
-    async fn execute_tool_call(
-        &self,
-        tool_call: &ToolCallRequest,
-    ) -> Result<ToolExecutionResult> {
+    async fn execute_tool_call(&self, tool_call: &ToolCallRequest) -> Result<ToolExecutionResult> {
         let start = Instant::now();
         let tool_name = &tool_call.function.name;
         let args = &tool_call.function.arguments;
@@ -1027,13 +1062,12 @@ impl HarnessEngine {
         let normalized_args = normalize_tool_args(tool_name, args);
         let tool_timeout_secs = self.app_config.autonomy.tool_timeout_secs;
         let tool_name_owned = tool_name.clone();
-        let exec_handle = tokio::task::spawn_blocking(move || {
-            execute_tool(&tool_name_owned, &normalized_args)
-        });
+        let exec_handle =
+            tokio::task::spawn_blocking(move || execute_tool(&tool_name_owned, &normalized_args));
         let exec_result = if tool_timeout_secs == 0 {
-            exec_handle.await.unwrap_or_else(|e| {
-                Some(Err(anyhow::anyhow!("Tool task panicked: {}", e)))
-            })
+            exec_handle
+                .await
+                .unwrap_or_else(|e| Some(Err(anyhow::anyhow!("Tool task panicked: {}", e))))
         } else {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(tool_timeout_secs),
@@ -1041,9 +1075,8 @@ impl HarnessEngine {
             )
             .await
             {
-                Ok(join_result) => join_result.unwrap_or_else(|e| {
-                    Some(Err(anyhow::anyhow!("Tool task panicked: {}", e)))
-                }),
+                Ok(join_result) => join_result
+                    .unwrap_or_else(|e| Some(Err(anyhow::anyhow!("Tool task panicked: {}", e)))),
                 Err(_) => Some(Err(anyhow::anyhow!(
                     "Tool '{}' timed out after {}s",
                     tool_name,
@@ -1066,7 +1099,11 @@ impl HarnessEngine {
                     } else {
                         crate::security::RiskLevel::Medium
                     },
-                    if ok { "approved" } else { "tool-reported-failure" },
+                    if ok {
+                        "approved"
+                    } else {
+                        "tool-reported-failure"
+                    },
                 );
                 ToolExecutionResult {
                     tool_call_id: tool_call.id.clone(),

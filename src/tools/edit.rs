@@ -19,7 +19,7 @@ fn get_backup_store() -> Arc<Mutex<Option<BackupPair>>> {
 
 /// Perform a backup before editing and store it for potential undo.
 fn backup_before_edit(path: &Path) -> Result<PathBuf> {
-    let backup_path = path.with_extension("openshark_backup");
+    let backup_path = path.with_extension("openshield_backup");
     fs::copy(path, &backup_path)
         .with_context(|| format!("Failed to create backup of {}", path.display()))?;
     *get_backup_store().lock().unwrap() = Some((path.to_path_buf(), backup_path.clone()));
@@ -427,7 +427,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_edit_test_{}_{}", std::process::id(), count);
+        let dir = format!("/tmp/openshield_edit_test_{}_{}", std::process::id(), count);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

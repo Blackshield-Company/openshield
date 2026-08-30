@@ -1107,11 +1107,9 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
         }
         // Communication capabilities
         "messaging" => {
-            if let (Some(platform), Some(channel), Some(message)) = (
-                get_str("platform"),
-                get_str("channel"),
-                get_str("message"),
-            ) {
+            if let (Some(platform), Some(channel), Some(message)) =
+                (get_str("platform"), get_str("channel"), get_str("message"))
+            {
                 Some(format!("{} {} {}", platform, channel, message))
             } else {
                 None
@@ -1141,9 +1139,7 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
             let query = get_str("query").or_else(|| get_str("track"));
             match action.as_str() {
                 // No dedicated search subcommand — --play takes a free-text query.
-                "play" | "search" | "next" | "previous" => {
-                    query.map(|q| format!("--play {}", q))
-                }
+                "play" | "search" | "next" | "previous" => query.map(|q| format!("--play {}", q)),
                 "pause" => Some("--pause".to_string()),
                 "resume" => Some("--resume".to_string()),
                 "queue" => query.map(|q| format!("--queue {}", q)),
@@ -1315,14 +1311,14 @@ mod normalize_tests {
         assert!(tool_output_indicates_failure(
             "String not found in /tmp/x. Use 'edit read' to see exact content."
         ));
-        assert!(tool_output_indicates_failure(
-            "Tool 'terminal' timed out after 120s"
-        ) == false); // doesn't start with a known prefix — acceptable
+        assert!(tool_output_indicates_failure("Tool 'terminal' timed out after 120s") == false); // doesn't start with a known prefix — acceptable
     }
 
     #[test]
     fn failure_heuristic_passes_real_output() {
-        assert!(!tool_output_indicates_failure("Written 57 bytes to /tmp/demo.txt"));
+        assert!(!tool_output_indicates_failure(
+            "Written 57 bytes to /tmp/demo.txt"
+        ));
         assert!(!tool_output_indicates_failure("Replaced in /tmp/demo.txt"));
         assert!(!tool_output_indicates_failure("   1| fn main() {}"));
     }
@@ -1333,11 +1329,8 @@ mod normalize_tests {
 
     #[test]
     fn web_query_does_not_leak_json() {
-        let args = r#"{"query":"openshark protocol"}"#;
-        assert_eq!(
-            normalize_tool_args("web", args),
-            "openshark protocol"
-        );
+        let args = r#"{"query":"openshield protocol"}"#;
+        assert_eq!(normalize_tool_args("web", args), "openshield protocol");
     }
 
     #[test]
@@ -1436,7 +1429,10 @@ mod normalize_tests {
     #[test]
     fn homeassistant_toggle_and_default_list() {
         assert_eq!(
-            normalize_tool_args("homeassistant", r#"{"action":"toggle","entity":"light.living_room"}"#),
+            normalize_tool_args(
+                "homeassistant",
+                r#"{"action":"toggle","entity":"light.living_room"}"#
+            ),
             "--toggle light.living_room"
         );
         assert_eq!(
@@ -1459,10 +1455,7 @@ mod normalize_tests {
     #[test]
     fn android_split_fields() {
         let args = r#"{"category":"files","operation":"list","args":"/sdcard"}"#;
-        assert_eq!(
-            normalize_tool_args("android", args),
-            "files list /sdcard"
-        );
+        assert_eq!(normalize_tool_args("android", args), "files list /sdcard");
     }
 
     #[test]

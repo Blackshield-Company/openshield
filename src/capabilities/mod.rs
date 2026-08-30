@@ -1,4 +1,4 @@
-//! OpenShark Capability Suite — All tools implemented natively in Rust.
+//! OpenShield Capability Suite — All tools implemented natively in Rust.
 //!
 //! No external CLI dependencies. Every tool is a native struct implementing
 //! the `Tool` trait. Expensive resources (HTTP clients, DB connections) are

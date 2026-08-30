@@ -37,7 +37,10 @@ fn default_max_turns() -> usize {
 /// Build chat messages with the agent's identity (soul) as the system
 /// prompt. Without this the model falls back to its training identity
 /// (e.g. "I'm Kimi") instead of the configured agent.
-fn chat_messages(config: &crate::config::Config, message: String) -> Vec<crate::providers::Message> {
+fn chat_messages(
+    config: &crate::config::Config,
+    message: String,
+) -> Vec<crate::providers::Message> {
     let soul = crate::agent::soul::AgentSoul::from_config(config.agent.clone());
     let msg = |role: &str, content: String| crate::providers::Message {
         role: role.to_string(),
@@ -163,8 +166,7 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                     }
                 };
                 let model = model.unwrap_or_else(|| config.default_model.clone());
-                let session_id =
-                    session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
                 // Persistent session: ensure the row exists, replay recent
                 // history for continuity, and record the exchange after.
@@ -348,7 +350,7 @@ async fn handle_agent_ws(mut socket: WebSocket, state: AppState) {
 
                 let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
                 let security = match crate::security::SecurityEngine::new(
-                    crate::security::SecurityConfig::load().unwrap_or_default()
+                    crate::security::SecurityConfig::load().unwrap_or_default(),
                 ) {
                     Ok(s) => s,
                     Err(e) => {

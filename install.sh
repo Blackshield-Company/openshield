@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# OpenShark Installer
-# Usage: curl -sSL https://raw.githubusercontent.com/synthalorian/openshark/main/install.sh | bash
+# OpenShield Installer
+# Usage: curl -sSL https://raw.githubusercontent.com/synthalorian/openshield/main/install.sh | bash
 
-REPO="https://github.com/synthalorian/openshark.git"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/openshark}"
+REPO="https://github.com/synthalorian/openshield.git"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/openshield}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
-echo "🦈 OpenShark Installer"
+echo "🛡 OpenShield Installer"
 echo "======================"
 
 # Check for Rust
@@ -24,7 +24,7 @@ check_rust() {
 # Clone or update repo
 setup_repo() {
     if [ -d "$INSTALL_DIR/.git" ]; then
-        echo "🔄 Updating existing OpenShark..."
+        echo "🔄 Updating existing OpenShield..."
         cd "$INSTALL_DIR"
         git pull
     elif [ -d "$INSTALL_DIR" ]; then
@@ -39,7 +39,7 @@ setup_repo() {
             cd "$INSTALL_DIR"
         fi
     else
-        echo "📥 Cloning OpenShark..."
+        echo "📥 Cloning OpenShield..."
         mkdir -p "$(dirname "$INSTALL_DIR")"
         git clone "$REPO" "$INSTALL_DIR"
         cd "$INSTALL_DIR"
@@ -48,16 +48,16 @@ setup_repo() {
 
 # Build release binary
 build() {
-    echo "🔨 Building OpenShark (release)..."
+    echo "🔨 Building OpenShield (release)..."
     cargo build --release
 }
 
 # Install binary
 install_binary() {
     mkdir -p "$BIN_DIR"
-    cp "$INSTALL_DIR/target/release/openshark" "$BIN_DIR/"
-    chmod +x "$BIN_DIR/openshark"
-    echo "✅ Installed openshark to $BIN_DIR"
+    cp "$INSTALL_DIR/target/release/openshield" "$BIN_DIR/"
+    chmod +x "$BIN_DIR/openshield"
+    echo "✅ Installed openshield to $BIN_DIR"
 }
 
 # Setup shell integration
@@ -86,7 +86,7 @@ setup_shell() {
 
 # Create config directory
 setup_config() {
-    local config_dir="$HOME/.config/openshark"
+    local config_dir="$HOME/.config/openshield"
     mkdir -p "$config_dir"
     echo "✅ Config directory: $config_dir"
     echo "   Set your provider API key environment variable before running"
@@ -103,17 +103,17 @@ main() {
     setup_config
 
     echo ""
-    echo "🎉 OpenShark installed successfully!"
+    echo "🎉 OpenShield installed successfully!"
     echo ""
     echo "Usage:"
-    echo "  openshark           Launch TUI (default)"
-    echo "  openshark tui       Launch TUI explicitly"
-    echo "  openshark chat      One-shot chat"
-    echo "  openshark agent     Run agent on a task"
-    echo "  openshark models    List available models"
-    echo "  openshark stats     View usage statistics"
-    echo "  openshark config    Show configuration"
-    echo "  openshark setup     Interactive setup"
+    echo "  openshield           Launch TUI (default)"
+    echo "  openshield tui       Launch TUI explicitly"
+    echo "  openshield chat      One-shot chat"
+    echo "  openshield agent     Run agent on a task"
+    echo "  openshield models    List available models"
+    echo "  openshield stats     View usage statistics"
+    echo "  openshield config    Show configuration"
+    echo "  openshield setup     Interactive setup"
     echo ""
     echo "Environment variables:"
     echo "  OPENAI_API_KEY      Your OpenAI API key"
@@ -122,7 +122,7 @@ main() {
     echo "  XAI_API_KEY         Your xAI API key"
     echo "  SOUL_NAME           Set to 'blank' for blank slate, or 'synthclaw' (default)"
     echo ""
-    echo "Run 'openshark' to start!"
+    echo "Run 'openshield' to start!"
 }
 
 main "$@"

@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_detect_linter_rust() {
-        let dir = format!("/tmp/openshark_lint_test_{}", std::process::id());
+        let dir = format!("/tmp/openshield_lint_test_{}", std::process::id());
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(format!("{}/Cargo.toml", dir), "[package]\nname=\"test\"\n").unwrap();

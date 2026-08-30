@@ -41,7 +41,7 @@ cargo build --release
 
 # Run TUI, send 20+ messages
 # Monitor RSS in another terminal:
-watch -n1 'ps -o rss= -p $(pgrep openshark)'
+watch -n1 'ps -o rss= -p $(pgrep openshield)'
 
 # Trigger stall (disconnect network mid-stream)
 # Verify RSS drops after watchdog fires

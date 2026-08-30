@@ -101,12 +101,17 @@ impl AgentRunner {
         system_prompt: &str,
     ) -> Self {
         let security_engine = crate::security::SecurityEngine::new(
-            crate::security::SecurityConfig::load().unwrap_or_default()
-        ).unwrap_or_else(|e| {
-            tracing::warn!("Failed to initialize security engine for swarm agent: {}. Using default.", e);
-            crate::security::SecurityEngine::new(crate::security::SecurityConfig::default()).unwrap_or_else(|_| {
-                panic!("Failed to create default security engine for swarm agent");
-            })
+            crate::security::SecurityConfig::load().unwrap_or_default(),
+        )
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                "Failed to initialize security engine for swarm agent: {}. Using default.",
+                e
+            );
+            crate::security::SecurityEngine::new(crate::security::SecurityConfig::default())
+                .unwrap_or_else(|_| {
+                    panic!("Failed to create default security engine for swarm agent");
+                })
         });
 
         Self {
@@ -278,7 +283,10 @@ impl AgentRunner {
             });
 
             // Security gate — apply security checks before executing any tool
-            match self.security_engine.check_tool_call(&suggestion.tool_name, &suggestion.args) {
+            match self
+                .security_engine
+                .check_tool_call(&suggestion.tool_name, &suggestion.args)
+            {
                 crate::security::SecurityDecision::Allow => {}
                 crate::security::SecurityDecision::RequireApproval { reason, .. } => {
                     let msg = format!(

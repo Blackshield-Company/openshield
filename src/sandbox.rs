@@ -35,7 +35,7 @@ pub fn extract_code_blocks(content: &str) -> Vec<(String, String)> {
 /// Execute code in a sandboxed environment.
 /// Returns (stdout, stderr, success).
 pub fn execute_code(lang: &str, code: &str) -> Result<(String, String, bool)> {
-    let tmp_dir = std::env::temp_dir().join("openshark_sandbox");
+    let tmp_dir = std::env::temp_dir().join("openshield_sandbox");
     std::fs::create_dir_all(&tmp_dir)?;
 
     match lang {
@@ -78,7 +78,8 @@ fn execute_rust(code: &str, tmp_dir: &Path) -> Result<(String, String, bool)> {
     }
 
     let sandbox_path = tmp_dir.join("sandbox");
-    let sandbox_path_str = sandbox_path.to_str()
+    let sandbox_path_str = sandbox_path
+        .to_str()
         .ok_or_else(|| anyhow::anyhow!("Sandbox path contains invalid UTF-8 characters"))?;
     let run_output = Command::new("timeout")
         .args(["5", sandbox_path_str])

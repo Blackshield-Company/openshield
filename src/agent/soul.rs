@@ -4,11 +4,11 @@ use crate::config::AgentIdentity;
 ///
 /// This module defines the identity, voice, and behavioral patterns of the agent.
 /// The soul is loaded from the user's config (`config.agent`), making it fully
-/// customizable per-user. The default is OpenShark's identity, but any user
+/// customizable per-user. The default is OpenShield's identity, but any user
 /// can configure their own agent name, personality, and behavioral rules
 /// (e.g. a user's personal agent lives only in their local config.toml, never in the binary).
 ///
-/// To customize your agent, edit `~/.config/openshark/config.toml`:
+/// To customize your agent, edit `~/.config/openshield/config.toml`:
 ///
 /// ```toml
 /// [agent]
@@ -30,7 +30,7 @@ use crate::config::AgentIdentity;
 /// ]
 /// ```
 ///
-/// Or run `openshark setup` to configure interactively.
+/// Or run `openshield setup` to configure interactively.
 
 #[derive(Debug, Clone)]
 pub struct AgentSoul {
@@ -146,7 +146,7 @@ impl AgentSoul {
     }
 }
 
-/// Load the active soul from config. Falls back to default (openshark) if not configured.
+/// Load the active soul from config. Falls back to default (openshield) if not configured.
 #[allow(dead_code)]
 pub fn load_soul_from_config(config: &crate::config::Config) -> AgentSoul {
     AgentSoul::from_config(config.agent.clone())
@@ -192,8 +192,8 @@ mod tests {
 
     fn test_identity() -> AgentIdentity {
         AgentIdentity {
-            name: "testshark".to_string(),
-            display_name: "TestShark".to_string(),
+            name: "testshield".to_string(),
+            display_name: "TestShield".to_string(),
             role: "test engine".to_string(),
             origin: "Born from unit tests".to_string(),
             purpose: "To pass all tests".to_string(),
@@ -212,8 +212,8 @@ mod tests {
     fn test_soul_from_config() {
         let identity = test_identity();
         let soul = AgentSoul::from_config(identity);
-        assert_eq!(soul.name(), "testshark");
-        assert_eq!(soul.display_name(), "TestShark");
+        assert_eq!(soul.name(), "testshield");
+        assert_eq!(soul.display_name(), "TestShield");
         assert_eq!(soul.emoji(), "🧪");
     }
 
@@ -222,7 +222,7 @@ mod tests {
         let identity = test_identity();
         let soul = AgentSoul::from_config(identity);
         let prompt = soul.system_prompt();
-        assert!(prompt.contains("testshark"));
+        assert!(prompt.contains("testshield"));
         assert!(prompt.contains("test engine"));
         assert!(prompt.contains("Test everything."));
     }
@@ -254,7 +254,7 @@ mod tests {
     fn test_status_line() {
         let identity = test_identity();
         let soul = AgentSoul::from_config(identity);
-        assert_eq!(soul.status_line(), "🧪 TestShark — test engine");
+        assert_eq!(soul.status_line(), "🧪 TestShield — test engine");
     }
 
     #[test]
@@ -279,7 +279,7 @@ mod tests {
             std::env::remove_var("SOUL_NAME");
         }
         let soul = load_soul();
-        assert_eq!(soul.name(), "openshark");
+        assert_eq!(soul.name(), "openshield");
         assert!(!soul.system_prompt().is_empty());
     }
 

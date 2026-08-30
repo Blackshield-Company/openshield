@@ -60,7 +60,7 @@ impl Tool for VisionTool {
             ))
         } else {
             Ok(format!(
-                "Image not found: {}\nQuestion: {}\n\nTip: Use browser --snapshot <url> to capture a page screenshot first, then vision /tmp/openshark_snapshot.png.",
+                "Image not found: {}\nQuestion: {}\n\nTip: Use browser --snapshot <url> to capture a page screenshot first, then vision /tmp/openshield_snapshot.png.",
                 image_path, question
             ))
         }
@@ -103,7 +103,7 @@ impl Tool for ImageGenTool {
                 // Try loading from fal.env in config dir
                 let env_path = dirs::config_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("openshark/fal.env");
+                    .join("openshield/fal.env");
                 if let Ok(content) = std::fs::read_to_string(&env_path) {
                     for line in content.lines() {
                         let line = line.trim();
@@ -122,7 +122,7 @@ impl Tool for ImageGenTool {
             Ok(k) => k,
             Err(_) => {
                 return Ok(
-                    "No FAL_KEY found. Set FAL_KEY environment variable or create ~/.config/openshark/fal.env".to_string()
+                    "No FAL_KEY found. Set FAL_KEY environment variable or create ~/.config/openshield/fal.env".to_string()
                 );
             }
         };
@@ -261,7 +261,7 @@ impl Tool for TtsTool {
         let output_path = parts
             .get(1)
             .map(|s| s.split("--voice").next().unwrap_or(s).trim())
-            .unwrap_or("~/.hermes/audio_cache/openshark_tts.mp3");
+            .unwrap_or("~/.hermes/audio_cache/openshield_tts.mp3");
 
         if text.is_empty() {
             return Ok("Usage: tts <text> [--output <path>] [--voice <voice_id>]".to_string());

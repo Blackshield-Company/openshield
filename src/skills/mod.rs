@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 /// A skill is a reusable piece of procedural knowledge — YAML frontmatter + markdown body.
 ///
-/// Skills are loaded from `~/.config/openshark/skills/` and auto-injected into
+/// Skills are loaded from `~/.config/openshield/skills/` and auto-injected into
 /// the system prompt when their trigger keywords match the user's query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {

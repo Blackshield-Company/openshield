@@ -55,8 +55,8 @@ fn expand_path(path: &str) -> PathBuf {
 
 fn cmd_read(path_str: &str) -> Result<String> {
     let path = expand_path(path_str);
-    let metadata = fs::metadata(&path)
-        .with_context(|| format!("Failed to stat {}", path.display()))?;
+    let metadata =
+        fs::metadata(&path).with_context(|| format!("Failed to stat {}", path.display()))?;
 
     const MAX_SIZE: u64 = 100 * 1024; // 100KB
     if metadata.len() > MAX_SIZE {
@@ -190,7 +190,12 @@ fn cmd_list(path_str: &str) -> Result<String> {
     } else {
         String::new()
     };
-    result.push_str(&format!("\n{} dirs, {} files{}\n", dirs.len(), files.len(), note));
+    result.push_str(&format!(
+        "\n{} dirs, {} files{}\n",
+        dirs.len(),
+        files.len(),
+        note
+    ));
     Ok(result)
 }
 
@@ -313,7 +318,12 @@ fn cmd_glob(pattern: &str) -> Result<String> {
     }
 
     results.sort();
-    let mut result = format!("Glob: {}\nFound {} matches (showing {}):\n", expanded, results.len(), results.len().min(MAX_RESULTS));
+    let mut result = format!(
+        "Glob: {}\nFound {} matches (showing {}):\n",
+        expanded,
+        results.len(),
+        results.len().min(MAX_RESULTS)
+    );
     for r in &results {
         result.push_str(&format!("  {}\n", r));
     }
@@ -408,7 +418,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_fs_test_{}_{}", std::process::id(), count);
+        let dir = format!("/tmp/openshield_fs_test_{}_{}", std::process::id(), count);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

@@ -1,7 +1,7 @@
-//! MCP tool adapter — wraps MCP tools as OpenShark Tool trait objects.
+//! MCP tool adapter — wraps MCP tools as OpenShield Tool trait objects.
 //!
 //! This allows MCP-discovered tools to be used seamlessly alongside
-//! native OpenShark tools.
+//! native OpenShield tools.
 
 use anyhow::Result;
 use serde_json::Value;
@@ -11,7 +11,7 @@ use crate::mcp::protocol::{CallToolResult, McpTool};
 
 use super::Tool;
 
-/// An adapter that wraps an MCP tool as an OpenShark Tool.
+/// An adapter that wraps an MCP tool as an OpenShield Tool.
 pub struct McpToolAdapter {
     tool: McpTool,
     #[allow(dead_code)]
@@ -123,7 +123,7 @@ fn format_call_result(result: &CallToolResult) -> String {
     output.trim().to_string()
 }
 
-/// Build OpenShark ToolDefinition schemas from MCP tools for LLM tool calling.
+/// Build OpenShield ToolDefinition schemas from MCP tools for LLM tool calling.
 #[allow(dead_code)]
 pub fn mcp_tool_to_definition(tool: &McpTool) -> super::ToolDef {
     super::ToolDef {

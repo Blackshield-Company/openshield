@@ -1,4 +1,4 @@
-//! OpenShark AI Harness — Response Types
+//! OpenShield AI Harness — Response Types
 //!
 //! Defines the output types for the harness engine.
 

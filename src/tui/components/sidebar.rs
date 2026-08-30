@@ -23,7 +23,7 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     let mut out = stdout();
 
     let _border_color = current_theme().border;
-    let gold = Color::Rgb { r: 255, g: 215, b: 0 };
+    let gold = Color::Rgb { r: 201, g: 162, b: 39 };
 
     // Outer border with gold accent
     queue!(out, MoveTo(x, y), SetForegroundColor(gold))?;
@@ -50,18 +50,18 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     let inner_width = width.saturating_sub(2) as usize;
     let mut row = 1u16;
 
-    // Header: SHARK logo (compact)
+    // Header: shield wordmark (compact)
     let header = format!(
-        "{}🦈 {} {}",
-        ansi_fg(Color::Rgb { r: 255, g: 77, b: 158 }),
-        bold("OpenShark", gold),
-        ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 })
-    ) + "v1.1.0" + ansi_reset();
+        "{}🛡 {} v{}",
+        ansi_fg(Color::Rgb { r: 193, g: 18, b: 31 }),
+        bold("OpenShield", gold),
+        env!("CARGO_PKG_VERSION")
+    ) + ansi_reset();
     let header_x = inner_x + ((inner_width - unicode_width::UnicodeWidthStr::width(header.as_str())) / 2) as u16;
     queue!(out, MoveTo(header_x, y + row), Print(&header), ResetColor)?;
     row += 1;
 
-    let tagline = italic("Fast. Precise. Hungry.", Color::Rgb { r: 140, g: 120, b: 160 });
+    let tagline = italic("Steel. Precision. Resolve.", Color::Rgb { r: 138, g: 143, b: 152 });
     let tagline_x = inner_x + ((inner_width - unicode_width::UnicodeWidthStr::width(tagline.as_str())) / 2) as u16;
     queue!(out, MoveTo(tagline_x, y + row), Print(&tagline), ResetColor)?;
     row += 2;
@@ -99,9 +99,9 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     for (key, desc) in shortcuts {
         let line = format!(
             "{}{:8}{} {}",
-            ansi_fg(Color::Rgb { r: 0, g: 255, b: 255 }),
+            ansi_fg(Color::Rgb { r: 123, g: 157, b: 196 }),
             key,
-            ansi_fg(Color::Rgb { r: 220, g: 220, b: 220 }),
+            ansi_fg(Color::Rgb { r: 216, g: 211, b: 200 }),
             desc
         );
         queue!(out, MoveTo(inner_x, y + row), Print(&line), Clear(ClearType::UntilNewLine), ResetColor)?;
@@ -117,9 +117,9 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     for t in tools.iter().take(6) {
         let line = format!(
             "{}{}{} {}",
-            ansi_fg(Color::Rgb { r: 0, g: 255, b: 255 }),
+            ansi_fg(Color::Rgb { r: 123, g: 157, b: 196 }),
             t.name(),
-            ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 }),
+            ansi_fg(Color::Rgb { r: 138, g: 143, b: 152 }),
             t.description()
         );
         queue!(out, MoveTo(inner_x, y + row), Print(&line), Clear(ClearType::UntilNewLine), ResetColor)?;
@@ -162,8 +162,8 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
 
 /// Format a two-column info line: "Label      Value"
 fn format_info_line(label: &str, value: &str, width: usize) -> String {
-    let label_color = ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 });
-    let value_color = ansi_fg(Color::Rgb { r: 220, g: 220, b: 220 });
+    let label_color = ansi_fg(Color::Rgb { r: 138, g: 143, b: 152 });
+    let value_color = ansi_fg(Color::Rgb { r: 216, g: 211, b: 200 });
     let reset = ansi_reset();
     let label_width = 8usize;
     let value_width = width.saturating_sub(label_width + 1);
@@ -210,10 +210,10 @@ fn format_status_bar(
     stream_start: Option<std::time::Instant>,
     _tokens: u64,
 ) -> String {
-    let cyan = ansi_fg(Color::Rgb { r: 0, g: 255, b: 255 });
-    let gold = ansi_fg(Color::Rgb { r: 255, g: 215, b: 0 });
-    let green = ansi_fg(Color::Rgb { r: 80, g: 255, b: 120 });
-    let muted = ansi_fg(Color::Rgb { r: 140, g: 120, b: 160 });
+    let cyan = ansi_fg(Color::Rgb { r: 123, g: 157, b: 196 });
+    let gold = ansi_fg(Color::Rgb { r: 201, g: 162, b: 39 });
+    let green = ansi_fg(Color::Rgb { r: 106, g: 153, b: 78 });
+    let muted = ansi_fg(Color::Rgb { r: 138, g: 143, b: 152 });
     let reset = ansi_reset();
 
     let model_short = model.split('/').next_back().unwrap_or(model);

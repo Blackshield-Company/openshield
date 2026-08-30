@@ -423,9 +423,7 @@ impl SlashRegistry {
                 usage: "/agent [name]",
                 category: SlashCategory::Agent,
                 requires_args: false,
-                handler: |args| {
-                    SlashResult::SwitchAgent(args.to_string())
-                },
+                handler: |args| SlashResult::SwitchAgent(args.to_string()),
             },
             SlashCommand {
                 name: "agentlist",
@@ -434,9 +432,7 @@ impl SlashRegistry {
                 usage: "/agentlist",
                 category: SlashCategory::Agent,
                 requires_args: false,
-                handler: |_args| {
-                    SlashResult::SwitchAgent(String::new())
-                },
+                handler: |_args| SlashResult::SwitchAgent(String::new()),
             },
             SlashCommand {
                 name: "soul",
@@ -445,9 +441,7 @@ impl SlashRegistry {
                 usage: "/soul",
                 category: SlashCategory::Agent,
                 requires_args: false,
-                handler: |_args| {
-                    SlashResult::ShowSoul
-                },
+                handler: |_args| SlashResult::ShowSoul,
             },
             SlashCommand {
                 name: "help",
@@ -501,7 +495,7 @@ impl SlashRegistry {
                 handler: |args| {
                     let _filename = if args.is_empty() {
                         format!(
-                            "openshark-session-{}.json",
+                            "openshield-session-{}.json",
                             chrono::Utc::now().format("%Y%m%d-%H%M%S")
                         )
                     } else {
@@ -969,7 +963,7 @@ impl SlashRegistry {
     #[allow(dead_code)]
     pub fn format_help(&self) -> String {
         let mut lines = vec![
-            "🦈 Slash Commands".to_string(),
+            "🛡 Slash Commands".to_string(),
             "═══════════════════════════════════════════════════════════".to_string(),
             String::new(),
         ];

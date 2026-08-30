@@ -30,12 +30,12 @@ fn prompt_bool(question: &str, default: bool) -> Result<bool> {
 }
 
 pub async fn run() -> Result<()> {
-    println!("🦈 OpenShark Setup");
+    println!("🛡 OpenShield Setup");
     println!("==================");
     println!();
-    println!("OpenShark will create:");
-    println!("  - Config: ~/.config/openshark/config.toml");
-    println!("  - Memory: ~/.local/share/openshark/memory.db");
+    println!("OpenShield will create:");
+    println!("  - Config: ~/.config/openshield/config.toml");
+    println!("  - Memory: ~/.local/share/openshield/memory.db");
     println!();
     println!("Press Enter to continue or Ctrl+C to cancel...");
 
@@ -51,16 +51,13 @@ pub async fn run() -> Result<()> {
     println!("This is the AI that will help you code. Give it a name and personality.");
     println!();
 
-    let agent_name = prompt("Agent name (lowercase, no spaces):", Some("openshark"))?;
+    let agent_name = prompt("Agent name (lowercase, no spaces):", Some("openshield"))?;
     let display_name = prompt("Display name:", Some(&capitalize_first(&agent_name)))?;
     println!();
-    println!("ℹ️  Use Unicode emoji (e.g. 🎹🦈) not Discord codes (:emoji:)");
+    println!("ℹ️  Use Unicode emoji (e.g. 🎹🛡) not Discord codes (:emoji:)");
     let emoji = prompt("Emoji:", Some(""))?;
     let tagline = prompt("Tagline:", Some(""))?;
-    let greeting = prompt(
-        "Greeting:",
-        Some("The water's fine. What are we building?"),
-    )?;
+    let greeting = prompt("Greeting:", Some("Shields up. What are we building?"))?;
 
     // ── User Identity ───────────────────────────────────────────────────────
     println!();
@@ -78,30 +75,24 @@ pub async fn run() -> Result<()> {
         role: prompt("Role:", Some("autonomous coding agent"))?,
         origin: prompt(
             "Origin story:",
-            Some("Apex predator of the code ocean, forged in the digital depths"),
+            Some("Blackshield sentinel of the codebase, forged in blood and steel"),
         )?,
         purpose: prompt(
             "Purpose:",
-            Some("To build, debug, and ship code with surgical accuracy"),
+            Some("To guard quality, build deliberately, and ship verified code"),
         )?,
         tagline: tagline.clone(),
         tone: prompt(
             "Tone:",
             Some("Confident, precise, professional with personality"),
         )?,
-        style: prompt(
-            "Style:",
-            Some("Direct. No fluff. Gets to the point."),
-        )?,
+        style: prompt("Style:", Some("Direct. No fluff. Gets to the point."))?,
         greeting: greeting.clone(),
-        farewell: prompt(
-            "Farewell:",
-            Some("Shipped. The hunt continues."),
-        )?,
+        farewell: prompt("Farewell:", Some("Shipped. The watch continues."))?,
         emoji: emoji.clone(),
         catchphrases: vec![
-            "Fast. Precise. Hungry.".to_string(),
-            "The hunt continues.".to_string(),
+            "Steel. Precision. Resolve.".to_string(),
+            "The watch continues.".to_string(),
             "Every session makes the harness smarter.".to_string(),
         ],
         behavioral_rules: vec![
@@ -124,17 +115,19 @@ pub async fn run() -> Result<()> {
     println!();
 
     // ── Provider Configuration ──────────────────────────────────────────────
-    println!("🎹🦈 Provider Configuration");
+    println!("🎹🛡 Provider Configuration");
     println!("───────────────────────────");
     println!();
 
     // Kimi for Coding — direct connection, no local proxy needed
     if prompt_bool("Enable Kimi K3 (direct, api.kimi.com/coding)", true)? {
         let kimi_key = prompt(
-            "Kimi API key (or leave blank to use ~/.config/openshark/kimi.env):",
+            "Kimi API key (or leave blank to use ~/.config/openshield/kimi.env):",
             None,
         )?;
-        let mut kimi_provider = config.providers.get_mut("kimi")
+        let mut kimi_provider = config
+            .providers
+            .get_mut("kimi")
             .expect("Kimi provider should exist in default config")
             .clone();
         if !kimi_key.is_empty() {
@@ -183,10 +176,12 @@ pub async fn run() -> Result<()> {
     // OpenRouter
     if prompt_bool("Enable OpenRouter", false)? {
         let or_key = prompt(
-            "OpenRouter API key (or leave blank to use ~/.config/openshark/openrouter.env):",
+            "OpenRouter API key (or leave blank to use ~/.config/openshield/openrouter.env):",
             None,
         )?;
-        let mut or_provider = config.providers.get("openrouter")
+        let mut or_provider = config
+            .providers
+            .get("openrouter")
             .expect("OpenRouter provider should exist in default config")
             .clone();
         if !or_key.is_empty() {
@@ -212,10 +207,12 @@ pub async fn run() -> Result<()> {
     // Z.AI (GLM)
     if prompt_bool("Enable Z.AI (GLM-5.1)", false)? {
         let zai_key = prompt(
-            "Z.AI API key (or leave blank to use ~/.config/openshark/zai.env):",
+            "Z.AI API key (or leave blank to use ~/.config/openshield/zai.env):",
             None,
         )?;
-        let mut zai_provider = config.providers.get("zai")
+        let mut zai_provider = config
+            .providers
+            .get("zai")
             .expect("Z.AI provider should exist in default config")
             .clone();
         if !zai_key.is_empty() {
@@ -265,7 +262,7 @@ pub async fn run() -> Result<()> {
     // ── Gateway Configuration ───────────────────────────────────────────────
     println!("🔗 Gateway Configuration");
     println!("────────────────────────");
-    println!("Connect OpenShark to Discord, Telegram, Slack, Matrix, and MCP servers.");
+    println!("Connect OpenShield to Discord, Telegram, Slack, Matrix, and MCP servers.");
     println!();
 
     let mut gateway = GatewayConfig::default();
@@ -285,7 +282,7 @@ pub async fn run() -> Result<()> {
             guild_ids: vec![],
             allowed_channels: vec![],
             require_mention: false,
-            command_prefix: "!shark".to_string(),
+            command_prefix: "!shield".to_string(),
             max_message_length: 2000,
             typing_indicator: true,
             multi_model_enabled: false,
@@ -335,7 +332,7 @@ pub async fn run() -> Result<()> {
     // Matrix
     if prompt_bool("Enable Matrix bot", false)? {
         let homeserver = prompt("Matrix homeserver URL (e.g., https://matrix.org):", None)?;
-        let user_id = prompt("Matrix user ID (e.g., @openshark:matrix.org):", None)?;
+        let user_id = prompt("Matrix user ID (e.g., @openshield:matrix.org):", None)?;
         let access_token = prompt(
             "Matrix access token (or ${MATRIX_ACCESS_TOKEN} for env):",
             None,
@@ -406,7 +403,7 @@ pub async fn run() -> Result<()> {
     println!();
     println!("📁 Filesystem Access");
     println!("─────────────────────");
-    println!("Configure which directories OpenShark can access.");
+    println!("Configure which directories OpenShield can access.");
     println!("This lets the AI inspect configs, browse projects, and debug issues.");
     println!();
 
@@ -442,7 +439,7 @@ pub async fn run() -> Result<()> {
 
     config.save()?;
 
-    println!("✅ Config saved to ~/.config/openshark/config.toml");
+    println!("✅ Config saved to ~/.config/openshield/config.toml");
     println!(
         "✅ Agent: {} {}",
         config.agent.emoji, config.agent.display_name
@@ -452,8 +449,8 @@ pub async fn run() -> Result<()> {
         println!("✅ Discord gateway: enabled");
     }
     println!();
-    println!("Run `openshark` to start the TUI.");
-    println!("Run `openshark config` to view your configuration.");
+    println!("Run `openshield` to start the TUI.");
+    println!("Run `openshield config` to view your configuration.");
 
     Ok(())
 }

@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
+use crate::tui::theme::{ansi_fg, ansi_reset};
 /// Simple syntax highlighter for code blocks.
 /// Supports Rust, Python, JavaScript, TypeScript, JSON, TOML, YAML, Bash, and generic code.
 /// Returns ANSI-colored strings instead of ratatui Span/Line types.
 use crossterm::style::Color;
-use crate::tui::theme::{ansi_fg, ansi_reset};
 
 pub fn highlight_code_block(code: &str, lang: &str) -> Vec<String> {
     let lang_lower = lang.to_lowercase();
@@ -43,16 +43,75 @@ fn highlight_rust(lines: &[&str]) -> Vec<String> {
         "unsafe", "extern", "dyn", "box", "yield", "try", "macro",
     ];
     let types = [
-        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
-        "f32", "f64", "bool", "char", "str", "String", "Vec", "Option", "Result", "HashMap",
-        "BTreeMap", "Arc", "Rc", "Box", "Pin", "Cell", "RefCell", "VecDeque", "HashSet",
-        "BTreeSet", "LinkedList",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "i128",
+        "isize",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "u128",
+        "usize",
+        "f32",
+        "f64",
+        "bool",
+        "char",
+        "str",
+        "String",
+        "Vec",
+        "Option",
+        "Result",
+        "HashMap",
+        "BTreeMap",
+        "Arc",
+        "Rc",
+        "Box",
+        "Pin",
+        "Cell",
+        "RefCell",
+        "VecDeque",
+        "HashSet",
+        "BTreeSet",
+        "LinkedList",
     ];
     let builtins = [
-        "println!", "print!", "format!", "vec!", "assert!", "assert_eq!", "panic!", "todo!",
-        "unimplemented!", "unwrap", "expect", "clone", "len", "push", "pop", "insert", "remove",
-        "get", "iter", "collect", "map", "filter", "fold", "zip", "enumerate", "chars", "lines",
-        "to_string", "parse", "into", "from", "default", "new", "with_capacity",
+        "println!",
+        "print!",
+        "format!",
+        "vec!",
+        "assert!",
+        "assert_eq!",
+        "panic!",
+        "todo!",
+        "unimplemented!",
+        "unwrap",
+        "expect",
+        "clone",
+        "len",
+        "push",
+        "pop",
+        "insert",
+        "remove",
+        "get",
+        "iter",
+        "collect",
+        "map",
+        "filter",
+        "fold",
+        "zip",
+        "enumerate",
+        "chars",
+        "lines",
+        "to_string",
+        "parse",
+        "into",
+        "from",
+        "default",
+        "new",
+        "with_capacity",
     ];
 
     lines
@@ -70,15 +129,61 @@ fn highlight_python(lines: &[&str]) -> Vec<String> {
         "True", "False", "None",
     ];
     let types = [
-        "int", "float", "str", "bool", "list", "dict", "tuple", "set", "frozenset", "bytes",
-        "bytearray", "memoryview", "object",
+        "int",
+        "float",
+        "str",
+        "bool",
+        "list",
+        "dict",
+        "tuple",
+        "set",
+        "frozenset",
+        "bytes",
+        "bytearray",
+        "memoryview",
+        "object",
     ];
     let builtins = [
-        "print", "len", "range", "enumerate", "zip", "map", "filter", "sum", "min", "max",
-        "sorted", "reversed", "open", "input", "isinstance", "hasattr", "getattr", "setattr",
-        "delattr", "type", "id", "repr", "str", "int", "float", "list", "dict", "append",
-        "extend", "insert", "remove", "pop", "clear", "keys", "values", "items", "get",
-        "update", "join", "split",
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sum",
+        "min",
+        "max",
+        "sorted",
+        "reversed",
+        "open",
+        "input",
+        "isinstance",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "delattr",
+        "type",
+        "id",
+        "repr",
+        "str",
+        "int",
+        "float",
+        "list",
+        "dict",
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "clear",
+        "keys",
+        "values",
+        "items",
+        "get",
+        "update",
+        "join",
+        "split",
     ];
 
     lines
@@ -90,23 +195,121 @@ fn highlight_python(lines: &[&str]) -> Vec<String> {
 // ── JavaScript / TypeScript ────────────────────────────────────────────────
 fn highlight_js(lines: &[&str]) -> Vec<String> {
     let keywords = [
-        "function", "const", "let", "var", "if", "else", "for", "while", "do", "switch", "case",
-        "break", "continue", "return", "try", "catch", "finally", "throw", "new", "this", "typeof",
-        "instanceof", "void", "delete", "in", "of", "await", "async", "yield", "class", "extends",
-        "super", "import", "export", "from", "default", "interface", "type", "enum", "namespace",
-        "module", "declare", "public", "private", "protected", "readonly", "abstract", "implements",
+        "function",
+        "const",
+        "let",
+        "var",
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "break",
+        "continue",
+        "return",
+        "try",
+        "catch",
+        "finally",
+        "throw",
+        "new",
+        "this",
+        "typeof",
+        "instanceof",
+        "void",
+        "delete",
+        "in",
+        "of",
+        "await",
+        "async",
+        "yield",
+        "class",
+        "extends",
+        "super",
+        "import",
+        "export",
+        "from",
+        "default",
+        "interface",
+        "type",
+        "enum",
+        "namespace",
+        "module",
+        "declare",
+        "public",
+        "private",
+        "protected",
+        "readonly",
+        "abstract",
+        "implements",
     ];
     let types = [
-        "string", "number", "boolean", "symbol", "bigint", "undefined", "null", "any", "unknown",
-        "never", "void", "object", "Array", "Promise", "Map", "Set", "Date", "RegExp", "Error",
+        "string",
+        "number",
+        "boolean",
+        "symbol",
+        "bigint",
+        "undefined",
+        "null",
+        "any",
+        "unknown",
+        "never",
+        "void",
+        "object",
+        "Array",
+        "Promise",
+        "Map",
+        "Set",
+        "Date",
+        "RegExp",
+        "Error",
         "Function",
     ];
     let builtins = [
-        "console", "log", "warn", "error", "info", "JSON", "parse", "stringify", "Math", "random",
-        "floor", "ceil", "round", "abs", "min", "max", "setTimeout", "setInterval", "clearTimeout",
-        "clearInterval", "fetch", "then", "catch", "finally", "push", "pop", "shift", "unshift",
-        "slice", "splice", "concat", "join", "split", "map", "filter", "reduce", "forEach", "find",
-        "includes", "indexOf", "toString", "valueOf", "hasOwnProperty",
+        "console",
+        "log",
+        "warn",
+        "error",
+        "info",
+        "JSON",
+        "parse",
+        "stringify",
+        "Math",
+        "random",
+        "floor",
+        "ceil",
+        "round",
+        "abs",
+        "min",
+        "max",
+        "setTimeout",
+        "setInterval",
+        "clearTimeout",
+        "clearInterval",
+        "fetch",
+        "then",
+        "catch",
+        "finally",
+        "push",
+        "pop",
+        "shift",
+        "unshift",
+        "slice",
+        "splice",
+        "concat",
+        "join",
+        "split",
+        "map",
+        "filter",
+        "reduce",
+        "forEach",
+        "find",
+        "includes",
+        "indexOf",
+        "toString",
+        "valueOf",
+        "hasOwnProperty",
     ];
 
     lines
@@ -207,7 +410,11 @@ fn highlight_toml(lines: &[&str]) -> Vec<String> {
             } else if let Some(pos) = line.find('=') {
                 let key = &line[..pos];
                 let rest = &line[pos..];
-                format!("{}{}", color_span(key, Color::Cyan), color_span(rest, Color::White))
+                format!(
+                    "{}{}",
+                    color_span(key, Color::Cyan),
+                    color_span(rest, Color::White)
+                )
             } else {
                 color_span(line, Color::White)
             }
@@ -246,11 +453,11 @@ fn highlight_bash(lines: &[&str]) -> Vec<String> {
         "kill", "exec", "eval", "set", "unset", "env", "alias", "unalias", "test", "[", "[[",
     ];
     let builtins = [
-        "echo", "printf", "cat", "grep", "sed", "awk", "cut", "sort", "uniq", "wc", "head",
-        "tail", "find", "xargs", "chmod", "chown", "cp", "mv", "rm", "mkdir", "rmdir", "ls",
-        "cd", "pwd", "touch", "ln", "tar", "gzip", "gunzip", "zip", "unzip", "curl", "wget",
-        "ssh", "scp", "rsync", "git", "docker", "kubectl", "npm", "yarn", "cargo", "make",
-        "python", "python3", "node", "ruby", "perl", "bash", "sh", "zsh",
+        "echo", "printf", "cat", "grep", "sed", "awk", "cut", "sort", "uniq", "wc", "head", "tail",
+        "find", "xargs", "chmod", "chown", "cp", "mv", "rm", "mkdir", "rmdir", "ls", "cd", "pwd",
+        "touch", "ln", "tar", "gzip", "gunzip", "zip", "unzip", "curl", "wget", "ssh", "scp",
+        "rsync", "git", "docker", "kubectl", "npm", "yarn", "cargo", "make", "python", "python3",
+        "node", "ruby", "perl", "bash", "sh", "zsh",
     ];
 
     lines
@@ -261,11 +468,19 @@ fn highlight_bash(lines: &[&str]) -> Vec<String> {
 
 // ── Generic ────────────────────────────────────────────────────────────────
 fn highlight_generic(lines: &[&str]) -> Vec<String> {
-    lines.iter().map(|line| color_span(line, Color::White)).collect()
+    lines
+        .iter()
+        .map(|line| color_span(line, Color::White))
+        .collect()
 }
 
 // ── Tokenizer ──────────────────────────────────────────────────────────────
-fn tokenize_and_highlight(line: &str, keywords: &[&str], types: &[&str], builtins: &[&str]) -> String {
+fn tokenize_and_highlight(
+    line: &str,
+    keywords: &[&str],
+    types: &[&str],
+    builtins: &[&str],
+) -> String {
     let mut result = String::new();
     let mut chars = line.chars().peekable();
     let mut in_string = false;
@@ -277,12 +492,15 @@ fn tokenize_and_highlight(line: &str, keywords: &[&str], types: &[&str], builtin
 
     while let Some(ch) = chars.next() {
         // Comments
-        if !in_string && !in_comment && ch == '/'
+        if !in_string
+            && !in_comment
+            && ch == '/'
             && let Some(&next) = chars.peek()
-                && next == '/' {
-                    result.push_str(&italic_span(line, Color::DarkGrey));
-                    break;
-                }
+            && next == '/'
+        {
+            result.push_str(&italic_span(line, Color::DarkGrey));
+            break;
+        }
 
         // Strings
         if !in_comment && (ch == '"' || ch == '\'') {
@@ -306,12 +524,11 @@ fn tokenize_and_highlight(line: &str, keywords: &[&str], types: &[&str], builtin
         }
 
         // Numbers
-        if !in_comment && (ch.is_numeric() || (ch == '-' && num_buf.is_empty()))
-            && !in_number {
-                in_number = true;
-                num_buf.push(ch);
-                continue;
-            }
+        if !in_comment && (ch.is_numeric() || (ch == '-' && num_buf.is_empty())) && !in_number {
+            in_number = true;
+            num_buf.push(ch);
+            continue;
+        }
 
         if in_number {
             if ch.is_numeric() || ch == '.' || ch == 'e' || ch == 'E' || ch == '_' {
@@ -350,7 +567,8 @@ fn tokenize_and_highlight(line: &str, keywords: &[&str], types: &[&str], builtin
             // Punctuation / operators
             let color = match ch {
                 '(' | ')' | '{' | '}' | '[' | ']' | ';' | ',' | '.' => Color::White,
-                '+' | '-' | '*' | '/' | '%' | '=' | '!' | '&' | '|' | '<' | '>' | '^' | '~' | '?' | ':' => Color::Red,
+                '+' | '-' | '*' | '/' | '%' | '=' | '!' | '&' | '|' | '<' | '>' | '^' | '~'
+                | '?' | ':' => Color::Red,
                 '#' => Color::DarkGrey,
                 '@' => Color::Yellow,
                 _ => Color::White,

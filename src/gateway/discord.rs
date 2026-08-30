@@ -124,7 +124,7 @@ impl EventHandler for Handler {
             return;
         }
 
-        // Strip prefix if present (for commands like !shark status)
+        // Strip prefix if present (for commands like !shield status)
         let clean_content = if has_prefix {
             content[discord_config.command_prefix.len()..]
                 .trim()

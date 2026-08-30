@@ -17,12 +17,12 @@ __pycache__/
 
 # Rust build artifacts
 /target
-*.openshark_backup
+*.openshield_backup
 
 # Desktop app (Tauri + Svelte)
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
 
-# Local husk of the graduated desktop app (now: openshark-chompers repo)
+# Local husk of the graduated desktop app (now: openshield-chompers repo)
 /desktop/

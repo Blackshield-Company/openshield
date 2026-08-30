@@ -1,4 +1,4 @@
-//! Repo Map — Code graph understanding for OpenShark
+//! Repo Map — Code graph understanding for OpenShield
 //!
 //! Builds a lightweight structural map of the codebase for LLM context.
 //! Inspired by Aider's repo map.
@@ -123,39 +123,48 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
         "rust" => vec![
             (
                 SymbolKind::Function,
-                regex::Regex::new(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)").expect("Rust function regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)")
+                    .expect("Rust function regex compilation failed"),
             ),
             (
                 SymbolKind::Struct,
-                regex::Regex::new(r"^\s*(?:pub\s+)?struct\s+(\w+)").expect("Rust struct regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?struct\s+(\w+)")
+                    .expect("Rust struct regex compilation failed"),
             ),
             (
                 SymbolKind::Enum,
-                regex::Regex::new(r"^\s*(?:pub\s+)?enum\s+(\w+)").expect("Rust enum regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?enum\s+(\w+)")
+                    .expect("Rust enum regex compilation failed"),
             ),
             (
                 SymbolKind::Trait,
-                regex::Regex::new(r"^\s*(?:pub\s+)?trait\s+(\w+)").expect("Rust trait regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?trait\s+(\w+)")
+                    .expect("Rust trait regex compilation failed"),
             ),
             (
                 SymbolKind::Impl,
-                regex::Regex::new(r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)").expect("Rust impl regex compilation failed"),
+                regex::Regex::new(r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)")
+                    .expect("Rust impl regex compilation failed"),
             ),
             (
                 SymbolKind::Module,
-                regex::Regex::new(r"^\s*(?:pub\s+)?mod\s+(\w+)").expect("Rust mod regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?mod\s+(\w+)")
+                    .expect("Rust mod regex compilation failed"),
             ),
             (
                 SymbolKind::Const,
-                regex::Regex::new(r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+").expect("Rust const regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+")
+                    .expect("Rust const regex compilation failed"),
             ),
             (
                 SymbolKind::Macro,
-                regex::Regex::new(r"^\s*macro_rules!\s+(\w+)").expect("Rust macro regex compilation failed"),
+                regex::Regex::new(r"^\s*macro_rules!\s+(\w+)")
+                    .expect("Rust macro regex compilation failed"),
             ),
             (
                 SymbolKind::Type,
-                regex::Regex::new(r"^\s*(?:pub\s+)?type\s+(\w+)").expect("Rust type regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:pub\s+)?type\s+(\w+)")
+                    .expect("Rust type regex compilation failed"),
             ),
         ],
         "python" => vec![
@@ -165,17 +174,20 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
             ),
             (
                 SymbolKind::Struct,
-                regex::Regex::new(r"^\s*class\s+(\w+)").expect("Python class regex compilation failed"),
+                regex::Regex::new(r"^\s*class\s+(\w+)")
+                    .expect("Python class regex compilation failed"),
             ),
             (
                 SymbolKind::Const,
-                regex::Regex::new(r"^([A-Z_][A-Z0-9_]*)\s*=").expect("Python const regex compilation failed"),
+                regex::Regex::new(r"^([A-Z_][A-Z0-9_]*)\s*=")
+                    .expect("Python const regex compilation failed"),
             ),
         ],
         "javascript" | "typescript" => vec![
             (
                 SymbolKind::Function,
-                regex::Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)").expect("JS function regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)")
+                    .expect("JS function regex compilation failed"),
             ),
             (
                 SymbolKind::Function,
@@ -184,25 +196,30 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
             ),
             (
                 SymbolKind::Struct,
-                regex::Regex::new(r"^\s*(?:export\s+)?(?:class|interface)\s+(\w+)").expect("JS class regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:export\s+)?(?:class|interface)\s+(\w+)")
+                    .expect("JS class regex compilation failed"),
             ),
             (
                 SymbolKind::Const,
-                regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=").expect("JS const regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=")
+                    .expect("JS const regex compilation failed"),
             ),
         ],
         "go" => vec![
             (
                 SymbolKind::Trait,
-                regex::Regex::new(r"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)").expect("Go func regex compilation failed"),
+                regex::Regex::new(r"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)")
+                    .expect("Go func regex compilation failed"),
             ),
             (
                 SymbolKind::Struct,
-                regex::Regex::new(r"^\s*type\s+(\w+)\s+struct").expect("Go struct regex compilation failed"),
+                regex::Regex::new(r"^\s*type\s+(\w+)\s+struct")
+                    .expect("Go struct regex compilation failed"),
             ),
             (
                 SymbolKind::Trait,
-                regex::Regex::new(r"^\s*type\s+(\w+)\s+interface").expect("Go interface regex compilation failed"),
+                regex::Regex::new(r"^\s*type\s+(\w+)\s+interface")
+                    .expect("Go interface regex compilation failed"),
             ),
         ],
         "c" | "cpp" => vec![
@@ -213,11 +230,13 @@ fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<Symbol
             ),
             (
                 SymbolKind::Struct,
-                regex::Regex::new(r"^\s*(?:typedef\s+)?struct\s+(\w+)").expect("C/C++ struct regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:typedef\s+)?struct\s+(\w+)")
+                    .expect("C/C++ struct regex compilation failed"),
             ),
             (
                 SymbolKind::Enum,
-                regex::Regex::new(r"^\s*(?:typedef\s+)?enum\s+(\w+)").expect("C/C++ enum regex compilation failed"),
+                regex::Regex::new(r"^\s*(?:typedef\s+)?enum\s+(\w+)")
+                    .expect("C/C++ enum regex compilation failed"),
             ),
         ],
         _ => vec![],
@@ -390,9 +409,10 @@ mod tests {
 
     fn temp_rust_project() -> String {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = format!("/tmp/openshark_repo_test_{}_{n}", std::process::id());
+        let dir = format!("/tmp/openshield_repo_test_{}_{n}", std::process::id());
         let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(format!("{}/src", dir)).expect("Failed to create test project src directory");
+        fs::create_dir_all(format!("{}/src", dir))
+            .expect("Failed to create test project src directory");
         fs::write(
             format!("{}/src/main.rs", dir),
             r#"

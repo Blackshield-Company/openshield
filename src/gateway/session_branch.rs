@@ -40,7 +40,10 @@ impl BranchRegistry {
 
     /// Save the current channel state as a named branch.
     pub fn save(&self, channel_id: u64, name: &str, state: ChannelState) {
-        let mut branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
+        let mut branches = self
+            .branches
+            .lock()
+            .expect("SessionBranchRegistry mutex poisoned");
         branches.insert(
             (channel_id, name.to_string()),
             Branch {
@@ -53,7 +56,10 @@ impl BranchRegistry {
 
     /// Load a branch back into a channel state.
     pub fn load(&self, channel_id: u64, name: &str) -> Option<ChannelState> {
-        let branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
+        let branches = self
+            .branches
+            .lock()
+            .expect("SessionBranchRegistry mutex poisoned");
         branches
             .get(&(channel_id, name.to_string()))
             .map(|b| b.state.clone())
@@ -61,7 +67,10 @@ impl BranchRegistry {
 
     /// List all branch names for a channel.
     pub fn list(&self, channel_id: u64) -> Vec<BranchInfo> {
-        let branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
+        let branches = self
+            .branches
+            .lock()
+            .expect("SessionBranchRegistry mutex poisoned");
         branches
             .iter()
             .filter(|((cid, _), _)| *cid == channel_id)
@@ -76,14 +85,20 @@ impl BranchRegistry {
 
     /// Delete a branch.
     pub fn delete(&self, channel_id: u64, name: &str) -> bool {
-        let mut branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
+        let mut branches = self
+            .branches
+            .lock()
+            .expect("SessionBranchRegistry mutex poisoned");
         branches.remove(&(channel_id, name.to_string())).is_some()
     }
 
     /// Check if a branch exists.
     #[allow(dead_code)]
     pub fn exists(&self, channel_id: u64, name: &str) -> bool {
-        let branches = self.branches.lock().expect("SessionBranchRegistry mutex poisoned");
+        let branches = self
+            .branches
+            .lock()
+            .expect("SessionBranchRegistry mutex poisoned");
         branches.contains_key(&(channel_id, name.to_string()))
     }
 }

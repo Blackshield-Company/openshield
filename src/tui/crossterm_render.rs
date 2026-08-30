@@ -1,64 +1,66 @@
+#![allow(dead_code)]
+
 use crossterm::{
     cursor::{self, MoveTo, MoveToColumn, MoveToNextLine, Show},
-    style::{Color, Print, ResetColor, SetForegroundColor, SetBackgroundColor, Stylize},
+    style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor, Stylize},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand, QueueableCommand,
 };
 use std::io::{self, stdout, Write};
 
-/// Cyberpunk neon color palette.
+/// Blackshield color palette for direct crossterm rendering.
 #[derive(Debug, Clone, Copy)]
-pub struct CyberTheme {
+pub struct BlackshieldTheme {
     pub bg: Color,
     pub fg: Color,
-    pub accent: Color,         // Cyan
-    pub accent_secondary: Color, // Magenta/Pink
-    pub accent_tertiary: Color,  // Gold/Yellow
+    pub accent: Color,
+    pub accent_secondary: Color,
+    pub accent_tertiary: Color,
     pub muted: Color,
-    pub border: Color,         // Electric purple
-    pub border_focused: Color, // Cyan
+    pub border: Color,
+    pub border_focused: Color,
     pub error: Color,
     pub success: Color,
     pub warning: Color,
     pub selection: Color,
     pub highlight: Color,
-    pub shark: Color,
+    pub shield: Color,
 }
 
-impl Default for CyberTheme {
+impl Default for BlackshieldTheme {
     fn default() -> Self {
-        Self::neon_purple()
+        Self::blackshield()
     }
 }
 
-impl CyberTheme {
-    pub fn neon_purple() -> Self {
+impl BlackshieldTheme {
+    pub const fn blackshield() -> Self {
         Self {
-            bg: Color::Rgb { r: 26, g: 11, b: 46 },           // #1a0b2e
-            fg: Color::Rgb { r: 220, g: 220, b: 220 },        // #dcdcdc
-            accent: Color::Rgb { r: 0, g: 255, b: 255 },      // #00ffff
-            accent_secondary: Color::Rgb { r: 255, g: 0, b: 255 }, // #ff00ff
-            accent_tertiary: Color::Rgb { r: 255, g: 215, b: 0 },  // #ffd700
-            muted: Color::Rgb { r: 100, g: 80, b: 120 },      // #645078
-            border: Color::Rgb { r: 138, g: 43, b: 226 },     // #8a2be2
-            border_focused: Color::Rgb { r: 0, g: 255, b: 255 }, // #00ffff
-            error: Color::Rgb { r: 255, g: 80, b: 80 },       // #ff5050
-            success: Color::Rgb { r: 80, g: 255, b: 120 },    // #50ff78
-            warning: Color::Rgb { r: 255, g: 200, b: 60 },    // #ffc83c
-            selection: Color::Rgb { r: 60, g: 30, b: 80 },    // #3c1e50
-            highlight: Color::Rgb { r: 255, g: 0, b: 255 },    // #ff00ff
-            shark: Color::Rgb { r: 255, g: 0, b: 255 },       // #ff00ff
+            bg: Color::Rgb { r: 13, g: 13, b: 17 },
+            fg: Color::Rgb { r: 216, g: 211, b: 200 },
+            accent: Color::Rgb { r: 193, g: 18, b: 31 },
+            accent_secondary: Color::Rgb { r: 201, g: 162, b: 39 },
+            accent_tertiary: Color::Rgb { r: 91, g: 127, b: 166 },
+            muted: Color::Rgb { r: 138, g: 143, b: 152 },
+            border: Color::Rgb { r: 26, g: 26, b: 32 },
+            border_focused: Color::Rgb { r: 193, g: 18, b: 31 },
+            error: Color::Rgb { r: 193, g: 18, b: 31 },
+            success: Color::Rgb { r: 106, g: 153, b: 78 },
+            warning: Color::Rgb { r: 201, g: 162, b: 39 },
+            selection: Color::Rgb { r: 193, g: 18, b: 31 },
+            highlight: Color::Rgb { r: 255, g: 107, b: 114 },
+            shield: Color::Rgb { r: 193, g: 18, b: 31 },
         }
     }
 }
 
-static mut CURRENT_THEME: CyberTheme = CyberTheme::neon_purple();
+static mut CURRENT_THEME: BlackshieldTheme = BlackshieldTheme::blackshield();
 
-pub fn set_theme(theme: CyberTheme) {
+pub fn set_theme(theme: BlackshieldTheme) {
     unsafe { CURRENT_THEME = theme; }
 }
 
-pub fn current_theme() -> CyberTheme {
+pub fn current_theme() -> BlackshieldTheme {
     unsafe { CURRENT_THEME }
 }
 

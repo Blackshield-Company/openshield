@@ -1,6 +1,6 @@
 //! Context Mode — Auto file identification for smarter agent context
 //!
-//! When enabled, OpenShark automatically identifies files relevant to the user's
+//! When enabled, OpenShield automatically identifies files relevant to the user's
 //! query and injects them into the system prompt. This helps the model know
 //! which files to read without the user explicitly mentioning them.
 //!

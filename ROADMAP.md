@@ -1,4 +1,4 @@
-# OpenShark Roadmap
+# OpenShield Roadmap
 
 ## Phase 1: Core Engine (Weeks 1-2)
 **Goal:** Chat with any model, persistent memory, basic tools.
@@ -17,7 +17,7 @@
 | 5 | Test runner | Auto-detect test framework, run tests |
 | 5 | Refactor engine | Extract function, rename symbol, etc. |
 
-**Success Criteria:** Can build a feature end-to-end without leaving OpenShark. ✅
+**Success Criteria:** Can build a feature end-to-end without leaving OpenShield. ✅
 
 ## Phase 3: Real Memory (Weeks 6-7)
 **Goal:** Surpass Hermes memory with semantic search and cross-session context.
@@ -60,7 +60,7 @@
 **Success Criteria:** First token in < 500ms, tool results in < 1s. ✅
 
 ## Phase 6: Distribution & Community (Week 13+)
-**Goal:** Make OpenShark accessible to everyone.
+**Goal:** Make OpenShield accessible to everyone.
 **Status: ✅ COMPLETE** — Stats command ✅, Multi-model chat ✅, One-liner install ✅
 
 ## Phase 7: Agent Identity (v0.5.0)
@@ -77,14 +77,14 @@
 
 **How to customize your agent:**
 
-1. **Via setup wizard:** `openshark setup` → configure agent identity interactively
-2. **Via config edit:** Edit `~/.config/openshark/config.toml`:
+1. **Via setup wizard:** `openshield setup` → configure agent identity interactively
+2. **Via config edit:** Edit `~/.config/openshield/config.toml`:
 ```toml
 [agent]
 name = "myagent"
 display_name = "MyAgent"
 role = "coding assistant"
-origin = "Created in the neon grid"
+origin = "Created in the Blackshield forge"
 purpose = "To ship code fast"
 tagline = "Let's build the future."
 tone = "Professional but friendly"
@@ -102,18 +102,18 @@ behavioral_rules = [
 3. **Environment override:** `SOUL_NAME=blank` for neutral assistant
 
 ## Phase 8: Infrastructure & Platform (v0.6.0)
-**Goal:** OpenShark becomes a full agent platform — not just a coding harness. Gateway, MCP, skills, self-improvement, multi-platform messaging.
+**Goal:** OpenShield becomes a full agent platform — not just a coding harness. Gateway, MCP, skills, self-improvement, multi-platform messaging.
 **Status: ✅ COMPLETE** — Native MCP client ✅, Multi-platform gateway ✅ (Discord, Telegram, Slack, Matrix), Skills system ✅, Self-improvement ✅, Setup wizard ✅
 
 ### 8.1 Setup System with Config Transfer
 
-OpenShark's setup wizard runs standalone and can optionally import from other agent configs.
+OpenShield's setup wizard runs standalone and can optionally import from other agent configs.
 
 ```bash
-openshark setup                              # Interactive setup wizard
-openshark setup --migrate-from hermes        # Import Hermes config
-openshark setup --migrate-from openclaw      # Import OpenClaw config
-openshark setup --migrate-from hermes --dry-run   # Preview only
+openshield setup                              # Interactive setup wizard
+openshield setup --migrate-from hermes        # Import Hermes config
+openshield setup --migrate-from openclaw      # Import OpenClaw config
+openshield setup --migrate-from hermes --dry-run   # Preview only
 ```
 
 **Setup Flow:**
@@ -123,7 +123,7 @@ openshark setup --migrate-from hermes --dry-run   # Preview only
 
 **Step 1 — Detect:**
 - Check Rust toolchain (cargo, rustc)
-- Check for existing OpenShark config at `~/.config/openshark/`
+- Check for existing OpenShield config at `~/.config/openshield/`
 - Detect Hermes installation at `~/.hermes` (offer config transfer)
 - Detect OpenClaw installation at `~/.openclaw` (offer config transfer)
 
@@ -132,9 +132,9 @@ openshark setup --migrate-from hermes --dry-run   # Preview only
 - Build dependencies (openssl, pkg-config)
 
 **Step 3 — Auto-Configure:**
-- Write `~/.config/openshark/config.toml` with defaults
-- Create `~/.local/share/openshark/` for memory database
-- Create `~/.cache/openshark/` for response cache
+- Write `~/.config/openshield/config.toml` with defaults
+- Create `~/.local/share/openshield/` for memory database
+- Create `~/.cache/openshield/` for response cache
 - Generate shell completions (bash, zsh, fish)
 
 **Step 4 — Test:**
@@ -147,46 +147,46 @@ openshark setup --migrate-from hermes --dry-run   # Preview only
 - Show quick-start commands
 - Offer to launch TUI
 
-**Config Transfer from Hermes → OpenShark:**
+**Config Transfer from Hermes → OpenShield:**
 
-| Hermes Source | OpenShark Destination | Content |
+| Hermes Source | OpenShield Destination | Content |
 |---------------|----------------------|---------|
-| `~/.hermes/SOUL.md` | `~/.config/openshark/SOUL.md` | User persona / agent identity |
-| `~/.hermes/memory/` | `~/.local/share/openshark/memory/` | Hermes memory entries |
-| `~/.hermes/skills/` | `~/.config/openshark/skills/` | Skills (filtered for coding/dev) |
-| `~/.hermes/config.yaml` | `~/.config/openshark/config.toml` | Provider configs (mapped to OpenShark format) |
+| `~/.hermes/SOUL.md` | `~/.config/openshield/SOUL.md` | User persona / agent identity |
+| `~/.hermes/memory/` | `~/.local/share/openshield/memory/` | Hermes memory entries |
+| `~/.hermes/skills/` | `~/.config/openshield/skills/` | Skills (filtered for coding/dev) |
+| `~/.hermes/config.yaml` | `~/.config/openshield/config.toml` | Provider configs (mapped to OpenShield format) |
 
-**Config Transfer from OpenClaw → OpenShark:**
+**Config Transfer from OpenClaw → OpenShield:**
 
-| OpenClaw Source | OpenShark Destination | Content |
+| OpenClaw Source | OpenShield Destination | Content |
 |-----------------|----------------------|---------|
-| `~/.openclaw/SOUL.md` | `~/.config/openshark/SOUL.md` | User persona / agent identity |
-| `~/.openclaw/MEMORY.md` | `~/.local/share/openshark/memory/` | Long-term agent knowledge |
-| `~/.openclaw/USER.md` | `~/.config/openshark/user_profile.md` | User profile |
-| `~/.openclaw/workspace/tts/` | `~/.config/openshark/tts/` | TTS voice assets |
-| `~/.openclaw/skills/` | `~/.config/openshark/skills/` | User skills (filtered for coding/dev) |
-| `~/.openclaw/.env` | `~/.config/openshark/*.env` | API keys (Hermes-compatible providers only) |
+| `~/.openclaw/SOUL.md` | `~/.config/openshield/SOUL.md` | User persona / agent identity |
+| `~/.openclaw/MEMORY.md` | `~/.local/share/openshield/memory/` | Long-term agent knowledge |
+| `~/.openclaw/USER.md` | `~/.config/openshield/user_profile.md` | User profile |
+| `~/.openclaw/workspace/tts/` | `~/.config/openshield/tts/` | TTS voice assets |
+| `~/.openclaw/skills/` | `~/.config/openshield/skills/` | User skills (filtered for coding/dev) |
+| `~/.openclaw/.env` | `~/.config/openshield/*.env` | API keys (Hermes-compatible providers only) |
 
 **Migration Paths (No Circular Deps):**
 - **OpenClaw → Hermes:** `hermes claw migrate` (Hermes maintains this)
-- **OpenClaw → OpenShark:** `openshark setup --migrate-from openclaw`
-- **Hermes → OpenShark:** `openshark setup --migrate-from hermes`
+- **OpenClaw → OpenShield:** `openshield setup --migrate-from openclaw`
+- **Hermes → OpenShield:** `openshield setup --migrate-from hermes`
 
 Each tool only reads from source, never writes to another tool's config.
 
 ### 8.2 Doctor — Auto-Repair System
 
-`openshark doctor` is not just a diagnostic — it's an auto-repair function that detects and fixes broken components.
+`openshield doctor` is not just a diagnostic — it's an auto-repair function that detects and fixes broken components.
 
 ```bash
-openshark doctor              # Full diagnostic + auto-fix
-openshark doctor --check      # Diagnostic only, no fixes
-openshark doctor --fix        # Apply all fixes without prompting
-openshark doctor --component gateway   # Check/fix only gateway
-openshark doctor --component mcp      # Check/fix only MCP
-openshark doctor --component skills   # Check/fix only skills
-openshark doctor --component memory   # Check/fix only memory
-openshark doctor --component providers # Check/fix only providers
+openshield doctor              # Full diagnostic + auto-fix
+openshield doctor --check      # Diagnostic only, no fixes
+openshield doctor --fix        # Apply all fixes without prompting
+openshield doctor --component gateway   # Check/fix only gateway
+openshield doctor --component mcp      # Check/fix only MCP
+openshield doctor --component skills   # Check/fix only skills
+openshield doctor --component memory   # Check/fix only memory
+openshield doctor --component providers # Check/fix only providers
 ```
 
 **What doctor checks and fixes:**
@@ -228,16 +228,16 @@ impl Doctor {
 }
 ```
 
-### 8.3 OpenShark Gateway (Native — No Hermes Dependency)
+### 8.3 OpenShield Gateway (Native — No Hermes Dependency)
 
-OpenShark runs its own gateway for multi-platform messaging. No Hermes required.
+OpenShield runs its own gateway for multi-platform messaging. No Hermes required.
 
 ```bash
-openshark gateway start       # Start gateway daemon
-openshark gateway stop        # Stop gateway daemon
-openshark gateway status      # Show platform connections
-openshark gateway restart     # Restart gateway
-openshark gateway logs        # Tail gateway logs
+openshield gateway start       # Start gateway daemon
+openshield gateway stop        # Stop gateway daemon
+openshield gateway status      # Show platform connections
+openshield gateway restart     # Restart gateway
+openshield gateway logs        # Tail gateway logs
 ```
 
 **Supported Platforms:**
@@ -251,7 +251,7 @@ openshark gateway logs        # Tail gateway logs
 **Gateway Architecture:**
 ```
 ┌─────────────────────────────────────────┐
-│           OpenShark Gateway             │
+│           OpenShield Gateway             │
 │  ┌─────────┐ ┌─────────┐ ┌──────────┐ │
 │  │ Discord │ │Telegram │ │  Slack   │ │
 │  │ Adapter │ │ Adapter │ │ Adapter  │ │
@@ -262,7 +262,7 @@ openshark gateway logs        # Tail gateway logs
 │  └────────────────┬─────────────────┘  │
 │                   │                     │
 │  ┌────────────────┴─────────────────┐  │
-│  │       OpenShark Agent Core       │  │
+│  │       OpenShield Agent Core       │  │
 │  │  (tools, memory, model routing)  │  │
 │  └──────────────────────────────────┘  │
 └─────────────────────────────────────────┘
@@ -295,14 +295,14 @@ socket_mode = true
 
 ### 8.4 MCP Server Integration
 
-OpenShark acts as an MCP client — discovers and calls tools from any MCP server.
+OpenShield acts as an MCP client — discovers and calls tools from any MCP server.
 
 ```bash
-openshark mcp list            # List configured MCP servers
-openshark mcp add <name>      # Add MCP server
-openshark mcp remove <name>   # Remove MCP server
-openshark mcp test <name>     # Test server connection
-openshark mcp tools <name>    # List tools from server
+openshield mcp list            # List configured MCP servers
+openshield mcp add <name>      # Add MCP server
+openshield mcp remove <name>   # Remove MCP server
+openshield mcp test <name>     # Test server connection
+openshield mcp tools <name>    # List tools from server
 ```
 
 **Config:**
@@ -323,14 +323,14 @@ url = "http://localhost:3000/sse"
 
 ### 8.5 Skills System
 
-OpenShark has its own skills system — independent from Hermes.
+OpenShield has its own skills system — independent from Hermes.
 
 ```bash
-openshark skills list         # List installed skills
-openshark skills search       # Search skills hub
-openshark skills install      # Install skill from hub
-openshark skills update       # Update all skills
-openshark skills remove       # Remove skill
+openshield skills list         # List installed skills
+openshield skills search       # Search skills hub
+openshield skills install      # Install skill from hub
+openshield skills update       # Update all skills
+openshield skills remove       # Remove skill
 ```
 
 **Skill Format:**
@@ -350,18 +350,18 @@ tags:
 ```
 
 **Skill Directories:**
-- Built-in: `~/.config/openshark/skills/builtin/`
-- User: `~/.config/openshark/skills/user/`
-- Hub: `~/.config/openshark/skills/hub/`
+- Built-in: `~/.config/openshield/skills/builtin/`
+- User: `~/.config/openshield/skills/user/`
+- Hub: `~/.config/openshield/skills/hub/`
 
 ### 8.6 Self-Improvement Engine
 
-OpenShark analyzes its own performance and suggests improvements.
+OpenShield analyzes its own performance and suggests improvements.
 
 ```bash
-openshark learn               # Run self-improvement analysis
-openshark learn --report      # Generate improvement report
-openshark learn --apply       # Apply recommended changes
+openshield learn               # Run self-improvement analysis
+openshield learn --report      # Generate improvement report
+openshield learn --apply       # Apply recommended changes
 ```
 
 **What it tracks:**
@@ -381,8 +381,8 @@ openshark learn --apply       # Apply recommended changes
 
 ```
 src/config/setup.rs              # Enhanced setup wizard with migration
-src/config/migrate_hermes.rs     # Hermes → OpenShark migration
-src/config/migrate_openclaw.rs   # OpenClaw → OpenShark migration
+src/config/migrate_hermes.rs     # Hermes → OpenShield migration
+src/config/migrate_openclaw.rs   # OpenClaw → OpenShield migration
 src/doctor/mod.rs                # Doctor auto-repair system
 src/doctor/checks.rs             # Individual health checks
 src/doctor/fixes.rs              # Auto-fix implementations
@@ -412,10 +412,10 @@ scripts/setup.sh                 # One-liner curl install
 ### 9.1 Swarm Engine
 
 ```bash
-openshark swarm init "Build a REST API with auth"  # Initialize swarm with seed prompt
-openshark swarm start                               # Start autonomous loop
-openshark swarm stop                                # Stop swarm
-openshark swarm status                              # Show swarm status
+openshield swarm init "Build a REST API with auth"  # Initialize swarm with seed prompt
+openshield swarm start                               # Start autonomous loop
+openshield swarm stop                                # Stop swarm
+openshield swarm status                              # Show swarm status
 ```
 
 **Features:**
@@ -469,7 +469,7 @@ src/swarm/agent_runner.rs   # AgentRunner, AgentContext, build_agent_provider
 
 ### 9.5 Real LLM Integration
 
-Each agent now makes actual LLM calls via the OpenShark provider system:
+Each agent now makes actual LLM calls via the OpenShield provider system:
 
 - **Per-agent provider** — Each agent gets a cloned `Provider` with isolated context
 - **Tool access** — Agents can use `fs`, `search`, `terminal`, `git`, etc. (30s timeout)
@@ -496,7 +496,7 @@ Each agent now makes actual LLM calls via the OpenShark provider system:
 ### 9.7 Enabling Swarm Mode
 
 ```toml
-# ~/.config/openshark/config.toml
+# ~/.config/openshield/config.toml
 [swarm]
 enabled = true           # Enable swarm mode
 max_agents = 8

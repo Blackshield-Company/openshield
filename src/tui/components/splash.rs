@@ -1,23 +1,23 @@
 /// Direct ANSI rendering for the splash screen.
-/// Displays the OpenShark banner with shark ASCII art, version info, and session details.
+/// Displays the OpenShield banner with Blackshield sigil art, version info, and session details.
 /// Styled after the Hermes Agent TUI launch screen.
 ///
 /// ANTI-FLICKER: Uses a static flag to only clear+draw once. Subsequent calls
 /// just re-flush the existing buffer. This eliminates the seizure-inducing
 /// full-screen clear on every 60fps tick.
-use std::io::{self, stdout, Write};
+use std::io::{self, Write, stdout};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::{
     cursor::{Hide, MoveTo},
+    queue,
     style::{Print, ResetColor},
     terminal::{Clear, ClearType},
-    queue,
 };
 
-use crate::tui::ascii_art;
-use crate::tui::theme::{ansi_fg, ansi_reset, Color};
 use crate::tui::App;
+use crate::tui::ascii_art;
+use crate::tui::theme::{Color, ansi_fg, ansi_reset};
 
 static SPLASH_DRAWN: AtomicBool = AtomicBool::new(false);
 
@@ -79,7 +79,11 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
         // "Press any key" prompt
         let prompt = format!(
             "{}Press any key to start{}",
-            ansi_fg(Color::Rgb { r: 255, g: 77, b: 158 }),
+            ansi_fg(Color::Rgb {
+                r: 193,
+                g: 18,
+                b: 31
+            }),
             ansi_reset()
         );
         let prompt_x = (term_width.saturating_sub(visible_width(&prompt) as u16)) / 2;

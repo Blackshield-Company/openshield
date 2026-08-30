@@ -220,7 +220,8 @@ mod tests {
     #[test]
     fn test_json_rpc_request_serialization() {
         let req = JsonRpcRequest::new("tools/list", None);
-        let json = serde_json::to_string(&req).expect("JSON-RPC request serialization should not fail");
+        let json =
+            serde_json::to_string(&req).expect("JSON-RPC request serialization should not fail");
         assert!(json.contains("\"jsonrpc\":\"2.0\""));
         assert!(json.contains("\"method\":\"tools/list\""));
         assert!(json.contains("\"id\":"));
@@ -229,7 +230,8 @@ mod tests {
     #[test]
     fn test_json_rpc_response_parsing() {
         let raw = r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#;
-        let resp: JsonRpcResponse = serde_json::from_str(raw).expect("JSON-RPC response parsing should not fail");
+        let resp: JsonRpcResponse =
+            serde_json::from_str(raw).expect("JSON-RPC response parsing should not fail");
         assert_eq!(resp.id, 1);
         assert!(resp.result.is_some());
         assert!(resp.error.is_none());
@@ -239,7 +241,8 @@ mod tests {
     fn test_json_rpc_error_parsing() {
         let raw =
             r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
-        let resp: JsonRpcResponse = serde_json::from_str(raw).expect("JSON-RPC response parsing should not fail");
+        let resp: JsonRpcResponse =
+            serde_json::from_str(raw).expect("JSON-RPC response parsing should not fail");
         assert!(resp.error.is_some());
         let err = resp.error.expect("JSON-RPC response should contain error");
         assert_eq!(err.code, -32601);
@@ -268,12 +271,13 @@ mod tests {
             protocol_version: MCP_PROTOCOL_VERSION.to_string(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "openshark".to_string(),
+                name: "openshield".to_string(),
                 version: crate::VERSION.to_string(),
             },
         };
-        let json = serde_json::to_string(&params).expect("JSON-RPC params serialization should not fail");
-        assert!(json.contains("openshark"));
+        let json =
+            serde_json::to_string(&params).expect("JSON-RPC params serialization should not fail");
+        assert!(json.contains("openshield"));
         assert!(json.contains("2024-11-05"));
     }
 }

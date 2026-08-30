@@ -1,8 +1,8 @@
-# OpenShark v1.2.x Roadmap
+# OpenShield v1.2.x Roadmap
 
 ## Vision
 
-OpenShark becomes the **synthesis engine** — a standalone powerhouse that optionally integrates with every other harness (Hermes, OpenClaw, OpenCode, Claw Code, Claude Code). Strong alone, stronger connected. No circular deps, no required external tools.
+OpenShield becomes the **synthesis engine** — a standalone powerhouse that optionally integrates with every other harness (Hermes, OpenClaw, OpenCode, Claw Code, Claude Code). Strong alone, stronger connected. No circular deps, no required external tools.
 
 ---
 
@@ -28,13 +28,13 @@ OpenShark becomes the **synthesis engine** — a standalone powerhouse that opti
 
 ## Tier 2: Hermes Bridge (Optional) 🟡 SCAFFOLDED
 
-**Goal:** Two-way sync with Hermes — OpenShark reads Hermes memory, Hermes reads OpenShark skills.
+**Goal:** Two-way sync with Hermes — OpenShield reads Hermes memory, Hermes reads OpenShield skills.
 
 ```bash
-openshark hermes status      # Show bridge status
-openshark hermes sync        # Pull memories from Hermes
-openshark hermes push        # Push skills to Hermes
-openshark hermes bridge      # Start real-time sync daemon
+openshield hermes status      # Show bridge status
+openshield hermes sync        # Pull memories from Hermes
+openshield hermes push        # Push skills to Hermes
+openshield hermes bridge      # Start real-time sync daemon
 ```
 
 **Config (optional, off by default):**
@@ -56,18 +56,18 @@ push_skills = true
 
 ## Tier 3: OpenClaw / OpenCode / Claw-Code Interop (Optional) ✅ COMPLETE
 
-**Goal:** Delegate to other agents, stream results back. OpenShark as conductor.
+**Goal:** Delegate to other agents, stream results back. OpenShield as conductor.
 
 ```bash
-openshark delegate claw "refactor auth module"      # Delegate to Claw Code
-openshark delegate opencode "fix bug #42"           # Delegate to OpenCode
-openshark delegate claude "write tests for src/lib.rs"  # Delegate to Claude Code
+openshield delegate claw "refactor auth module"      # Delegate to Claw Code
+openshield delegate opencode "fix bug #42"           # Delegate to OpenCode
+openshield delegate claude "write tests for src/lib.rs"  # Delegate to Claude Code
 ```
 
 **Behavior:**
 - Detects if tool is installed (`which claw`, `which opencode`, etc.)
 - Spawns process, streams stdout/stderr back to TUI in real-time
-- Captures result, stores in OpenShark memory
+- Captures result, stores in OpenShield memory
 - If tool not installed: suggests install command, does not fail
 
 **Files:**
@@ -98,11 +98,11 @@ openshark delegate claude "write tests for src/lib.rs"  # Delegate to Claude Cod
 
 ## Tier 5: The Synthesis Engine 📋 NOT STARTED
 
-**Goal:** Meta-learning across harnesses. OpenShark learns which agent performs best per task type.
+**Goal:** Meta-learning across harnesses. OpenShield learns which agent performs best per task type.
 
 ```bash
-openshark synthesis "fix the auth bug"   # Auto-routes to best agent
-openshark synthesis --compare "refactor" # Run on all available agents, compare
+openshield synthesis "fix the auth bug"   # Auto-routes to best agent
+openshield synthesis --compare "refactor" # Run on all available agents, compare
 ```
 
 **Behavior:**

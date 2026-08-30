@@ -53,9 +53,7 @@ pub fn command_on_path(command: &str) -> bool {
         return std::path::Path::new(command).is_file();
     }
     std::env::var_os("PATH")
-        .map(|paths| {
-            std::env::split_paths(&paths).any(|dir| dir.join(command).is_file())
-        })
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(command).is_file()))
         .unwrap_or(false)
 }
 
@@ -98,9 +96,13 @@ impl LspClient {
             .spawn()
             .with_context(|| format!("Failed to start LSP server: {}", command))?;
 
-        let stdin = server.stdin.take()
+        let stdin = server
+            .stdin
+            .take()
             .ok_or_else(|| anyhow::anyhow!("LSP server stdin not available"))?;
-        let stdout = server.stdout.take()
+        let stdout = server
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("LSP server stdout not available"))?;
 
         // Drain stderr into a small ring buffer so EOF errors can quote it.
@@ -143,7 +145,10 @@ impl LspClient {
     }
 
     fn next_id(&self) -> i64 {
-        let mut id = self.request_id.lock().expect("LSP request_id mutex poisoned");
+        let mut id = self
+            .request_id
+            .lock()
+            .expect("LSP request_id mutex poisoned");
         *id += 1;
         *id
     }
@@ -495,14 +500,14 @@ mod lsp_server_preflight_tests {
 #[cfg(test)]
 mod lsp_live_tests {
     //! Live protocol tests against a real pylsp process.
-    //! Run: cargo test --bin openshark lsp_live -- --include-ignored --nocapture
+    //! Run: cargo test --bin openshield lsp_live -- --include-ignored --nocapture
     use super::*;
     use crate::lsp::LspManager;
 
     const DEMO: &str = "demo.py";
 
     fn demo_content() -> String {
-        "def greet(name: str) -> str:\n    \"\"\"Return a retro greeting.\"\"\"\n    return f\"Stay retro, {name}\"\n\n\nmessage = greet(\"openshark\")\nprint(message)\n"
+        "def greet(name: str) -> str:\n    \"\"\"Return a retro greeting.\"\"\"\n    return f\"Stay retro, {name}\"\n\n\nmessage = greet(\"openshield\")\nprint(message)\n"
             .to_string()
     }
 
@@ -581,7 +586,7 @@ mod lsp_live_tests {
         let file = dir.join("src/main.rs");
         std::fs::write(
             &file,
-            "fn main() {\n    let msg = \"openshark protocol test\";\n    println!(\"{}\", msg);\n}\n",
+            "fn main() {\n    let msg = \"openshield protocol test\";\n    println!(\"{}\", msg);\n}\n",
         )
         .unwrap();
         let file_str = file.to_string_lossy().to_string();

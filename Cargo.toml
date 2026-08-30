@@ -1,23 +1,23 @@
 [package]
-name = "openshark"
+name = "openshield"
 version = "1.1.0"
 edition = "2024"
 authors = ["synth <synthalorian@gmail.com>"]
 description = "The harness that learns. The agent that decides."
 license = "MIT"
-repository = "https://github.com/synthalorian/openshark"
+repository = "https://github.com/synthalorian/openshield"
 keywords = ["ai", "harness", "coding", "agent", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.91"
 
 [[bin]]
-name = "openshark"
+name = "openshield"
 path = "src/main.rs"
 
 # Library target: same modules as the bin, exposed for embedding
-# (Tauri Android backend links this to host `openshark serve` in-process).
+# (Tauri Android backend links this to host `openshield serve` in-process).
 [lib]
-name = "openshark"
+name = "openshield"
 path = "src/lib.rs"
 
 [features]

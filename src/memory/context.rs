@@ -177,7 +177,8 @@ impl<'a> ContextInjector<'a> {
 
         // Pattern: "Tell me about X"
         let tell_me_about = TELL_ME_ABOUT_RE.get_or_init(|| {
-            Regex::new(r"tell me (about|regarding)\s+(.+?)\??$").expect("tell me about regex compilation failed")
+            Regex::new(r"tell me (about|regarding)\s+(.+?)\??$")
+                .expect("tell me about regex compilation failed")
         });
         if let Some(caps) = tell_me_about.captures(&query_lower) {
             return QueryIntent::TellMeAbout {
@@ -329,7 +330,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = COUNTER.fetch_add(1, Ordering::SeqCst);
         let db_path = format!(
-            "/tmp/openshark_context_test_{}_{}.db",
+            "/tmp/openshield_context_test_{}_{}.db",
             std::process::id(),
             count
         );
