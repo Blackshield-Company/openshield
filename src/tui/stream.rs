@@ -325,7 +325,7 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             success,
         } => {
             let display = if success {
-                format!("Result: {}", &result[..result.len().min(200)])
+                format!("Result: {}", crate::utils::truncate_str(&result, 200))
             } else {
                 format!("Tool execution failed: {}", result)
             };

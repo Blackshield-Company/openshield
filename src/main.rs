@@ -570,7 +570,7 @@ async fn main() -> anyhow::Result<()> {
                     for m in models {
                         println!(
                             "  {:<20} | {:>8} | {:>8} | {:>10} | {:>5.1}%",
-                            &m.model[..m.model.len().min(20)],
+                            crate::utils::truncate_str(&m.model, 20),
                             m.session_count,
                             m.message_count,
                             m.total_tokens,
@@ -730,7 +730,7 @@ async fn main() -> anyhow::Result<()> {
                     Ok(results) => {
                         println!("🛡 Semantic Search: '{}' ({} results)", query, results.len());
                         for (msg, score) in results {
-                            let preview = &msg.content[..msg.content.len().min(100)];
+                            let preview = crate::utils::truncate_str(&msg.content, 100);
                             println!(
                                 "  [{:.3}] [{}] {}: {}",
                                 score,
@@ -748,7 +748,7 @@ async fn main() -> anyhow::Result<()> {
                     Ok(messages) => {
                         println!("🛡 Memory Search: '{}' ({} results)", query, messages.len());
                         for msg in messages {
-                            let preview = &msg.content[..msg.content.len().min(100)];
+                            let preview = crate::utils::truncate_str(&msg.content, 100);
                             println!(
                                 "  [{}] {}: {}",
                                 msg.created_at.format("%Y-%m-%d %H:%M"),

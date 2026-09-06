@@ -282,7 +282,7 @@ impl MessageRouter {
                             "[{}] {}: {}\n",
                             msg.created_at.format("%Y-%m-%d"),
                             msg.role,
-                            &msg.content[..msg.content.len().min(150)]
+                            crate::utils::truncate_str(&msg.content, 150)
                         ));
                     }
                 }
@@ -298,7 +298,7 @@ impl MessageRouter {
                                 "[{}] {}: {}",
                                 msg.created_at.format("%Y-%m-%d"),
                                 msg.role,
-                                &msg.content[..msg.content.len().min(150)]
+                                crate::utils::truncate_str(&msg.content, 150)
                             )
                         })
                         .collect::<Vec<_>>()
