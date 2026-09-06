@@ -57,7 +57,7 @@ pub(crate) fn handle_user_tool_invocation(app: &mut App, input: &str) -> Result<
             let ok = !crate::tools::tool_output_indicates_failure(&sanitized);
             app.add_system_message(format!(
                 "Result: {}",
-                &sanitized[..sanitized.len().min(500)]
+                crate::utils::truncate_str(&sanitized, 500)
             ));
 
             let tool_call = ToolCall {

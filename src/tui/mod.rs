@@ -1253,7 +1253,7 @@ impl App {
                 .iter()
                 .filter(|m| m.role == "user" || m.role == "assistant")
                 .map(|m| {
-                    let preview = &m.content[..m.content.len().min(80)];
+                    let preview = crate::utils::truncate_str(&m.content, 80);
                     format!("{}: {}", m.role, preview)
                 })
                 .collect::<Vec<_>>()
@@ -1811,7 +1811,7 @@ async fn run_app(app: &mut App, last_tick: &mut Instant) -> Result<()> {
                             swarm_updates.push(format!(
                                 "🐝 **{}** {}",
                                 agent_id,
-                                &thought[..thought.len().min(300)]
+                                crate::utils::truncate_str(&thought, 300)
                             ));
                         }
                         crate::swarm::SwarmEvent::AgentError { agent_id, error } => {
@@ -1880,7 +1880,7 @@ async fn run_app(app: &mut App, last_tick: &mut Instant) -> Result<()> {
                             updates.push(format!(
                                 "🐝 **{}** completed:\n{}",
                                 agent.name,
-                                &result[..result.len().min(500)]
+                                crate::utils::truncate_str(result, 500)
                             ));
                         }
                         // Agent hit an error
@@ -3684,7 +3684,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                             "[{}] {}: {}",
                             msg.created_at.format("%H:%M:%S"),
                             msg.role,
-                            &msg.content[..msg.content.len().min(60)]
+                            crate::utils::truncate_str(&msg.content, 60)
                         )
                     })
                     .collect::<Vec<_>>()
@@ -5954,7 +5954,7 @@ async fn execute_tool_suggestion(app: &mut App, suggestion: &ToolSuggestion) -> 
                 .sanitize_output(&suggestion.tool_name, &result);
             app.add_system_message(format!(
                 "Result: {} ({}ms)",
-                &sanitized[..sanitized.len().min(200)],
+                crate::utils::truncate_str(&sanitized, 200),
                 metrics.duration_ms
             ));
 

@@ -1,22 +1,17 @@
 /// OpenShield ASCII Art & Banner Generation
 ///
 /// Blackshield Mercenary styling for the TUI launch screen: bone text, steel
-/// borders, and the blood-red shield sigil. Pixel glyphs intentionally use
-/// `▪` instead of `█` so adjacent cells keep readable gaps in terminal fonts.
+/// borders, and the blood-red shield sigil. Pixel glyphs use solid `█` blocks
+/// so the shield and wordmark read as continuous metal, not scattered dots.
 use crate::tui::theme::{Color, ansi_fg, ansi_reset};
 
 // ── Blackshield Palette ─────────────────────────────────────────────────────
 
 const C_IRON: Color = Color::Rgb {
-    r: 16,
-    g: 16,
-    b: 20,
-}; // #101014
-const C_STEEL: Color = Color::Rgb {
-    r: 22,
-    g: 22,
-    b: 28,
-}; // #16161C
+    r: 31,
+    g: 31,
+    b: 40,
+}; // #1F1F28 — charcoal, visible against a black terminal
 const C_BONE: Color = Color::Rgb {
     r: 216,
     g: 211,
@@ -57,6 +52,11 @@ const C_FIELD_GREEN: Color = Color::Rgb {
     g: 153,
     b: 78,
 }; // #6A994E
+const C_SHADOW: Color = Color::Rgb {
+    r: 20,
+    g: 20,
+    b: 26,
+}; // #14141A — wordmark drop shadow
 
 // ── Main Banner ─────────────────────────────────────────────────────────────
 
@@ -136,123 +136,147 @@ pub fn banner(term_width: usize, info: &SplashInfo) -> String {
 }
 
 // ── Wordmark ────────────────────────────────────────────────────────────────
+//
+// Gothic stencil wordmark: 5x7 block glyphs composed with 1-cell tracking.
+// A dark copy offset one cell left + one cell down yields the drop shadow.
+// Face rows: bone-bright top, blood crossbar, steel-ash base.
+
+const GLYPH_ROWS: usize = 7;
+
+fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
+    match ch {
+        'O' => [
+            "█████", "█   █", "█   █", "█   █", "█   █", "█   █", "█████",
+        ],
+        'P' => [
+            "█████", "█   █", "█   █", "█████", "█    ", "█    ", "█    ",
+        ],
+        'E' => [
+            "█████", "█    ", "█    ", "████ ", "█    ", "█    ", "█████",
+        ],
+        'N' => [
+            "█   █", "██  █", "██  █", "█ █ █", "█  ██", "█  ██", "█   █",
+        ],
+        'S' => [
+            "█████", "█    ", "█    ", "█████", "    █", "    █", "█████",
+        ],
+        'H' => [
+            "█   █", "█   █", "█   █", "█████", "█   █", "█   █", "█   █",
+        ],
+        'I' => [
+            "█████", "  █  ", "  █  ", "  █  ", "  █  ", "  █  ", "█████",
+        ],
+        'L' => [
+            "█    ", "█    ", "█    ", "█    ", "█    ", "█    ", "█████",
+        ],
+        'D' => [
+            "████ ", "█   █", "█   █", "█   █", "█   █", "█   █", "████ ",
+        ],
+        _ => ["     "; GLYPH_ROWS],
+    }
+}
+
+fn face_color(row: usize) -> Color {
+    match row {
+        0..=2 => C_BONE_BRIGHT,
+        3 => C_BLOOD_BRIGHT,
+        _ => C_ASH,
+    }
+}
 
 fn openshield_logo() -> Vec<String> {
-    let rows = [
-        " ▪▪▪   ▪▪▪▪  ▪▪▪▪▪ ▪   ▪  ▪▪▪▪ ▪   ▪ ▪▪▪▪▪ ▪▪▪▪▪ ▪     ▪▪▪▪ ",
-        "▪   ▪  ▪   ▪ ▪     ▪▪  ▪ ▪     ▪   ▪   ▪   ▪     ▪     ▪   ▪",
-        "▪   ▪  ▪▪▪▪  ▪▪▪▪  ▪ ▪ ▪  ▪▪▪  ▪▪▪▪▪   ▪   ▪▪▪▪  ▪     ▪   ▪",
-        "▪   ▪  ▪     ▪     ▪  ▪▪     ▪ ▪   ▪   ▪   ▪     ▪     ▪   ▪",
-        " ▪▪▪   ▪     ▪▪▪▪▪ ▪   ▪ ▪▪▪▪  ▪   ▪ ▪▪▪▪▪ ▪▪▪▪▪ ▪▪▪▪▪ ▪▪▪▪ ",
-    ];
+    let text = "OPENSHIELD";
+    let mut face: Vec<Vec<bool>> = vec![Vec::new(); GLYPH_ROWS];
+    for (i, ch) in text.chars().enumerate() {
+        for (y, row) in glyph(ch).iter().enumerate() {
+            if i > 0 {
+                face[y].push(false);
+            }
+            face[y].extend(row.chars().map(|c| c == '█'));
+        }
+    }
+    let w = face[0].len();
+    let is_face = |x: usize, y: usize| y < GLYPH_ROWS && x < w && face[y][x];
 
-    let colors = [C_BONE_BRIGHT, C_BONE, C_BLOOD_BRIGHT, C_BLOOD, C_BLOOD];
-
-    rows.iter()
-        .zip(colors)
-        .map(|(row, color)| format!("{}{}{}", ansi_fg(color), row, ansi_reset()))
+    (0..=GLYPH_ROWS)
+        .map(|oy| {
+            let mut out = String::new();
+            let mut active: Option<Color> = None;
+            for ox in 0..=w {
+                let cell = if ox >= 1 && is_face(ox - 1, oy) {
+                    Some(face_color(oy))
+                } else if oy >= 1 && is_face(ox, oy - 1) {
+                    Some(C_SHADOW)
+                } else {
+                    None
+                };
+                if cell != active {
+                    match cell {
+                        Some(c) => out.push_str(&ansi_fg(c)),
+                        None => out.push_str(ansi_reset()),
+                    }
+                    active = cell;
+                }
+                out.push(if cell.is_some() { '█' } else { ' ' });
+            }
+            out.push_str(ansi_reset());
+            out
+        })
         .collect()
 }
 
 // ── Blackshield Sigil ───────────────────────────────────────────────────────
+//
+// Template legend: `#` steel outline · `.` iron field · `X` blood cross ·
+// space = transparent. Every row is exactly 27 cells wide so all rows share
+// one center axis — the sigil cannot drift.
+
+const SHIELD_ROWS: &[&str] = &[
+    "###########################",
+    "#.........................#",
+    "#.........................#",
+    "#........XXXXXXXXX........#",
+    "#........XXXXXXXXX........#",
+    "#...XXX....XXXXX....XXX...#",
+    "#...XXXXX..XXXXX..XXXXX...#",
+    "#...XXXXXXXXXXXXXXXXXXX...#",
+    "#...XXXXX..XXXXX..XXXXX...#",
+    " #..XXX....XXXXX....XXX..# ",
+    "  #......XXXXXXXXX......#  ",
+    "   #.....XXXXXXXXX.....#   ",
+    "    #.................#    ",
+    "     #...............#     ",
+    "      #.............#      ",
+    "       #...........#       ",
+    "        #.........#        ",
+    "         #.......#         ",
+    "          #.....#          ",
+    "           #...#           ",
+    "            ###            ",
+];
 
 fn compact_shield() -> Vec<String> {
-    vec![
-        shield_line(8, &[(9, C_ASH)]),
-        shield_line(6, &[(2, C_ASH), (13, C_STEEL), (2, C_ASH)]),
-        shield_line(5, &[(2, C_ASH), (15, C_STEEL), (2, C_ASH)]),
-        shield_line(
-            4,
-            &[
-                (2, C_ASH),
-                (4, C_IRON),
-                (3, C_BLOOD),
-                (4, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            3,
-            &[
-                (2, C_ASH),
-                (4, C_IRON),
-                (7, C_BLOOD),
-                (4, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            3,
-            &[
-                (2, C_ASH),
-                (2, C_IRON),
-                (11, C_BLOOD),
-                (2, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            3,
-            &[
-                (2, C_ASH),
-                (2, C_IRON),
-                (11, C_BLOOD),
-                (2, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            4,
-            &[
-                (2, C_ASH),
-                (4, C_IRON),
-                (3, C_BLOOD),
-                (4, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            5,
-            &[
-                (2, C_ASH),
-                (3, C_IRON),
-                (3, C_BLOOD),
-                (3, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            6,
-            &[
-                (2, C_ASH),
-                (2, C_IRON),
-                (5, C_BLOOD),
-                (2, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(
-            7,
-            &[
-                (2, C_ASH),
-                (1, C_IRON),
-                (3, C_BLOOD),
-                (1, C_IRON),
-                (2, C_ASH),
-            ],
-        ),
-        shield_line(8, &[(2, C_ASH), (3, C_BLOOD), (2, C_ASH)]),
-        shield_line(9, &[(5, C_ASH)]),
-        shield_line(10, &[(3, C_ASH)]),
-        shield_line(11, &[(1, C_BLOOD)]),
-    ]
+    SHIELD_ROWS.iter().map(|row| render_shield_row(row)).collect()
 }
 
-fn shield_line(padding: usize, segments: &[(usize, Color)]) -> String {
-    let mut out = " ".repeat(padding);
-    for (count, color) in segments {
-        out.push_str(&ansi_fg(*color));
-        out.push_str(&"▪".repeat(*count));
+fn render_shield_row(row: &str) -> String {
+    let mut out = String::new();
+    let mut active: Option<char> = None;
+    for ch in row.chars() {
+        let class = match ch {
+            '#' | '.' | 'X' => Some(ch),
+            _ => None,
+        };
+        if class != active {
+            match class {
+                Some('#') => out.push_str(&ansi_fg(C_ASH)),
+                Some('.') => out.push_str(&ansi_fg(C_IRON)),
+                Some('X') => out.push_str(&ansi_fg(C_BLOOD)),
+                _ => out.push_str(ansi_reset()),
+            }
+            active = class;
+        }
+        out.push(if class.is_some() { '█' } else { ' ' });
     }
     out.push_str(ansi_reset());
     out
@@ -315,7 +339,7 @@ fn system_info_panel(
             &value_color,
             reset,
             "Session",
-            &session[..session.len().min(42)],
+            &crate::utils::truncate_str(session, 42),
         ),
         format!(
             "{}└──────────────────────┴────────────────────────────────────────────┘{}",
@@ -416,4 +440,31 @@ fn visible_line_width(s: &str) -> usize {
         }
     }
     width
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shield_rows_share_one_center_axis() {
+        for row in compact_shield() {
+            assert_eq!(visible_line_width(&row), 27, "row drifted: {row:?}");
+        }
+    }
+
+    #[test]
+    fn banner_renders_sigil_and_prompt() {
+        let info = SplashInfo {
+            model: "k3".into(),
+            provider: "test".into(),
+            permissions: "n/a".into(),
+            branch: "n/a".into(),
+            directory: "/home/synth".into(),
+            session: "test-session".into(),
+        };
+        let out = banner(100, &info);
+        assert!(out.contains("Press any key to start"));
+        assert!(out.contains('█'));
+    }
 }
