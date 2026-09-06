@@ -311,7 +311,7 @@ impl<'a> ContextInjector<'a> {
         if !session_msgs.is_empty() {
             summary.push_str("\nRecent session messages:\n");
             for msg in session_msgs.iter().rev().take(3) {
-                let preview = &msg.content[..msg.content.len().min(60)];
+                let preview = crate::utils::truncate_str(&msg.content, 60);
                 summary.push_str(&format!("  [{}] {}\n", msg.role, preview));
             }
         }
