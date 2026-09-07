@@ -560,6 +560,9 @@ impl App {
                 Some(registry)
             },
             code_index: {
+                if !config.code_index_enabled {
+                    None
+                } else {
                 let config_dir = dirs::config_dir()
                     .map(|d| d.join("openshield"))
                     .unwrap_or_else(|| std::path::PathBuf::from(".openshield"));
@@ -571,17 +574,29 @@ impl App {
                 ) {
                     Ok(index) => {
                         let arc = Arc::new(index);
-                        // Spawn background refresh every 5 minutes.
-                        // Skip the initial synchronous rebuild — it blocks startup
-                        // on large directories. The background thread will populate
-                        // the index on its first refresh cycle.
-                        arc.spawn_background_refresh(std::time::Duration::from_secs(300));
+                        // Spawn background refresh every 5 minutes — but only in
+                        // a real project root. Scanning $HOME or a random dir on
+                        // a timer is what caused idle RSS/CPU blowups.
+                        if crate::repo_map::looks_like_project_root(&cwd) {
+                            let interval_secs = std::env::var("OPENSHIELD_INDEX_REFRESH_SECS")
+                                .ok()
+                                .and_then(|v| v.parse::<u64>().ok())
+                                .filter(|&s| s >= 10)
+                                .unwrap_or(300);
+                            arc.spawn_background_refresh(std::time::Duration::from_secs(interval_secs));
+                        } else {
+                            tracing::info!(
+                                "Code index background refresh disabled: '{}' is not a project root",
+                                cwd.display()
+                            );
+                        }
                         Some(arc)
                     }
                     Err(e) => {
                         tracing::warn!("Failed to open code index: {}", e);
                         None
                     }
+                }
                 }
             },
             swarm: None,
