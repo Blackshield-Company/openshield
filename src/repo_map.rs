@@ -8,6 +8,36 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
+
+/// Hard scan bounds: build_repo_map runs on a 5-minute timer from the code
+/// index, so an unbounded scan of $HOME or a binary-heavy tree eats GBs of RAM.
+const MAX_WALK_DEPTH: usize = 10;
+const MAX_SCAN_FILES: usize = 5_000;
+const MAX_FILE_BYTES: u64 = 256 * 1024;
+
+/// True when `dir` looks like a real project root; gates expensive scans.
+pub fn looks_like_project_root(dir: &Path) -> bool {
+    const MARKERS: &[&str] = &[
+        ".git",
+        ".hg",
+        ".svn",
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Gemfile",
+        "composer.json",
+        "CMakeLists.txt",
+        "Makefile",
+        "mix.exs",
+        "deno.json",
+    ];
+    MARKERS.iter().any(|m| dir.join(m).exists())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SymbolKind {
@@ -63,6 +93,9 @@ pub struct RepoMap {
     pub files: Vec<FileNode>,
     pub symbols: Vec<SymbolNode>,
     pub root: String,
+    /// Cheap fingerprint of the scanned tree (file count + mtime/size hash).
+    /// Lets callers skip redundant rebuilds when nothing changed.
+    pub fingerprint: u64,
 }
 
 impl RepoMap {
@@ -116,134 +149,88 @@ fn detect_language(path: &Path) -> &'static str {
     }
 }
 
+/// Symbol patterns compiled once per process. Previously these were compiled
+/// per FILE, which was the main CPU cost of a scan (regex compilation is
+/// far more expensive than matching).
+static SYMBOL_PATTERNS: LazyLock<HashMap<&'static str, Vec<(SymbolKind, regex::Regex)>>> =
+    LazyLock::new(|| {
+        let mut m = HashMap::new();
+        let compile = |kind: SymbolKind, pat: &str| {
+            (kind, regex::Regex::new(pat).expect("symbol regex must compile"))
+        };
+        m.insert(
+            "rust",
+            vec![
+                compile(
+                    SymbolKind::Function,
+                    r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)",
+                ),
+                compile(SymbolKind::Struct, r"^\s*(?:pub\s+)?struct\s+(\w+)"),
+                compile(SymbolKind::Enum, r"^\s*(?:pub\s+)?enum\s+(\w+)"),
+                compile(SymbolKind::Trait, r"^\s*(?:pub\s+)?trait\s+(\w+)"),
+                compile(SymbolKind::Impl, r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)"),
+                compile(SymbolKind::Module, r"^\s*(?:pub\s+)?mod\s+(\w+)"),
+                compile(SymbolKind::Const, r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+"),
+                compile(SymbolKind::Macro, r"^\s*macro_rules!\s+(\w+)"),
+                compile(SymbolKind::Type, r"^\s*(?:pub\s+)?type\s+(\w+)"),
+            ],
+        );
+        m.insert(
+            "python",
+            vec![
+                compile(SymbolKind::Function, r"^\s*def\s+(\w+)"),
+                compile(SymbolKind::Struct, r"^\s*class\s+(\w+)"),
+                compile(SymbolKind::Const, r"^([A-Z_][A-Z0-9_]*)\s*="),
+            ],
+        );
+        let js_ts = vec![
+            compile(
+                SymbolKind::Function,
+                r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)",
+            ),
+            compile(
+                SymbolKind::Function,
+                r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\(",
+            ),
+            compile(
+                SymbolKind::Struct,
+                r"^\s*(?:export\s+)?(?:class|interface)\s+(\w+)",
+            ),
+            compile(SymbolKind::Const, r"^\s*(?:export\s+)?const\s+(\w+)\s*="),
+        ];
+        m.insert("javascript", js_ts.clone());
+        m.insert("typescript", js_ts);
+        m.insert(
+            "go",
+            vec![
+                compile(SymbolKind::Trait, r"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)"),
+                compile(SymbolKind::Struct, r"^\s*type\s+(\w+)\s+struct"),
+                compile(SymbolKind::Trait, r"^\s*type\s+(\w+)\s+interface"),
+            ],
+        );
+        let c_cpp = vec![
+            compile(
+                SymbolKind::Function,
+                r"^\s*(?:[\w:*&<>]+\s+)+(\w+)\s*\([^)]*\)\s*(?:const\s*)?\{",
+            ),
+            compile(SymbolKind::Struct, r"^\s*(?:typedef\s+)?struct\s+(\w+)"),
+            compile(SymbolKind::Enum, r"^\s*(?:typedef\s+)?enum\s+(\w+)"),
+        ];
+        m.insert("c", c_cpp.clone());
+        m.insert("cpp", c_cpp);
+        m
+    });
+
 fn extract_symbols(content: &str, file_path: &str, language: &str) -> Vec<SymbolNode> {
     let mut symbols = Vec::new();
 
-    let patterns: Vec<(SymbolKind, regex::Regex)> = match language {
-        "rust" => vec![
-            (
-                SymbolKind::Function,
-                regex::Regex::new(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)")
-                    .expect("Rust function regex compilation failed"),
-            ),
-            (
-                SymbolKind::Struct,
-                regex::Regex::new(r"^\s*(?:pub\s+)?struct\s+(\w+)")
-                    .expect("Rust struct regex compilation failed"),
-            ),
-            (
-                SymbolKind::Enum,
-                regex::Regex::new(r"^\s*(?:pub\s+)?enum\s+(\w+)")
-                    .expect("Rust enum regex compilation failed"),
-            ),
-            (
-                SymbolKind::Trait,
-                regex::Regex::new(r"^\s*(?:pub\s+)?trait\s+(\w+)")
-                    .expect("Rust trait regex compilation failed"),
-            ),
-            (
-                SymbolKind::Impl,
-                regex::Regex::new(r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)")
-                    .expect("Rust impl regex compilation failed"),
-            ),
-            (
-                SymbolKind::Module,
-                regex::Regex::new(r"^\s*(?:pub\s+)?mod\s+(\w+)")
-                    .expect("Rust mod regex compilation failed"),
-            ),
-            (
-                SymbolKind::Const,
-                regex::Regex::new(r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+")
-                    .expect("Rust const regex compilation failed"),
-            ),
-            (
-                SymbolKind::Macro,
-                regex::Regex::new(r"^\s*macro_rules!\s+(\w+)")
-                    .expect("Rust macro regex compilation failed"),
-            ),
-            (
-                SymbolKind::Type,
-                regex::Regex::new(r"^\s*(?:pub\s+)?type\s+(\w+)")
-                    .expect("Rust type regex compilation failed"),
-            ),
-        ],
-        "python" => vec![
-            (
-                SymbolKind::Function,
-                regex::Regex::new(r"^\s*def\s+(\w+)").expect("Python def regex compilation failed"),
-            ),
-            (
-                SymbolKind::Struct,
-                regex::Regex::new(r"^\s*class\s+(\w+)")
-                    .expect("Python class regex compilation failed"),
-            ),
-            (
-                SymbolKind::Const,
-                regex::Regex::new(r"^([A-Z_][A-Z0-9_]*)\s*=")
-                    .expect("Python const regex compilation failed"),
-            ),
-        ],
-        "javascript" | "typescript" => vec![
-            (
-                SymbolKind::Function,
-                regex::Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)")
-                    .expect("JS function regex compilation failed"),
-            ),
-            (
-                SymbolKind::Function,
-                regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\(")
-                    .expect("JS const regex compilation failed"),
-            ),
-            (
-                SymbolKind::Struct,
-                regex::Regex::new(r"^\s*(?:export\s+)?(?:class|interface)\s+(\w+)")
-                    .expect("JS class regex compilation failed"),
-            ),
-            (
-                SymbolKind::Const,
-                regex::Regex::new(r"^\s*(?:export\s+)?const\s+(\w+)\s*=")
-                    .expect("JS const regex compilation failed"),
-            ),
-        ],
-        "go" => vec![
-            (
-                SymbolKind::Trait,
-                regex::Regex::new(r"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)")
-                    .expect("Go func regex compilation failed"),
-            ),
-            (
-                SymbolKind::Struct,
-                regex::Regex::new(r"^\s*type\s+(\w+)\s+struct")
-                    .expect("Go struct regex compilation failed"),
-            ),
-            (
-                SymbolKind::Trait,
-                regex::Regex::new(r"^\s*type\s+(\w+)\s+interface")
-                    .expect("Go interface regex compilation failed"),
-            ),
-        ],
-        "c" | "cpp" => vec![
-            (
-                SymbolKind::Function,
-                regex::Regex::new(r"^\s*(?:[\w:*&<>]+\s+)+(\w+)\s*\([^)]*\)\s*(?:const\s*)?\{")
-                    .expect("C/C++ function regex compilation failed"),
-            ),
-            (
-                SymbolKind::Struct,
-                regex::Regex::new(r"^\s*(?:typedef\s+)?struct\s+(\w+)")
-                    .expect("C/C++ struct regex compilation failed"),
-            ),
-            (
-                SymbolKind::Enum,
-                regex::Regex::new(r"^\s*(?:typedef\s+)?enum\s+(\w+)")
-                    .expect("C/C++ enum regex compilation failed"),
-            ),
-        ],
-        _ => vec![],
+    let patterns = match SYMBOL_PATTERNS.get(language) {
+        Some(p) => p,
+        None => return symbols,
     };
 
     for (line_num, line) in content.lines().enumerate() {
-        for (kind, re) in &patterns {
+        for (kind, re) in patterns {
             if let Some(cap) = re.captures(line)
                 && let Some(name_match) = cap.get(1)
             {
@@ -284,7 +271,11 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
     .copied()
     .collect();
 
+    let mut scanned: usize = 0;
+    let mut fingerprint: u64 = 0;
+
     for entry in walkdir::WalkDir::new(root)
+        .max_depth(MAX_WALK_DEPTH)
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
@@ -295,6 +286,15 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
         let path = entry.path();
         if !path.is_file() {
             continue;
+        }
+
+        if scanned >= MAX_SCAN_FILES {
+            tracing::warn!(
+                "repo map scan hit {}-file cap at '{}'; results truncated",
+                MAX_SCAN_FILES,
+                root
+            );
+            break;
         }
 
         // Skip ignored dirs
@@ -308,6 +308,22 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
             continue;
         }
 
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let file_len = metadata.len();
+        let mtime_secs = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        fingerprint = fingerprint
+            .wrapping_mul(0x100_0000_01b3)
+            .wrapping_add(file_len ^ mtime_secs);
+        scanned += 1;
+
         let rel_path = path
             .strip_prefix(root)
             .unwrap_or(path)
@@ -315,8 +331,20 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
             .to_string();
         let language = detect_language(path).to_string();
 
-        let content = std::fs::read_to_string(path).unwrap_or_default();
-        let lines = content.lines().count();
+        // Only read file contents for languages we actually extract symbols
+        // from, and never read more than MAX_FILE_BYTES. Reading every file
+        // (including multi-GB binaries) is what blew up RSS on large trees.
+        let has_patterns = SYMBOL_PATTERNS.contains_key(language.as_str());
+        let content = if has_patterns && file_len > 0 && file_len <= MAX_FILE_BYTES {
+            std::fs::read_to_string(path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let lines = if content.is_empty() {
+            0
+        } else {
+            content.lines().count()
+        };
 
         map.files.push(FileNode {
             path: rel_path.clone(),
@@ -324,10 +352,15 @@ pub fn build_repo_map(root: &str) -> Result<RepoMap> {
             lines,
         });
 
-        let symbols = extract_symbols(&content, &rel_path, &language);
-        map.symbols.extend(symbols);
+        if !content.is_empty() {
+            let symbols = extract_symbols(&content, &rel_path, &language);
+            map.symbols.extend(symbols);
+        }
     }
 
+    map.fingerprint = fingerprint
+        .wrapping_mul(0x100_0000_01b3)
+        .wrapping_add(scanned as u64);
     Ok(map)
 }
 
@@ -477,6 +510,48 @@ version = "0.1.0"
         let fns = map.find_symbols_by_kind(SymbolKind::Function);
         assert!(!fns.is_empty());
 
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_scan_bounds_skip_binary_and_huge_files() {
+        let dir = temp_rust_project();
+        fs::write(format!("{}/blob.bin", dir), vec![0xffu8; 1024]).unwrap();
+        fs::write(format!("{}/big.rs", dir), "fn x() {}\n".repeat(100_000)).unwrap();
+        let map = build_repo_map(&dir).unwrap();
+
+        let bin = map.files.iter().find(|f| f.path.ends_with("blob.bin")).unwrap();
+        assert_eq!(bin.lines, 0);
+        let big = map.files.iter().find(|f| f.path.ends_with("big.rs")).unwrap();
+        assert_eq!(big.lines, 0, "files over MAX_FILE_BYTES must not be read");
+        assert!(map.find_symbol("main").is_some(), "normal files still indexed");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_fingerprint_tracks_changes() {
+        let dir = temp_rust_project();
+        let first = build_repo_map(&dir).unwrap().fingerprint;
+        let second = build_repo_map(&dir).unwrap().fingerprint;
+        assert_eq!(first, second, "unchanged tree must fingerprint identically");
+
+        fs::write(format!("{}/src/extra.rs", dir), "fn extra() {}\n").unwrap();
+        let third = build_repo_map(&dir).unwrap().fingerprint;
+        assert_ne!(first, third, "modified tree must change fingerprint");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_looks_like_project_root() {
+        let dir = temp_rust_project();
+        assert!(looks_like_project_root(Path::new(&dir)));
+        let plain = format!("/tmp/openshield_plain_{}", std::process::id());
+        let _ = fs::remove_dir_all(&plain);
+        fs::create_dir_all(&plain).unwrap();
+        assert!(!looks_like_project_root(Path::new(&plain)));
+        let _ = fs::remove_dir_all(&plain);
         cleanup(&dir);
     }
 

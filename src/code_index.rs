@@ -31,6 +31,11 @@ impl CodeIndex {
         let conn = rusqlite::Connection::open(db_path)
             .with_context(|| format!("Failed to open code index DB: {}", db_path))?;
 
+        // Cap SQLite's page cache (~2 MB) so repeated full-table rewrites
+        // don't pin the whole index in RAM.
+        conn.pragma_update(None, "cache_size", -2000)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS symbols (
                 name TEXT NOT NULL,
@@ -72,10 +77,38 @@ impl CodeIndex {
     }
 
     /// Build the index from scratch by scanning the repo.
+    /// Skips the scan+rewrite entirely when the tree fingerprint is unchanged.
     pub fn rebuild(&self) -> Result<usize> {
+        let root_path = std::path::Path::new(&self.root);
+        if !crate::repo_map::looks_like_project_root(root_path) {
+            tracing::info!(
+                "Code index: '{}' is not a project root — skipping rebuild",
+                self.root
+            );
+            return Ok(0);
+        }
+
         let map = crate::repo_map::build_repo_map(&self.root)?;
 
         let mut conn = self.db.lock().unwrap();
+
+        let stored_fingerprint: u64 = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'fingerprint'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        if stored_fingerprint == map.fingerprint {
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM symbols", [], |row| row.get(0))
+                .unwrap_or(0);
+            tracing::debug!("Code index unchanged ({} symbols) — skipping rewrite", count);
+            return Ok(count as usize);
+        }
+
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM symbols", [])?;
 
@@ -93,17 +126,26 @@ impl CodeIndex {
             )?;
         }
 
-        tx.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('last_refresh', ?1)",
-            [map.symbols.len().to_string()],
-        )?;
-
-        tx.commit()?;
-
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('last_refresh', ?1)",
+            [now.to_string()],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('symbol_count', ?1)",
+            [map.symbols.len().to_string()],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('fingerprint', ?1)",
+            [map.fingerprint.to_string()],
+        )?;
+
+        tx.commit()?;
+        drop(conn);
+
         *self
             .last_refresh
             .lock()
@@ -261,6 +303,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&proj_dir);
         std::fs::create_dir_all(format!("{}/src", proj_dir)).unwrap();
         std::fs::write(format!("{}/src/main.rs", proj_dir), "fn main() {}\n").unwrap();
+        std::fs::write(format!("{}/Cargo.toml", proj_dir), "[package]\nname = \"t\"\n").unwrap();
 
         let index = CodeIndex::open(&db_path, &proj_dir).unwrap();
         let count = index.rebuild().unwrap();
@@ -274,5 +317,46 @@ mod tests {
 
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir_all(&proj_dir);
+    }
+
+    #[test]
+    fn test_rebuild_skips_unchanged_tree_and_non_project_roots() {
+        let db_path = temp_db();
+        let _ = std::fs::remove_file(&db_path);
+        let proj_dir = db_path.replace(".db", "_proj").to_string();
+        let _ = std::fs::remove_dir_all(&proj_dir);
+        std::fs::create_dir_all(format!("{}/src", proj_dir)).unwrap();
+        std::fs::write(format!("{}/src/main.rs", proj_dir), "fn main() {}\n").unwrap();
+        std::fs::write(format!("{}/Cargo.toml", proj_dir), "[package]\nname = \"t\"\n").unwrap();
+
+        let index = CodeIndex::open(&db_path, &proj_dir).unwrap();
+        let count = index.rebuild().unwrap();
+        assert!(count > 0);
+
+        // Wipe the table: a fingerprint-honoring rebuild must NOT repopulate it.
+        {
+            let conn = index.db.lock().unwrap();
+            conn.execute("DELETE FROM symbols", []).unwrap();
+        }
+        assert_eq!(
+            index.rebuild().unwrap(),
+            0,
+            "unchanged fingerprint must skip the DELETE+INSERT rewrite"
+        );
+
+        // A directory with no project markers must not be scanned at all.
+        let plain_dir = db_path.replace(".db", "_plain").to_string();
+        let _ = std::fs::remove_dir_all(&plain_dir);
+        std::fs::create_dir_all(&plain_dir).unwrap();
+        std::fs::write(format!("{}/notes.rs", plain_dir), "fn notes() {}\n").unwrap();
+        let plain_db = temp_db();
+        let _ = std::fs::remove_file(&plain_db);
+        let plain_index = CodeIndex::open(&plain_db, &plain_dir).unwrap();
+        assert_eq!(plain_index.rebuild().unwrap(), 0);
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(&plain_db);
+        let _ = std::fs::remove_dir_all(&proj_dir);
+        let _ = std::fs::remove_dir_all(&plain_dir);
     }
 }
