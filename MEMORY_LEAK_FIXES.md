@@ -55,3 +55,54 @@ watch -n1 'ps -o rss= -p $(pgrep openshield)'
 - [ ] Convert `unbounded_channel` to bounded `channel(100)` for backpressure
 - [ ] Add `Arc` to `messages: Vec<ChatMessage>` (display history)
 - [ ] Consider `parking_lot::Mutex` for fine-grained branch locking
+
+---
+
+## Round 2 — The Code Index Was Eating Everything (2026-09-07)
+
+Repro evidence (`/tmp/oshield-rss.log`): idle TUI sat flat at **29 MB RSS for
+10 minutes**, then RSS ratcheted past **2 GB** and VSZ ballooned to **27 GB**
+in a sawtooth pattern. The 10-minute delay exactly matched
+`CodeIndex::spawn_background_refresh` — it sleeps two 5-min intervals, then
+calls `rebuild()` → `build_repo_map(cwd)` every 5 minutes.
+
+### Root Causes (all in the repo-map/code-index path)
+
+1. **Unbounded walk** — scanned the *entire* cwd tree regardless of what it
+   was (home directory, random folder full of ISOs, anything).
+2. **`read_to_string` on every file** — no size cap, no type filter. Multi-GB
+   binaries were read fully into RAM per scan cycle (the RSS sawtooth).
+3. **Regexes compiled per file** — up to 9 regex compilations × thousands of
+   files × every 5 minutes. This was the CPU burn.
+4. **Full `DELETE` + re-`INSERT` of all symbols every cycle** — SQLite churn
+   even when nothing changed.
+5. `last_refresh` meta stored the symbol *count*, not a timestamp (latent bug).
+
+### Fixes
+
+- `repo_map.rs`
+  - Walk bounded: max depth 10, max 5 000 files, files > 256 KiB never read.
+  - Contents read only for languages with symbol patterns (binaries skipped).
+  - All regexes compiled once per process in a `LazyLock` static.
+  - `RepoMap.fingerprint` (file count + len/mtime rolling hash) added.
+  - `looks_like_project_root()` gate (.git, Cargo.toml, package.json, …).
+- `code_index.rs`
+  - `rebuild()` refuses to scan non-project roots.
+  - Skips the DELETE+INSERT rewrite when the fingerprint is unchanged.
+  - `last_refresh` now stores a real timestamp; symbol count in `symbol_count`.
+  - SQLite `cache_size` capped at ~2 MB, WAL journal mode.
+- `tui/mod.rs` + `config`
+  - Background refresh only spawns when cwd is a project root.
+  - New config toggle: `code_index_enabled = false` disables it entirely.
+  - `OPENSHIELD_INDEX_REFRESH_SECS` env override (min 10s) for testing.
+- Regression tests: scan bounds, fingerprint change detection,
+  project-root gate, rebuild skip-on-unchanged.
+
+### Verification
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Idle from `$HOME` | 29 MB → multi-GB RSS, VSZ → 27 GB | 6 MB flat, 0.2 % CPU |
+| 546 MB bait dir (500 MB bin + 50 MB JSON + 2 000 sources), refresh every **15 s** | would OOM | peaked 66 MB, settled ~50 MB, VSZ constant |
+
+`cargo test`: 511 passed, 0 failed.
