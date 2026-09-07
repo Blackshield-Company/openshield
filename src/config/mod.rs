@@ -199,6 +199,10 @@ pub struct Config {
     /// Effort level: low, medium, high, xhigh.
     #[serde(default = "default_effort")]
     pub effort_level: String,
+    /// Background code-index refresh. Disable to eliminate the periodic
+    /// repo scan on huge/non-project directories.
+    #[serde(default = "default_code_index_enabled")]
+    pub code_index_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -241,6 +245,10 @@ fn default_theme() -> String {
 
 fn default_effort() -> String {
     "medium".to_string()
+}
+
+fn default_code_index_enabled() -> bool {
+    true
 }
 
 // Deprecated: kept for backward compatibility. Use gateway instead.
@@ -794,6 +802,7 @@ impl Default for Config {
             test_command: None,
             auto_lint: true,
             effort_level: "medium".to_string(),
+            code_index_enabled: true,
         }
     }
 }
@@ -907,6 +916,7 @@ mod tests {
             test_command: None,
             auto_lint: false,
             effort_level: "medium".to_string(),
+            code_index_enabled: true,
         }
     }
 

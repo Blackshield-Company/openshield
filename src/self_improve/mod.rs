@@ -869,6 +869,7 @@ mod tests {
             test_command: None,
             auto_lint: false,
             effort_level: "medium".to_string(),
+            code_index_enabled: true,
         }
     }
 
