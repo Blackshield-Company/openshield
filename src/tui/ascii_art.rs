@@ -32,6 +32,11 @@ const C_BLOOD_BRIGHT: Color = Color::Rgb {
     g: 107,
     b: 114,
 }; // #FF6B72
+const C_BLOOD_DARK: Color = Color::Rgb {
+    r: 92,
+    g: 10,
+    b: 16,
+}; // #5C0A10 — dried-blood base of the wordmark
 const C_ASH: Color = Color::Rgb {
     r: 138,
     g: 143,
@@ -178,9 +183,9 @@ fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
 
 fn face_color(row: usize) -> Color {
     match row {
-        0..=2 => C_BONE_BRIGHT,
-        3 => C_BLOOD_BRIGHT,
-        _ => C_ASH,
+        0 => C_BLOOD_BRIGHT,     // top edge highlight, like light on carved stone
+        1..=5 => C_BLOOD,        // deep blood face
+        _ => C_BLOOD_DARK,       // dried-blood base
     }
 }
 
@@ -228,18 +233,19 @@ fn openshield_logo() -> Vec<String> {
 // ── Blackshield Sigil ───────────────────────────────────────────────────────
 //
 // Template legend: `#` steel outline · `.` iron field · `X` blood cross ·
-// space = transparent. Every row is exactly 27 cells wide so all rows share
-// one center axis — the sigil cannot drift.
+// `o` rivet (bone-bright stud on the rim) · space = transparent.
+// Every row is exactly 27 cells wide so all rows share one center axis —
+// the sigil cannot drift.
 
 const SHIELD_ROWS: &[&str] = &[
-    "###########################",
+    "#o#######################o#",
     "#.........................#",
     "#.........................#",
     "#........XXXXXXXXX........#",
     "#........XXXXXXXXX........#",
     "#...XXX....XXXXX....XXX...#",
     "#...XXXXX..XXXXX..XXXXX...#",
-    "#...XXXXXXXXXXXXXXXXXXX...#",
+    "o...XXXXXXXXXXXXXXXXXXX...o",
     "#...XXXXX..XXXXX..XXXXX...#",
     " #..XXX....XXXXX....XXX..# ",
     "  #......XXXXXXXXX......#  ",
@@ -264,7 +270,7 @@ fn render_shield_row(row: &str) -> String {
     let mut active: Option<char> = None;
     for ch in row.chars() {
         let class = match ch {
-            '#' | '.' | 'X' => Some(ch),
+            '#' | '.' | 'X' | 'o' => Some(ch),
             _ => None,
         };
         if class != active {
@@ -272,11 +278,16 @@ fn render_shield_row(row: &str) -> String {
                 Some('#') => out.push_str(&ansi_fg(C_ASH)),
                 Some('.') => out.push_str(&ansi_fg(C_IRON)),
                 Some('X') => out.push_str(&ansi_fg(C_BLOOD)),
+                Some('o') => out.push_str(&ansi_fg(C_BONE_BRIGHT)),
                 _ => out.push_str(ansi_reset()),
             }
             active = class;
         }
-        out.push(if class.is_some() { '█' } else { ' ' });
+        out.push(match class {
+            Some('o') => '●',
+            Some(_) => '█',
+            None => ' ',
+        });
     }
     out.push_str(ansi_reset());
     out
