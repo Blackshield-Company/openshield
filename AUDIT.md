@@ -136,4 +136,4 @@ cargo clippy --all-features
 
 ---
 
-*Audit conducted by synthclaw. The tape stops when the work is done.*
+*Audit conducted by blackclaw. The tape stops when the work is done.*
