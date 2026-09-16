@@ -1722,6 +1722,7 @@ async fn main() -> anyhow::Result<()> {
                 running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
                 config_dir: None,
                 auth: Some(auth),
+                approvals: Arc::new(crate::api::approvals::ApprovalsState::new()),
                 started: std::time::Instant::now(),
             };
             if let Err(e) = crate::api::serve(state, &bind_addr).await {

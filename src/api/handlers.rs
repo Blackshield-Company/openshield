@@ -70,6 +70,104 @@ pub async fn create_session(State(state): State<AppState>) -> impl IntoResponse 
     }
 }
 
+/// GET /api/v1/sessions/{id} — session record + full history (messages with
+/// timestamps and the tool-call log) from the SQLite memory store. 404 for
+/// unknown ids; the desktop GUI's normalizer consumes this shape directly.
+pub async fn get_session_detail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let memory = match open_memory(&state) {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
+    let session = match memory.get_session(&id) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    error: format!("Session not found: {}", id),
+                }),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("session lookup failed: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let messages: Vec<serde_json::Value> = match memory.get_session_messages(&id) {
+        Ok(msgs) => msgs
+            .iter()
+            .map(|m| {
+                json!({
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "created_at": m.created_at.to_rfc3339(),
+                    "tokens_used": m.tokens_used,
+                })
+            })
+            .collect(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("session messages failed: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let tool_calls: Vec<serde_json::Value> = match memory.search_tool_calls_by_session(&id) {
+        Ok(calls) => calls
+            .iter()
+            .map(|c| {
+                json!({
+                    "id": c.id,
+                    "tool": c.tool_name,
+                    "args": serde_json::from_str::<serde_json::Value>(&c.args)
+                        .unwrap_or(serde_json::Value::String(c.args.clone())),
+                    "result": c.result,
+                    "success": c.success,
+                    "created_at": c.created_at.to_rfc3339(),
+                })
+            })
+            .collect(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    error: format!("session tool calls failed: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    Json(json!({
+        "session": {
+            "id": session.id,
+            "started_at": session.started_at.to_rfc3339(),
+            "model": session.model,
+            "task_type": session.task_type,
+            "project_path": session.project_path,
+            "archived": session.archived,
+        },
+        "messages": messages,
+        "tool_calls": tool_calls,
+    }))
+    .into_response()
+}
+
 /// DELETE /api/v1/sessions/{id} — close (archive) a chat session.
 pub async fn close_session(
     State(state): State<AppState>,
