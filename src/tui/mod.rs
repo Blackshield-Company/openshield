@@ -1504,18 +1504,26 @@ impl App {
     }
 
     fn auto_continue(&mut self) {
-        const MAX_AUTO_CONTINUES: u8 = 5;
-        if self.auto_continue_count >= MAX_AUTO_CONTINUES {
+        // Configurable via [autonomy] max_auto_continues in config.toml.
+        // 0 = unlimited: keep going until the model emits TASK_COMPLETE
+        // or stops asking to proceed.
+        let max_auto_continues = self.config.autonomy.max_auto_continues;
+        if max_auto_continues > 0 && self.auto_continue_count >= max_auto_continues {
             self.add_system_message(
-                "⚠️ Auto-continue limit reached. The model keeps asking to proceed. Please review the conversation and provide explicit direction.".to_string(),
+                "⚠️ Auto-continue limit reached. The model keeps asking to proceed. Please review the conversation and provide explicit direction. (Raise [autonomy] max_auto_continues in config.toml, or set it to 0 for unlimited.)".to_string(),
             );
             self.auto_continue_count = 0;
             return;
         }
         self.auto_continue_count += 1;
+        let limit_display = if max_auto_continues == 0 {
+            "∞".to_string()
+        } else {
+            max_auto_continues.to_string()
+        };
         self.add_system_message(format!(
             "🤖 Auto-continuing (attempt {}/{})",
-            self.auto_continue_count, MAX_AUTO_CONTINUES
+            self.auto_continue_count, limit_display
         ));
         self.add_user_message("continue".to_string());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();

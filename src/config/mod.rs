@@ -110,6 +110,9 @@ pub struct AutonomyConfig {
     /// How long a tool approval prompt waits before timing out.
     /// With `enabled = true`, timeout approves; otherwise it skips.
     pub approval_timeout_secs: u64,
+    /// Maximum automatic "continue" nudges when the model asks to proceed
+    /// mid-task, before requiring explicit user input. 0 = unlimited.
+    pub max_auto_continues: u8,
 }
 
 impl Default for AutonomyConfig {
@@ -119,6 +122,7 @@ impl Default for AutonomyConfig {
             tool_timeout_secs: 600,
             stream_stall_timeout_secs: 900,
             approval_timeout_secs: 60,
+            max_auto_continues: 5,
         }
     }
 }
