@@ -199,6 +199,38 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
     };
     lines.push(header);
 
+    // Inline diff/preview for code-writing tool calls (edit/write/patch).
+    // Body lines are classified by their leading char: '-' removed, '+'
+    // added, '·' context, '…' truncation footer. Wrapped before coloring so
+    // escape codes never interfere with width math.
+    if let Some(ref tr) = msg.tool_render {
+        let theme = current_theme();
+        let op_label = match tr.op {
+            "write" => "write",
+            "patch" => "patch",
+            _ => "edit",
+        };
+        lines.push(format!(
+            "{}⚒ {} → {}{}",
+            ansi_fg(theme.accent_tertiary),
+            op_label,
+            tr.path,
+            ansi_reset()
+        ));
+        for body_line in tr.body.lines() {
+            let color = match body_line.chars().next() {
+                Some('-') => theme.error,
+                Some('+') => theme.success,
+                Some('…') => theme.muted,
+                _ => theme.muted,
+            };
+            let wrapped = wrap_line(body_line, width.saturating_sub(4));
+            for w in wrapped {
+                lines.push(format!("{}  {}{}", ansi_fg(color), w, ansi_reset()));
+            }
+        }
+    }
+
     // Content lines (word-wrapped)
     for content_line in msg.content.lines() {
         let wrapped = wrap_line(content_line, width.saturating_sub(2));

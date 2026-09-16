@@ -330,10 +330,290 @@ pub(crate) fn generate_edit_diff(args: &str) -> Option<String> {
     }
 }
 
+/// Inline scrollback render for a code-writing tool call (edit/write/patch).
+/// The body is plain text (one diff/preview line per row, already capped);
+/// coloring is applied by the renderer so it can wrap lines first.
+#[derive(Debug, Clone)]
+pub(crate) struct InlineToolRender {
+    /// "write" | "replace" | "patch"
+    pub op: &'static str,
+    pub path: String,
+    pub body: String,
+}
+
+/// Cap for edit/patch inline diffs (body lines) before a truncation footer.
+const INLINE_DIFF_MAX_LINES: usize = 60;
+/// Cap for whole-file write previews (body lines) before a truncation footer.
+const WRITE_PREVIEW_MAX_LINES: usize = 30;
+
+/// Build an inline diff/preview for a code-writing tool call, parsed from the
+/// tool-call arguments (JSON or normalized mini-language) — never re-reads
+/// files from disk. Returns None for non-edit tools or unparseable args.
+pub(crate) fn build_inline_tool_render(
+    tool_name: &str,
+    args: &str,
+) -> Option<InlineToolRender> {
+    let (op, path, old, new) = parse_edit_args(tool_name, args)?;
+
+    let body = match op {
+        "write" => {
+            // Whole-file write: preview the content being written as +lines.
+            let lines: Vec<String> = new.lines().map(|l| format!("+{l}")).collect();
+            cap_body(lines, WRITE_PREVIEW_MAX_LINES)
+        }
+        _ => {
+            // replace/patch: inline diff of old vs new content from the args.
+            let lines = inline_diff_lines(&old, &new);
+            cap_body(lines, INLINE_DIFF_MAX_LINES)
+        }
+    };
+
+    Some(InlineToolRender {
+        op: match op {
+            "write" => "write",
+            "patch" => "patch",
+            _ => "replace",
+        },
+        path,
+        body,
+    })
+}
+
+/// Extract (operation, path, old_content, new_content) from edit-tool args.
+/// Accepts both raw JSON arguments and the normalized mini-language
+/// ("write <path> <content>", "replace <path> <old> ||| <new>").
+fn parse_edit_args<'a>(
+    tool_name: &str,
+    args: &'a str,
+) -> Option<(&'static str, String, String, String)> {
+    let trimmed = args.trim();
+    if trimmed.starts_with('{') {
+        parse_edit_args_json(tool_name, trimmed)
+    } else {
+        parse_edit_args_mini(tool_name, trimmed)
+    }
+}
+
+fn parse_edit_args_json(
+    tool_name: &str,
+    json_str: &str,
+) -> Option<(&'static str, String, String, String)> {
+    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+
+    let get_str = |keys: &[&str]| -> Option<String> {
+        keys.iter()
+            .find_map(|k| v.get(*k).and_then(|x| x.as_str()))
+            .map(|s| s.to_string())
+    };
+
+    let path = get_str(&["file", "path", "filename"])?;
+    let old = get_str(&["old_string", "old_lines", "old", "old_content"])
+        .unwrap_or_default();
+    let new = get_str(&[
+        "new_string",
+        "new_lines",
+        "new_content",
+        "content",
+        "new",
+    ])
+    .unwrap_or_default();
+
+    let op = get_str(&["operation"])
+        .map(|s| s.to_lowercase())
+        .filter(|s| matches!(s.as_str(), "write" | "replace" | "patch"))
+        .unwrap_or_else(|| {
+            if !old.is_empty() || new.is_empty() {
+                "replace".to_string()
+            } else {
+                "write".to_string()
+            }
+        });
+
+    if new.is_empty() && old.is_empty() {
+        return None;
+    }
+
+    let _ = tool_name;
+    let op: &'static str = match op.as_str() {
+        "write" => "write",
+        "patch" => "patch",
+        _ => "replace",
+    };
+    Some((op, path, old, new))
+}
+
+fn parse_edit_args_mini<'a>(
+    tool_name: &str,
+    args: &'a str,
+) -> Option<(&'static str, String, String, String)> {
+    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let cmd = parts[0];
+    let rest = parts[1];
+
+    // Only the edit family carries old/new content in the mini-language.
+    if !matches!(cmd, "write" | "replace" | "patch") {
+        let _ = tool_name;
+        return None;
+    }
+
+    match cmd {
+        "write" => {
+            let wp: Vec<&str> = rest.splitn(2, ' ').collect();
+            if wp.len() < 2 || wp[0].is_empty() {
+                return None;
+            }
+            Some(("write", wp[0].to_string(), String::new(), wp[1].to_string()))
+        }
+        "replace" | "patch" => {
+            let delimiter = " ||| ";
+            let rp: Vec<&str> = rest.splitn(2, delimiter).collect();
+            if rp.len() < 2 {
+                return None;
+            }
+            let pp: Vec<&str> = rp[0].splitn(2, ' ').collect();
+            if pp.len() < 2 || pp[0].is_empty() {
+                return None;
+            }
+            let op: &'static str = if cmd == "patch" { "patch" } else { "replace" };
+            Some((op, pp[0].to_string(), pp[1].to_string(), rp[1].to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Diff old vs new line-by-line using a common prefix/suffix split: context
+/// lines (2 before/after the change) marked " ", removals "-", additions "+".
+fn inline_diff_lines(old: &str, new: &str) -> Vec<String> {
+    let old_l: Vec<&str> = old.lines().collect();
+    let new_l: Vec<&str> = new.lines().collect();
+
+    let mut start = 0;
+    while start < old_l.len() && start < new_l.len() && old_l[start] == new_l[start] {
+        start += 1;
+    }
+    let mut old_end = old_l.len();
+    let mut new_end = new_l.len();
+    while old_end > start && new_end > start && old_l[old_end - 1] == new_l[new_end - 1] {
+        old_end -= 1;
+        new_end -= 1;
+    }
+
+    let mut out = Vec::new();
+    let ctx_start = start.saturating_sub(2);
+    for line in &old_l[ctx_start..start] {
+        out.push(format!(" {line}"));
+    }
+    for line in &old_l[start..old_end] {
+        out.push(format!("-{line}"));
+    }
+    for line in &new_l[start..new_end] {
+        out.push(format!("+{line}"));
+    }
+    let ctx_end = (old_end + 2).min(old_l.len());
+    for line in &old_l[old_end..ctx_end] {
+        out.push(format!(" {line}"));
+    }
+    out
+}
+
+/// Join body lines, appending a "... N more lines" footer when capped.
+fn cap_body(mut lines: Vec<String>, max: usize) -> String {
+    if lines.len() > max {
+        let hidden = lines.len() - max;
+        lines.truncate(max);
+        lines.push(format!("… {hidden} more lines"));
+    }
+    lines.join("\n")
+}
+
 /// Check if a tool name is an edit operation that should trigger auto-commit.
 pub(crate) fn is_edit_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "edit" | "write" | "patch" | "replace" | "refactor"
     )
+}
+
+#[cfg(test)]
+mod inline_render_tests {
+    use super::*;
+
+    #[test]
+    fn json_replace_produces_colored_diff_body() {
+        let args = r#"{"operation":"replace","file":"src/main.rs","old_string":"let x = 1;\nlet y = 2;","new_string":"let x = 1;\nlet y = 3;"}"#;
+        let render = build_inline_tool_render("edit", args).unwrap();
+        assert_eq!(render.op, "replace");
+        assert_eq!(render.path, "src/main.rs");
+        assert!(render.body.contains("-let y = 2;"));
+        assert!(render.body.contains("+let y = 3;"));
+        // Common line appears as context.
+        assert!(render.body.contains(" let x = 1;"));
+    }
+
+    #[test]
+    fn json_write_produces_preview_with_plus_lines() {
+        let args = r#"{"operation":"write","file":"/tmp/new.rs","new_string":"fn main() {\n    println!(\"hi\");\n}"}"#;
+        let render = build_inline_tool_render("edit", args).unwrap();
+        assert_eq!(render.op, "write");
+        assert!(render.body.contains("+fn main() {"));
+        assert!(!render.body.contains('-'));
+    }
+
+    #[test]
+    fn json_operation_inferred_when_missing() {
+        // No "operation": old_string present -> replace.
+        let args = r#"{"file":"a.rs","old_string":"foo","new_string":"bar"}"#;
+        let render = build_inline_tool_render("edit", args).unwrap();
+        assert_eq!(render.op, "replace");
+        // old empty + content present -> write.
+        let args = r#"{"file":"a.rs","content":"hello"}"#;
+        let render = build_inline_tool_render("edit", args).unwrap();
+        assert_eq!(render.op, "write");
+    }
+
+    #[test]
+    fn mini_language_args_are_supported() {
+        let args = "replace src/lib.rs old_fn() {} ||| new_fn() {}";
+        let render = build_inline_tool_render("edit", args).unwrap();
+        assert_eq!(render.path, "src/lib.rs");
+        assert!(render.body.contains("-old_fn() {}"));
+        assert!(render.body.contains("+new_fn() {}"));
+    }
+
+    #[test]
+    fn non_edit_tools_return_none() {
+        assert!(build_inline_tool_render("search", r#"{"query":"x"}"#).is_none());
+        assert!(build_inline_tool_render("edit", "").is_none());
+    }
+
+    #[test]
+    fn large_write_is_capped_with_footer() {
+        let content: Vec<String> = (0..100).map(|i| format!("line{i}")).collect();
+        let args = format!(
+            r#"{{"operation":"write","file":"big.rs","new_string":{}}}"#,
+            serde_json::to_string(&content.join("\n")).unwrap()
+        );
+        let render = build_inline_tool_render("edit", &args).unwrap();
+        let body_lines: Vec<&str> = render.body.lines().collect();
+        assert_eq!(body_lines.len(), WRITE_PREVIEW_MAX_LINES + 1);
+        assert!(body_lines.last().unwrap().contains("more lines"));
+    }
+
+    #[test]
+    fn large_diff_is_capped_with_footer() {
+        let old: Vec<String> = (0..50).map(|i| format!("old{i}")).collect();
+        let new: Vec<String> = (0..50).map(|i| format!("new{i}")).collect();
+        let args = format!(
+            "replace big.rs {} ||| {}",
+            old.join("\n"),
+            new.join("\n")
+        );
+        let render = build_inline_tool_render("edit", &args).unwrap();
+        let body_lines: Vec<&str> = render.body.lines().collect();
+        assert_eq!(body_lines.len(), INLINE_DIFF_MAX_LINES + 1);
+        assert!(body_lines.last().unwrap().contains("more lines"));
+    }
 }
