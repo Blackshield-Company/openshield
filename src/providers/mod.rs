@@ -341,8 +341,51 @@ impl Provider {
     fn build_chat_body(&self, request: &ChatRequest) -> serde_json::Value {
         match self.kind {
             ProviderKind::OpenAiCompatible => {
-                let messages: Vec<_> = request
+                // Merge ALL system-role messages into a single leading system
+                // message. Strict chat templates (stock Qwen3 / llama.cpp
+                // minijinja, incl. the custom synthclaw templates) hard-fail
+                // with "System message must be at the beginning" when any
+                // second system message exists — and several OpenShield paths
+                // inject memory/skills/compaction/truncation context as extra
+                // system messages (harness double-prepend, Discord router,
+                // gateway /v1/chat, follow-up truncation notices). Merging
+                // preserves all content and is accepted by every
+                // OpenAI-compatible backend.
+                let system_count = request
                     .messages
+                    .iter()
+                    .filter(|m| m.role == "system")
+                    .count();
+                let normalized: Vec<Message> = if system_count > 1 {
+                    let merged_system = request
+                        .messages
+                        .iter()
+                        .filter(|m| m.role == "system")
+                        .map(|m| m.content.trim())
+                        .filter(|c| !c.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
+                    let mut v: Vec<Message> = Vec::with_capacity(request.messages.len());
+                    v.push(Message {
+                        role: "system".to_string(),
+                        content: merged_system,
+                        images: None,
+                        tool_call_id: None,
+                        tool_calls: None,
+                        reasoning_content: None,
+                    });
+                    v.extend(
+                        request
+                            .messages
+                            .iter()
+                            .filter(|m| m.role != "system")
+                            .cloned(),
+                    );
+                    v
+                } else {
+                    request.messages.clone()
+                };
+                let messages: Vec<_> = normalized
                     .iter()
                     .filter(|m| {
                         // Filter out empty assistant messages that have no tool_calls.
@@ -1274,6 +1317,85 @@ mod tests {
         };
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content, "Hello");
+    }
+
+    #[test]
+    fn test_build_chat_body_merges_multiple_system_messages() {
+        // Strict chat templates (stock Qwen3 / llama.cpp minijinja) reject any
+        // system message that is not messages[0] with a 500 Jinja error.
+        // build_chat_body must merge all system messages into one leading
+        // system message for OpenAI-compatible providers.
+        let provider = Provider::new(
+            "test".to_string(),
+            "http://127.0.0.1:1/v1".to_string(),
+            "test-key".to_string(),
+            ProviderKind::OpenAiCompatible,
+            std::collections::HashMap::new(),
+        );
+        let msg = |role: &str, content: &str| Message {
+            role: role.to_string(),
+            content: content.to_string(),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        };
+        let request = ChatRequest::new(
+            "m".to_string(),
+            vec![
+                msg("system", "PROMPT-A"),
+                msg("user", "hello"),
+                msg("assistant", "hi there"),
+                msg("system", "PROMPT-B"),
+                msg("user", "again"),
+                msg("system", "PROMPT-C"),
+            ],
+            false,
+        );
+        let body = provider.build_chat_body(&request);
+        let messages = body["messages"].as_array().unwrap();
+        // Exactly one system message, at index 0, with all contents merged.
+        let system_msgs: Vec<_> = messages
+            .iter()
+            .filter(|m| m["role"].as_str() == Some("system"))
+            .collect();
+        assert_eq!(system_msgs.len(), 1, "must merge to a single system message");
+        assert_eq!(messages[0]["role"].as_str(), Some("system"));
+        let merged = messages[0]["content"].as_str().unwrap();
+        assert!(merged.contains("PROMPT-A"));
+        assert!(merged.contains("PROMPT-B"));
+        assert!(merged.contains("PROMPT-C"));
+        // Non-system order preserved.
+        let roles: Vec<_> = messages.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, vec!["system", "user", "assistant", "user"]);
+    }
+
+    #[test]
+    fn test_build_chat_body_single_system_untouched() {
+        let provider = Provider::new(
+            "test".to_string(),
+            "http://127.0.0.1:1/v1".to_string(),
+            "test-key".to_string(),
+            ProviderKind::OpenAiCompatible,
+            std::collections::HashMap::new(),
+        );
+        let msg = |role: &str, content: &str| Message {
+            role: role.to_string(),
+            content: content.to_string(),
+            images: None,
+            tool_call_id: None,
+            tool_calls: None,
+            reasoning_content: None,
+        };
+        let request = ChatRequest::new(
+            "m".to_string(),
+            vec![msg("system", "ONLY"), msg("user", "hi")],
+            false,
+        );
+        let body = provider.build_chat_body(&request);
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"].as_str(), Some("ONLY"));
     }
 
     #[test]
