@@ -1592,7 +1592,8 @@ mod normalize_tests {
     fn cronjob_create_uses_cron_flags() {
         // Old arm copy-pasted todo: emitted "--add <task>" which CronjobTool
         // cannot parse (it only understands --create/--list/--remove).
-        let args = r#"{"action":"create","schedule":"0 9 * * *","prompt":"run tests","job_id":"morning"}"#;
+        let args =
+            r#"{"action":"create","schedule":"0 9 * * *","prompt":"run tests","job_id":"morning"}"#;
         assert_eq!(
             normalize_tool_args("cronjob", args),
             "--create --schedule 0 9 * * * --prompt run tests --name morning"
@@ -1601,7 +1602,10 @@ mod normalize_tests {
 
     #[test]
     fn cronjob_list_and_remove() {
-        assert_eq!(normalize_tool_args("cronjob", r#"{"action":"list"}"#), "--list");
+        assert_eq!(
+            normalize_tool_args("cronjob", r#"{"action":"list"}"#),
+            "--list"
+        );
         assert_eq!(
             normalize_tool_args("cronjob", r#"{"action":"remove","job_id":"morning"}"#),
             "--remove morning"

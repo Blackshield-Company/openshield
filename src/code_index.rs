@@ -105,7 +105,10 @@ impl CodeIndex {
             let count: i64 = conn
                 .query_row("SELECT COUNT(*) FROM symbols", [], |row| row.get(0))
                 .unwrap_or(0);
-            tracing::debug!("Code index unchanged ({} symbols) — skipping rewrite", count);
+            tracing::debug!(
+                "Code index unchanged ({} symbols) — skipping rewrite",
+                count
+            );
             return Ok(count as usize);
         }
 
@@ -303,7 +306,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&proj_dir);
         std::fs::create_dir_all(format!("{}/src", proj_dir)).unwrap();
         std::fs::write(format!("{}/src/main.rs", proj_dir), "fn main() {}\n").unwrap();
-        std::fs::write(format!("{}/Cargo.toml", proj_dir), "[package]\nname = \"t\"\n").unwrap();
+        std::fs::write(
+            format!("{}/Cargo.toml", proj_dir),
+            "[package]\nname = \"t\"\n",
+        )
+        .unwrap();
 
         let index = CodeIndex::open(&db_path, &proj_dir).unwrap();
         let count = index.rebuild().unwrap();
@@ -327,7 +334,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&proj_dir);
         std::fs::create_dir_all(format!("{}/src", proj_dir)).unwrap();
         std::fs::write(format!("{}/src/main.rs", proj_dir), "fn main() {}\n").unwrap();
-        std::fs::write(format!("{}/Cargo.toml", proj_dir), "[package]\nname = \"t\"\n").unwrap();
+        std::fs::write(
+            format!("{}/Cargo.toml", proj_dir),
+            "[package]\nname = \"t\"\n",
+        )
+        .unwrap();
 
         let index = CodeIndex::open(&db_path, &proj_dir).unwrap();
         let count = index.rebuild().unwrap();
