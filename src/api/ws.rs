@@ -7,20 +7,23 @@ use axum::extract::{
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::AppState;
 
-/// WS message from client.
+/// WS message from client. The inbound chat frame is
+/// `{type: "chat", session, message}` (design doc §4); `session` is accepted
+/// under its legacy `session_id` spelling too.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientMessage {
     Chat {
         message: String,
+        #[serde(default, alias = "session_id")]
+        session: Option<String>,
         #[serde(default)]
         model: Option<String>,
-        #[serde(default)]
-        session_id: Option<String>,
     },
     Agent {
         task: String,
@@ -37,9 +40,10 @@ fn default_max_turns() -> usize {
 }
 
 /// Typed WS envelope for /ws/v1/chat, per design doc §4:
-/// `{ "type": "token|tool_start|tool_result|turn_done|error", "session": "...", "data": {...} }`
-/// The harness event system is serialized directly into this shape; the
-/// approval_req / approval_res types land in M3.
+/// `{ "type": "token|tool_start|tool_result|approval_req|approval_res|turn_done|error", "session": "...", "data": {...} }`
+/// The harness event system is serialized directly into this shape;
+/// approval_req / approval_res arrive via the approvals broadcast (M3) and
+/// are forwarded by the same send path.
 #[derive(Debug, Serialize)]
 struct WsEvent {
     #[serde(rename = "type")]
@@ -145,6 +149,7 @@ async fn run_harness_turn(
     session_id: String,
     message: String,
     h_tx: mpsc::UnboundedSender<crate::harness::HarnessEvent>,
+    approvals: Arc<crate::api::approvals::ApprovalsState>,
 ) {
     let err_tx = h_tx.clone();
     let result = async {
@@ -156,9 +161,8 @@ async fn run_harness_turn(
         let harness_config = crate::harness::HarnessConfig {
             primary_model: model,
             max_tool_loops: 10,
-            // No interactive approval surface on the WS yet — approval_req /
-            // approval_res land in M3. The security engine still gates every
-            // tool call (L1–L4), it just can't ask a human to override.
+            // The M3 human gate is installed on the engine below; this flag
+            // keeps its legacy meaning (no interactive surface → don't block).
             require_tool_approval: false,
             multi_model_enabled: false,
             memory_context_limit: 5,
@@ -169,10 +173,19 @@ async fn run_harness_turn(
             harness_config,
             config,
             memory,
-            session_id,
+            session_id.clone(),
             history,
             security,
         )?;
+        // M3: High/Critical tool calls hold for a human when a desktop/pocket
+        // client is connected to /ws/v1/chat (approval_req → POST
+        // /api/v1/approvals/:id → resume, 120s timeout denies). The gate
+        // short-circuits to allow when no client is connected, so behavior
+        // without a GUI is unchanged.
+        engine.set_approval_gate(Some(crate::api::approvals::make_gate(
+            approvals,
+            session_id,
+        )));
         engine.run_turn_streaming(&message, h_tx, true).await?;
         anyhow::Ok(())
     }
@@ -248,112 +261,153 @@ fn build_provider(
 }
 
 async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
-    while let Some(Ok(msg)) = socket.recv().await {
-        let text = match msg {
-            Message::Text(t) => t,
-            Message::Close(_) => break,
-            _ => continue,
-        };
+    // M3: connected-client count decides whether the High/Critical human
+    // gate engages, and approval_req / approval_res events are forwarded to
+    // every chat client (GUI dispatches by session + id).
+    state.approvals.client_connected();
+    let mut approval_events = state.approvals.subscribe();
 
-        let client_msg: ClientMessage = match serde_json::from_str(&text) {
-            Ok(m) => m,
-            Err(e) => {
-                let _ = send_json(
-                    &mut socket,
-                    &WsEvent::new(
-                        "error",
-                        "",
-                        json!({ "message": format!("Invalid message: {}", e) }),
-                    ),
-                )
-                .await;
-                continue;
-            }
-        };
+    'conn: loop {
+        tokio::select! {
+            msg = socket.recv() => {
+                let text = match msg {
+                    Some(Ok(Message::Text(t))) => t,
+                    Some(Ok(Message::Close(_))) | None => break 'conn,
+                    Some(Ok(_)) => continue,
+                    Some(Err(_)) => break 'conn,
+                };
 
-        match client_msg {
-            ClientMessage::Ping => {
-                let _ = send_json(&mut socket, &WsEvent::new("pong", "", json!({}))).await;
-            }
-            ClientMessage::Chat {
-                message,
-                model,
-                session_id,
-            } => {
-                let config = match state.reload_config() {
-                    Ok(c) => c,
+                let client_msg: ClientMessage = match serde_json::from_str(&text) {
+                    Ok(m) => m,
                     Err(e) => {
                         let _ = send_json(
                             &mut socket,
                             &WsEvent::new(
                                 "error",
                                 "",
-                                json!({ "message": format!("Config error: {}", e) }),
+                                json!({ "message": format!("Invalid message: {}", e) }),
                             ),
                         )
                         .await;
                         continue;
                     }
                 };
-                if config.providers.is_empty() {
-                    let _ = send_json(
-                        &mut socket,
-                        &WsEvent::new("error", "", json!({ "message": "No providers configured" })),
-                    )
-                    .await;
-                    continue;
-                }
-                let model = model.unwrap_or_else(|| config.default_model.clone());
-                let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-                // Harness engine + rusqlite MemoryStore are non-Send: the turn
-                // runs on a blocking thread with a local runtime, streaming
-                // HarnessEvents back over an unbounded channel.
-                let (h_tx, mut h_rx) = mpsc::unbounded_channel::<crate::harness::HarnessEvent>();
-                let session_for_engine = session_id.clone();
-                tokio::task::spawn_blocking(move || {
-                    let rt = match tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    {
-                        Ok(rt) => rt,
-                        Err(_) => return,
-                    };
-                    rt.block_on(run_harness_turn(
-                        config,
-                        model,
-                        session_for_engine,
+                match client_msg {
+                    ClientMessage::Ping => {
+                        let _ = send_json(&mut socket, &WsEvent::new("pong", "", json!({}))).await;
+                    }
+                    ClientMessage::Chat {
                         message,
-                        h_tx,
-                    ));
-                });
+                        session,
+                        model,
+                    } => {
+                        let config = match state.reload_config() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                let _ = send_json(
+                                    &mut socket,
+                                    &WsEvent::new(
+                                        "error",
+                                        "",
+                                        json!({ "message": format!("Config error: {}", e) }),
+                                    ),
+                                )
+                                .await;
+                                continue;
+                            }
+                        };
+                        if config.providers.is_empty() {
+                            let _ = send_json(
+                                &mut socket,
+                                &WsEvent::new("error", "", json!({ "message": "No providers configured" })),
+                            )
+                            .await;
+                            continue;
+                        }
+                        let model = model.unwrap_or_else(|| config.default_model.clone());
+                        let session_id = session.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-                // Serialize harness events into the typed envelope (§4).
-                while let Some(event) = h_rx.recv().await {
-                    match harness_event_envelope(&session_id, event) {
-                        Envelope::Emit(ev) => {
-                            if send_json(&mut socket, &ev).await.is_err() {
-                                break;
+                        // Harness engine + rusqlite MemoryStore are non-Send: the turn
+                        // runs on a blocking thread with a local runtime, streaming
+                        // HarnessEvents back over an unbounded channel.
+                        let (h_tx, mut h_rx) =
+                            mpsc::unbounded_channel::<crate::harness::HarnessEvent>();
+                        let session_for_engine = session_id.clone();
+                        let approvals = state.approvals.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let rt = match tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                            {
+                                Ok(rt) => rt,
+                                Err(_) => return,
+                            };
+                            rt.block_on(run_harness_turn(
+                                config,
+                                model,
+                                session_for_engine,
+                                message,
+                                h_tx,
+                                approvals,
+                            ));
+                        });
+
+                        // Serialize harness events into the typed envelope (§4),
+                        // interleaved with approval_req / approval_res from the
+                        // broadcast so a client mid-turn sees its own requests.
+                        'turn: loop {
+                            tokio::select! {
+                                event = h_rx.recv() => {
+                                    match event {
+                                        Some(event) => match harness_event_envelope(&session_id, event) {
+                                            Envelope::Emit(ev) => {
+                                                if send_json(&mut socket, &ev).await.is_err() {
+                                                    break 'turn;
+                                                }
+                                            }
+                                            Envelope::EndTurn => break 'turn,
+                                            Envelope::Drop => {}
+                                        },
+                                        None => break 'turn,
+                                    }
+                                }
+                                ev = approval_events.recv() => {
+                                    if let Ok(ev) = ev {
+                                        if send_json(&mut socket, &ev).await.is_err() {
+                                            break 'turn;
+                                        }
+                                    }
+                                }
                             }
                         }
-                        Envelope::EndTurn => break,
-                        Envelope::Drop => {}
+                    }
+                    ClientMessage::Agent { .. } => {
+                        let _ = send_json(
+                            &mut socket,
+                            &WsEvent::new(
+                                "error",
+                                "",
+                                json!({ "message": "Use /ws/v1/agent for agent tasks" }),
+                            ),
+                        )
+                        .await;
                     }
                 }
             }
-            ClientMessage::Agent { .. } => {
-                let _ = send_json(
-                    &mut socket,
-                    &WsEvent::new(
-                        "error",
-                        "",
-                        json!({ "message": "Use /ws/v1/agent for agent tasks" }),
-                    ),
-                )
-                .await;
+            ev = approval_events.recv() => {
+                // Approval events broadcast while this client is idle
+                // (between turns). Mid-turn forwarding happens above.
+                if let Ok(ev) = ev {
+                    if send_json(&mut socket, &ev).await.is_err() {
+                        break 'conn;
+                    }
+                }
             }
         }
     }
+
+    state.approvals.client_disconnected();
 }
 
 async fn handle_agent_ws(mut socket: WebSocket, state: AppState) {
@@ -540,6 +594,38 @@ mod tests {
             serde_json::from_str(r#"{"type":"chat","message":"hello"}"#).unwrap();
         match msg {
             ClientMessage::Chat { message, .. } => assert_eq!(message, "hello"),
+            _ => panic!("Expected Chat"),
+        }
+    }
+
+    #[test]
+    fn test_client_message_chat_frame_shape() {
+        // Design doc §4 inbound frame: {type:"chat", session, message}.
+        let msg: ClientMessage = serde_json::from_str(
+            r#"{"type":"chat","session":"sess-1","message":"hi","model":"k3"}"#,
+        )
+        .unwrap();
+        match msg {
+            ClientMessage::Chat {
+                message,
+                session,
+                model,
+            } => {
+                assert_eq!(message, "hi");
+                assert_eq!(session.as_deref(), Some("sess-1"));
+                assert_eq!(model.as_deref(), Some("k3"));
+            }
+            _ => panic!("Expected Chat"),
+        }
+
+        // Legacy `session_id` spelling still accepted.
+        let msg: ClientMessage =
+            serde_json::from_str(r#"{"type":"chat","session_id":"sess-2","message":"hi"}"#)
+                .unwrap();
+        match msg {
+            ClientMessage::Chat { session, .. } => {
+                assert_eq!(session.as_deref(), Some("sess-2"))
+            }
             _ => panic!("Expected Chat"),
         }
     }
