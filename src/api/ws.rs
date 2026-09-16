@@ -6,6 +6,8 @@ use axum::extract::{
 };
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tokio::sync::mpsc;
 
 use super::AppState;
 
@@ -34,34 +36,158 @@ fn default_max_turns() -> usize {
     50
 }
 
-/// Build chat messages with the agent's identity (soul) as the system
-/// prompt. Without this the model falls back to its training identity
-/// (e.g. "I'm Kimi") instead of the configured agent.
-fn chat_messages(
-    config: &crate::config::Config,
-    message: String,
-) -> Vec<crate::providers::Message> {
-    let soul = crate::agent::soul::AgentSoul::from_config(config.agent.clone());
-    let msg = |role: &str, content: String| crate::providers::Message {
-        role: role.to_string(),
-        content,
-        images: None,
-        tool_call_id: None,
-        tool_calls: None,
-        reasoning_content: None,
-    };
-    vec![msg("system", soul.system_prompt()), msg("user", message)]
+/// Typed WS envelope for /ws/v1/chat, per design doc §4:
+/// `{ "type": "token|tool_start|tool_result|turn_done|error", "session": "...", "data": {...} }`
+/// The harness event system is serialized directly into this shape; the
+/// approval_req / approval_res types land in M3.
+#[derive(Debug, Serialize)]
+struct WsEvent {
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    session: String,
+    data: serde_json::Value,
 }
 
-/// WS message to client.
+impl WsEvent {
+    fn new(event_type: &'static str, session: &str, data: serde_json::Value) -> Self {
+        Self {
+            event_type,
+            session: session.to_string(),
+            data,
+        }
+    }
+}
+
+/// What to do with a harness event on the WS chat stream.
+enum Envelope {
+    /// Emit this envelope to the client.
+    Emit(WsEvent),
+    /// The turn is finished — return to reading client messages.
+    EndTurn,
+    /// Internal event with no envelope equivalent — skip.
+    Drop,
+}
+
+/// Map a harness engine event to its typed WS envelope (design doc §4).
+fn harness_event_envelope(session: &str, event: crate::harness::HarnessEvent) -> Envelope {
+    use crate::harness::HarnessEvent as HE;
+    match event {
+        HE::Start | HE::SystemMessage(_) => Envelope::Drop,
+        HE::Chunk(text) => Envelope::Emit(WsEvent::new("token", session, json!({ "text": text }))),
+        HE::ReasoningChunk(text) => Envelope::Emit(WsEvent::new(
+            "token",
+            session,
+            json!({ "text": text, "reasoning": true }),
+        )),
+        HE::ToolCall {
+            id,
+            name,
+            arguments,
+        } => Envelope::Emit(WsEvent::new(
+            "tool_start",
+            session,
+            json!({
+                "id": id,
+                "name": name,
+                "args": parse_tool_args(&arguments),
+            }),
+        )),
+        HE::ToolResult {
+            tool_call_id,
+            name,
+            result,
+            success,
+            ..
+        } => Envelope::Emit(WsEvent::new(
+            "tool_result",
+            session,
+            json!({
+                "id": tool_call_id,
+                "name": name,
+                "ok": success,
+                "output": result,
+            }),
+        )),
+        HE::AssistantComplete { metrics, .. } => Envelope::Emit(WsEvent::new(
+            "turn_done",
+            session,
+            json!({
+                "tokens": metrics.tokens_generated,
+                "ms": metrics.total_latency_ms,
+            }),
+        )),
+        // Post-tool-loop content arrives as a follow-up — same stream as tokens.
+        HE::FollowUp(text) => {
+            Envelope::Emit(WsEvent::new("token", session, json!({ "text": text })))
+        }
+        HE::MultiModelResponse { .. } => Envelope::Drop,
+        HE::Error(e) => Envelope::Emit(WsEvent::new("error", session, json!({ "message": e }))),
+        HE::Done => Envelope::EndTurn,
+    }
+}
+
+/// Tool arguments arrive as a JSON string from the provider; parse them into
+/// a real object for the envelope, falling back to the raw string.
+fn parse_tool_args(arguments: &str) -> serde_json::Value {
+    serde_json::from_str(arguments)
+        .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
+}
+
+/// Run one chat turn through the harness engine, streaming events over `h_tx`.
+///
+/// The engine and rusqlite's `MemoryStore` are non-Send, so this runs on a
+/// blocking thread with its own current-thread runtime (the headless-mode
+/// pattern). Any startup or turn error is surfaced to the client as a final
+/// `error` event before the channel closes.
+async fn run_harness_turn(
+    config: crate::config::Config,
+    model: String,
+    session_id: String,
+    message: String,
+    h_tx: mpsc::UnboundedSender<crate::harness::HarnessEvent>,
+) {
+    let err_tx = h_tx.clone();
+    let result = async {
+        let memory = crate::memory::MemoryStore::new(&config.memory_db_path)?;
+        let history = super::handlers::session_history_messages(&memory, &session_id, 40);
+        let security = crate::security::SecurityEngine::new(
+            crate::security::SecurityConfig::load().unwrap_or_default(),
+        )?;
+        let harness_config = crate::harness::HarnessConfig {
+            primary_model: model,
+            max_tool_loops: 10,
+            // No interactive approval surface on the WS yet — approval_req /
+            // approval_res land in M3. The security engine still gates every
+            // tool call (L1–L4), it just can't ask a human to override.
+            require_tool_approval: false,
+            multi_model_enabled: false,
+            memory_context_limit: 5,
+            skills_enabled: true,
+            secondary_models: Vec::new(),
+        };
+        let mut engine = crate::harness::HarnessEngine::new_with_history_and_security(
+            harness_config,
+            config,
+            memory,
+            session_id,
+            history,
+            security,
+        )?;
+        engine.run_turn_streaming(&message, h_tx, true).await?;
+        anyhow::Ok(())
+    }
+    .await;
+    if let Err(e) = result {
+        let _ = err_tx.send(crate::harness::HarnessEvent::Error(e.to_string()));
+    }
+}
+
+/// WS message to client (agent stream — /ws/v1/agent).
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage {
     Pong,
     Thinking {
-        content: String,
-    },
-    Token {
         content: String,
     },
     ToolCall {
@@ -134,9 +260,11 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
             Err(e) => {
                 let _ = send_json(
                     &mut socket,
-                    &ServerMessage::Error {
-                        message: format!("Invalid message: {}", e),
-                    },
+                    &WsEvent::new(
+                        "error",
+                        "",
+                        json!({ "message": format!("Invalid message: {}", e) }),
+                    ),
                 )
                 .await;
                 continue;
@@ -145,7 +273,7 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
 
         match client_msg {
             ClientMessage::Ping => {
-                let _ = send_json(&mut socket, &ServerMessage::Pong).await;
+                let _ = send_json(&mut socket, &WsEvent::new("pong", "", json!({}))).await;
             }
             ClientMessage::Chat {
                 message,
@@ -157,119 +285,70 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                     Err(e) => {
                         let _ = send_json(
                             &mut socket,
-                            &ServerMessage::Error {
-                                message: format!("Config error: {}", e),
-                            },
+                            &WsEvent::new(
+                                "error",
+                                "",
+                                json!({ "message": format!("Config error: {}", e) }),
+                            ),
                         )
                         .await;
                         continue;
                     }
                 };
+                if config.providers.is_empty() {
+                    let _ = send_json(
+                        &mut socket,
+                        &WsEvent::new("error", "", json!({ "message": "No providers configured" })),
+                    )
+                    .await;
+                    continue;
+                }
                 let model = model.unwrap_or_else(|| config.default_model.clone());
                 let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-                // Persistent session: ensure the row exists, replay recent
-                // history for continuity, and record the exchange after.
-                let memory = crate::memory::MemoryStore::new(&config.memory_db_path).ok();
-                if let Some(m) = &memory {
-                    let _ = m.ensure_session(&session_id, &model, "chat");
-                }
-
-                let (provider, _) = match build_provider(&config, &model) {
-                    Some(p) => p,
-                    None => {
-                        let _ = send_json(
-                            &mut socket,
-                            &ServerMessage::Error {
-                                message: "No providers configured".to_string(),
-                            },
-                        )
-                        .await;
-                        continue;
-                    }
-                };
-
-                // Order: system prompt, then replayed history, then the new
-                // user message (chat_messages returns [system, user]).
-                let mut pair = chat_messages(&config, message.clone());
-                let user_msg = pair.pop().expect("chat_messages yields user msg");
-                let mut request_messages = pair;
-                if let Some(m) = &memory {
-                    request_messages.extend(super::handlers::session_history_messages(
-                        m,
-                        &session_id,
-                        40,
+                // Harness engine + rusqlite MemoryStore are non-Send: the turn
+                // runs on a blocking thread with a local runtime, streaming
+                // HarnessEvents back over an unbounded channel.
+                let (h_tx, mut h_rx) = mpsc::unbounded_channel::<crate::harness::HarnessEvent>();
+                let session_for_engine = session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(_) => return,
+                    };
+                    rt.block_on(run_harness_turn(
+                        config,
+                        model,
+                        session_for_engine,
+                        message,
+                        h_tx,
                     ));
-                }
-                request_messages.push(user_msg);
-                let request = crate::providers::ChatRequest::new(
-                    model,
-                    request_messages,
-                    true, // stream
-                );
+                });
 
-                // chat_stream returns (Vec<String>, StreamMetrics) — collects all chunks
-                match provider.chat_stream(request).await {
-                    Ok((chunks, _metrics)) => {
-                        for chunk in &chunks {
-                            let _ = send_json(
-                                &mut socket,
-                                &ServerMessage::Token {
-                                    content: chunk.clone(),
-                                },
-                            )
-                            .await;
-                        }
-                        let full = chunks.join("");
-                        if let Some(m) = &memory {
-                            let now = chrono::Utc::now();
-                            let _ = m.save_message(&crate::memory::Message {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                session_id: session_id.clone(),
-                                role: "user".to_string(),
-                                content: message.clone(),
-                                created_at: now,
-                                tokens_used: None,
-                            });
-                            if !full.is_empty() {
-                                let _ = m.save_message(&crate::memory::Message {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    session_id: session_id.clone(),
-                                    role: "assistant".to_string(),
-                                    content: full.clone(),
-                                    created_at: chrono::Utc::now(),
-                                    tokens_used: None,
-                                });
+                // Serialize harness events into the typed envelope (§4).
+                while let Some(event) = h_rx.recv().await {
+                    match harness_event_envelope(&session_id, event) {
+                        Envelope::Emit(ev) => {
+                            if send_json(&mut socket, &ev).await.is_err() {
+                                break;
                             }
                         }
-                        let _ = send_json(
-                            &mut socket,
-                            &ServerMessage::Complete {
-                                summary: full,
-                                total_turns: 1,
-                                duration_secs: 0,
-                                session_id: Some(session_id.clone()),
-                            },
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        let _ = send_json(
-                            &mut socket,
-                            &ServerMessage::Error {
-                                message: format!("Chat failed: {}", e),
-                            },
-                        )
-                        .await;
+                        Envelope::EndTurn => break,
+                        Envelope::Drop => {}
                     }
                 }
             }
             ClientMessage::Agent { .. } => {
                 let _ = send_json(
                     &mut socket,
-                    &ServerMessage::Error {
-                        message: "Use /ws/v1/agent for agent tasks".to_string(),
-                    },
+                    &WsEvent::new(
+                        "error",
+                        "",
+                        json!({ "message": "Use /ws/v1/agent for agent tasks" }),
+                    ),
                 )
                 .await;
             }
@@ -440,8 +519,8 @@ async fn handle_agent_ws(mut socket: WebSocket, state: AppState) {
     }
 }
 
-/// Send a JSON-encoded server message over the WebSocket.
-async fn send_json(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), ()> {
+/// Send a JSON-encoded message over the WebSocket.
+async fn send_json(socket: &mut WebSocket, msg: &impl Serialize) -> Result<(), ()> {
     match serde_json::to_string(msg) {
         Ok(json) => socket
             .send(Message::Text(json.into()))
@@ -454,17 +533,6 @@ async fn send_json(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), ()
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_chat_messages_include_identity_system_prompt() {
-        let config = crate::config::Config::default();
-        let msgs = chat_messages(&config, "hello".to_string());
-        assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs[0].role, "system");
-        assert!(msgs[0].content.contains(&config.agent.display_name));
-        assert_eq!(msgs[1].role, "user");
-        assert_eq!(msgs[1].content, "hello");
-    }
 
     #[test]
     fn test_client_message_parse_chat() {
@@ -503,20 +571,19 @@ mod tests {
     }
 
     #[test]
+    fn test_ws_event_envelope_shape() {
+        let ev = WsEvent::new("token", "sess-1", json!({ "text": "hi" }));
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["type"], "token");
+        assert_eq!(json["session"], "sess-1");
+        assert_eq!(json["data"]["text"], "hi");
+    }
+
+    #[test]
     fn test_server_message_serialize_pong() {
         let msg = ServerMessage::Pong;
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("pong"));
-    }
-
-    #[test]
-    fn test_server_message_serialize_token() {
-        let msg = ServerMessage::Token {
-            content: "hello".to_string(),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("token"));
-        assert!(json.contains("hello"));
     }
 
     #[test]
@@ -575,5 +642,80 @@ mod tests {
         // Unlisted model → first-provider fallback, never a panic.
         let (_, name) = build_provider(&config, "unlisted-model").unwrap();
         assert!(name == "kimi" || name == "llama-swap");
+    }
+
+    #[test]
+    fn test_harness_event_envelope_types() {
+        use crate::harness::HarnessEvent as HE;
+        use crate::providers::{StreamMetrics, ToolCallRequest};
+
+        let metrics = StreamMetrics {
+            first_token_latency_ms: 10,
+            total_latency_ms: 9000,
+            tokens_generated: 1234,
+            cached: false,
+        };
+
+        let cases: Vec<(HE, &str)> = vec![
+            (HE::Chunk("hi".into()), "token"),
+            (
+                HE::ToolCall {
+                    id: "1".into(),
+                    name: "read_file".into(),
+                    arguments: r#"{"path":"x"}"#.into(),
+                },
+                "tool_start",
+            ),
+            (
+                HE::ToolResult {
+                    tool_call_id: "1".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                    result: "ok".into(),
+                    success: true,
+                },
+                "tool_result",
+            ),
+            (
+                HE::AssistantComplete {
+                    content: "done".into(),
+                    reasoning: None,
+                    tool_calls: Vec::<ToolCallRequest>::new(),
+                    metrics,
+                    finish_reason: Some("stop".into()),
+                },
+                "turn_done",
+            ),
+            (HE::Error("boom".into()), "error"),
+        ];
+
+        for (event, expected_type) in cases {
+            match harness_event_envelope("sess-1", event) {
+                Envelope::Emit(ev) => {
+                    let json = serde_json::to_value(&ev).unwrap();
+                    assert_eq!(json["type"], expected_type);
+                    assert_eq!(json["session"], "sess-1");
+                }
+                _ => panic!("expected Emit for {}", expected_type),
+            }
+        }
+
+        assert!(matches!(
+            harness_event_envelope("s", HE::Done),
+            Envelope::EndTurn
+        ));
+        assert!(matches!(
+            harness_event_envelope("s", HE::Start),
+            Envelope::Drop
+        ));
+    }
+
+    #[test]
+    fn test_parse_tool_args_falls_back_to_raw_string() {
+        assert_eq!(parse_tool_args(r#"{"a":1}"#), json!({ "a": 1 }));
+        assert_eq!(
+            parse_tool_args("not json"),
+            serde_json::Value::String("not json".into())
+        );
     }
 }

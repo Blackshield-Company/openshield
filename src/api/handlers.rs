@@ -184,12 +184,17 @@ pub(crate) fn session_history_messages(
         .collect()
 }
 
-/// GET /api/v1/health
-pub async fn health() -> Json<serde_json::Value> {
+/// GET /api/v1/health — health + version + active model + theme (design doc §3.1).
+pub async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config = &state.config;
     Json(json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
-        "uptime_secs": chrono::Utc::now().timestamp(),
+        "active_model": config.default_model,
+        "theme": config.theme,
+        "lan_mode": config.desktop.lan_mode,
+        "auth_required": state.auth.as_ref().is_some_and(|a| a.enforce),
+        "uptime_secs": state.started.elapsed().as_secs(),
     }))
 }
 
@@ -378,10 +383,11 @@ pub async fn stats(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-/// GET /api/v1/models — configured providers and their models.
+/// GET /api/v1/models — providers + models parsed from config.toml, plus the
+/// router slots (exact-match model names) the desktop model pickers need.
 pub async fn list_models(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let models: Vec<serde_json::Value> = state
-        .config
+    let config = &state.config;
+    let models: Vec<serde_json::Value> = config
         .providers
         .iter()
         .flat_map(|(pname, p)| {
@@ -396,9 +402,108 @@ pub async fn list_models(State(state): State<AppState>) -> Json<serde_json::Valu
         })
         .collect();
     Json(json!({
-        "default_model": state.config.default_model,
+        "active_model": config.default_model,
+        "default_model": config.default_model,
+        "router": {
+            "default": config.default_model,
+            "weak": config.weak_model,
+            "architect": config.architect_model,
+            "editor": config.editor_model,
+        },
         "models": models,
     }))
+}
+
+/// GET /api/v1/doctor — doctor report, reusing `openshield doctor`'s checks.
+pub async fn doctor() -> impl IntoResponse {
+    match crate::doctor::run_checks(false).await {
+        Ok(report) => {
+            let checks: Vec<serde_json::Value> = report
+                .checks
+                .iter()
+                .map(|c| {
+                    let status = match c.status {
+                        crate::doctor::CheckStatus::Healthy => "healthy",
+                        crate::doctor::CheckStatus::Warning => "warning",
+                        crate::doctor::CheckStatus::Critical => "critical",
+                    };
+                    json!({
+                        "component": c.component,
+                        "status": status,
+                        "message": c.message,
+                        "fixable": c.fixable,
+                    })
+                })
+                .collect();
+            Json(json!({
+                "healthy": report.healthy_count(),
+                "warnings": report.warning_count(),
+                "critical": report.critical_count(),
+                "checks": checks,
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                error: format!("doctor checks failed: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/v1/pair — issue a short-lived pairing payload `{host, port,
+/// token, expires}` for OpenShield Pocket (design doc §3.1). The pairing
+/// token is accepted by the bearer-auth middleware until it expires, so a
+/// phone can validate it with GET /api/v1/health.
+pub async fn pair(State(state): State<AppState>) -> impl IntoResponse {
+    let desktop = &state.config.desktop;
+    let ttl = desktop.pair_ttl_secs.max(1);
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let expires = chrono::Utc::now() + chrono::Duration::seconds(ttl as i64);
+
+    if let Some(auth) = &state.auth {
+        auth.pair_tokens
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(token.clone(), expires);
+    }
+
+    let host = pair_host(&desktop.bind);
+    Json(json!({
+        "host": host,
+        "port": desktop.port,
+        "token": token,
+        "expires": expires.to_rfc3339(),
+    }))
+}
+
+/// Host to advertise in a pairing payload. A wildcard bind advertises the
+/// machine's LAN address (discovered via a routing-table lookup — no packets
+/// are sent); a loopback bind advertises localhost for tunnel setups.
+fn pair_host(bind: &str) -> String {
+    match bind.parse::<std::net::IpAddr>() {
+        Ok(ip) if ip.is_loopback() => "127.0.0.1".to_string(),
+        Ok(ip) if ip.is_unspecified() => lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
+        Ok(ip) => ip.to_string(),
+        Err(_) => lan_ip().unwrap_or_else(|| bind.to_string()),
+    }
+}
+
+/// Best-effort LAN IP: bind a UDP socket and read its local address after a
+/// notional connect. Falls back to None when offline/no route exists.
+fn lan_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(v4) => Some(v4.to_string()),
+        _ => None,
+    }
 }
 
 /// Query params for GET /api/v1/memory.

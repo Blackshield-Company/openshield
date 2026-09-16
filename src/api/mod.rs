@@ -7,7 +7,10 @@
 //!
 //! | Method | Path | Description |
 //! |--------|------|-------------|
-//! | GET    | /api/v1/health | Health check |
+//! | GET    | /api/v1/health | Health check (+ version, active model, theme) |
+//! | GET    | /api/v1/models | Providers + models from config.toml (router slots) |
+//! | GET    | /api/v1/doctor | Doctor report (reuses `openshield doctor` checks) |
+//! | POST   | /api/v1/pair | Short-lived pairing payload {host, port, token, expires} |
 //! | GET    | /api/v1/tools | List available tools |
 //! | POST   | /api/v1/tools/:name | Execute a tool |
 //! | GET    | /api/v1/diagnostics | All LSP diagnostics |
@@ -22,13 +25,20 @@
 //!
 //! | Path | Description |
 //! |------|-------------|
-//! | /ws/v1/chat | Streaming chat with real-time events |
+//! | /ws/v1/chat | Streaming chat with real-time events (typed envelope, §4 of the desktop design doc) |
 //! | /ws/v1/agent | Streaming agent execution with tool/progress events |
+//!
+//! ## Auth
+//!
+//! `openshield serve` attaches bearer-token auth (see `auth`). Enforcement
+//! engages only in LAN mode; loopback and embedded hosts run open.
 
+pub mod auth;
 pub mod handlers;
 pub mod ws;
 
 use axum::Router;
+use axum::middleware;
 use axum::routing::{delete, get, post};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -42,6 +52,12 @@ pub struct AppState {
     /// `dirs::config_dir()` is None. When set, per-request config reloads
     /// use `Config::load_from_dir` instead of `load_or_default`.
     pub config_dir: Option<std::path::PathBuf>,
+    /// Bearer-token auth state. `None` = no enforcement (embedded loopback
+    /// hosts). Set by `openshield serve` from the `[desktop]` config —
+    /// enforcement engages only in LAN mode (design doc §3.1/§6).
+    pub auth: Option<Arc<auth::AuthState>>,
+    /// Server start time, for real uptime reporting on /api/v1/health.
+    pub started: std::time::Instant,
 }
 
 impl AppState {
@@ -136,6 +152,7 @@ pub struct ApiError {
 
 /// Build the complete API router.
 pub fn build_router(state: AppState) -> Router {
+    let middleware_state = state.clone();
     Router::new()
         // Health
         .route("/api/v1/health", get(handlers::health))
@@ -152,6 +169,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/stats", get(handlers::stats))
         .route("/api/v1/models", get(handlers::list_models))
         .route("/api/v1/memory", get(handlers::memory_search))
+        // Doctor + pairing (desktop/pocket companions, design doc §3.1)
+        .route("/api/v1/doctor", get(handlers::doctor))
+        .route("/api/v1/pair", post(handlers::pair))
         // Chat
         .route("/api/v1/chat", post(handlers::chat))
         // Chat sessions
@@ -171,6 +191,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws/v1/chat", get(ws::ws_chat))
         .route("/ws/v1/agent", get(ws::ws_agent))
         .with_state(state)
+        // Bearer-token auth: enforced only in LAN mode (see auth::require_bearer).
+        .layer(middleware::from_fn_with_state(
+            middleware_state,
+            auth::require_bearer,
+        ))
 }
 
 /// Start the API server on the given address.
