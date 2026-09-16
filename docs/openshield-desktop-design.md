@@ -179,6 +179,23 @@ per the Pincers playbook:
 
 ## 4. Protocol — WS Event Envelope
 
+### Inbound (client → server, /ws/v1/chat)
+
+The chat frame the server consumes (the desktop GUI's adapted shape;
+`session_id` is still accepted as a legacy alias for `session`):
+
+```json
+{ "type": "chat", "session": "...", "message": "..." }
+```
+
+Optional fields: `model` (override the configured default for the turn).
+`session` may be omitted — the server mints a fresh session id and returns it
+on every outbound envelope. Other inbound types: `{ "type": "ping" }` (→
+`pong`), `{ "type": "agent", "task": "...", "yolo": false, "max_turns": 50 }`
+on /ws/v1/agent.
+
+### Outbound (server → client, typed envelope)
+
 Extend the existing WS chat/agent streams with a typed envelope so Flutter can
 dispatch without guessing:
 
@@ -197,6 +214,24 @@ The harness `event.rs` system already emits equivalents internally; the WS
 layer just serializes them. Approvals bridge: security gate raises
 `approval_req` over WS, blocks the tool call with a timeout (default 120s,
 then deny), resumes on `POST /api/v1/approvals/:id`.
+
+Server implementation notes (M3, 2026-09-16):
+
+- `approval_req` / `approval_res` are broadcast to **every** connected
+  `/ws/v1/chat` client; dispatch by `session` + `data.id`, not by which
+  socket you sent the chat on (the approving human may be on Pocket while
+  the turn runs on Desktop).
+- `approval_req.data` additionally carries `reason` (the L4 gate's
+  explanation) and `expires` (RFC 3339 deadline; deny-on-timeout per §6).
+- The human gate engages only when **at least one** WS client is connected
+  AND the assessed risk is High/Critical. With no client connected, the
+  serve path behaves exactly as before the bridge existed — the gate is
+  never weakened.
+- REST: `GET /api/v1/approvals` lists pending
+  `{id, session, risk, tool, args, reason, created_at}`;
+  `POST /api/v1/approvals/:id` takes `{decision: "approve" | "reject" |
+  "approve_always"}` (`approve_always` auto-approves future calls to the
+  same tool for the server's lifetime).
 
 ## 5. Theming & Branding
 
