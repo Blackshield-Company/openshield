@@ -6,6 +6,7 @@ use crossterm::{
     style::{Print, ResetColor},
 };
 
+use crate::tui::code_display::render_content_lines;
 use crate::tui::theme::*;
 use crate::tui::{App, ChatMessage};
 
@@ -184,11 +185,20 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
         }
     }
 
-    // Content lines (word-wrapped)
-    for content_line in msg.content.lines() {
-        let wrapped = wrap_line(content_line, width.saturating_sub(2));
-        for w in wrapped {
-            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
+    // Content lines (word-wrapped). Assistant messages get the visible
+    // code-writing display: fenced blocks become bordered, highlighted panels.
+    if msg.role == "assistant" {
+        lines.extend(render_content_lines(
+            &msg.content,
+            width.saturating_sub(2),
+            theme.fg,
+        ));
+    } else {
+        for content_line in msg.content.lines() {
+            let wrapped = wrap_line(content_line, width.saturating_sub(2));
+            for w in wrapped {
+                lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
+            }
         }
     }
 
@@ -224,12 +234,13 @@ fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
     );
     lines.push(header);
 
-    for line in content.lines() {
-        let wrapped = wrap_line(line, width.saturating_sub(2));
-        for w in wrapped {
-            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
-        }
-    }
+    // Live code-writing display for streamed assistant output: re-render the
+    // accumulated buffer each frame so open fences show a "writing…" footer.
+    lines.extend(render_content_lines(
+        content,
+        width.saturating_sub(2),
+        theme.fg,
+    ));
     lines
 }
 
