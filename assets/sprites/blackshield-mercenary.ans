@@ -1,65 +1,25 @@
-# ─────────────────────────────────────────────────────────────
-# blackshield-mercenary — the stock OpenShield mascot sprite.
-#
-# The Blackshield mercenary lobster: matte-black plate armor with
-# bone edging and war-gold rivets, a black tower shield bearing the
-# blood-red cross, and a pincer claw that raises in frame 2.
-#
-# Theme tokens (replaced with the active theme's ANSI escapes at
-# load time): {fg} {bg} {accent} {accent_secondary}
-#             {accent_tertiary} {muted} {blood} {bone} {reset}
-#   {blood} = {accent}, {bone} = {fg}
-# Lines starting with '#' are comments. Frames are separated by a
-# line containing exactly ---frame---.
-# ─────────────────────────────────────────────────────────────
-   {muted}\\\{reset}                                {muted}///{reset}   {reset}
-      {muted}\\\\{reset}                        {muted}////{reset}      {reset}
-          {muted}\\\\{reset}  {accent_secondary}●{muted}│{reset}        {accent_secondary}●{reset}   {muted}////{reset}          {reset}
-              {muted}\\\\││{reset}    {muted}││////{reset}              {reset}
-                 {fg}▛▀▀▀▀▀▀▜{muted}/{reset}                  {reset}
-                 {fg}▌{muted}▓▓▓▓▓▓{fg}▐{reset}                   {reset}
-                 {fg}▌{muted}▒▒▒▒▒▒▓{fg}▐{reset}                  {reset}
-                 {fg}▙▄▄▄▄▄▄▟{reset}                   {reset}
-           {fg}▛▀{accent_secondary}●{fg}▀▀▀▀▀▀▀▀▀▀{accent_secondary}●{fg}▀▜{reset}                 {reset}
- {fg}▛▀▀▀▀▀▀▜{reset}  {fg}▌{muted}▓▓▓▓▓▓▓▓▓▓▓▓▓▓{fg}▐{reset}   {muted}▓▓{reset}            {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▛▀▀▀▀▀▀▀▀▀▜{reset}     {muted}▓▓▓{fg}▛{muted}────{fg}▜{reset}    {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▌{muted}▓▓▓▓▓▓▓▓▓{fg}▐{reset}       {muted}▓▓{accent}█████{fg}▐{reset}   {reset}
- {fg}▌{accent}██████{fg}▐{reset}      {fg}▙▄▄▄▄▄▄▄▄▄▟{reset}       {fg}▌{accent}██{muted}──{accent}██{fg}▙{reset}   {reset}
- {fg}▌{accent}██████{fg}▐{muted}▓▓▓{reset}   {fg}▛▀▀▀▀▀▀▀▀▀▜{reset}        {fg}▙{muted}────{fg}▟{reset}    {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▌{muted}▓▒▓▓▓▓▓▓▒{fg}▐{reset}                  {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▙▄▄▄▄▄▄▄▄▄▟{reset}                  {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▛▀▀▀▀▀▀▀▀▀▜{reset}                  {reset}
- {fg}▙▄▄▄▄▄▄▟{reset}      {fg}▌{muted}▓▓▓▓▓▓▓▓▓{fg}▐{reset}                  {reset}
-               {fg}▙▄▄▄▄▄▄▄▄▄▟{reset}                  {reset}
-            {muted}╲{fg}╲{reset}    {fg}▛▀▀▀▀▀▜{reset}     {fg}╲{muted}╱{reset}            {reset}
-           {muted}╲{fg}╲{reset}     {fg}▌{muted}▓▓▓▓▓{fg}▐{reset}      {fg}╲{muted}╱{reset}           {reset}
-          {muted}╲{reset}        {fg}▛▀▀▀▀▜{reset}        {muted}╱{reset}          {reset}
-                   {fg}▙▄▄▄▄▟{reset}                   {reset}
-                    {fg}▛▀▀▀▜{reset}                   {reset}
-                  {fg}▛▀▀▜{reset}  {fg}▛▀▀▜{reset}                {reset}
----frame---
-   {muted}\\\{reset}                           {fg}▛{muted}──────{fg}▜{reset}   {reset}
-      {muted}\\\\{reset}                    {muted}//{fg}▌{accent}███████{fg}▐{reset}   {reset}
-          {muted}\\\\{reset}  {accent_secondary}●{muted}│{reset}        {accent_secondary}●{reset} {muted}//{reset}  {fg}▌{accent}█▓▓████{fg}▐{reset}   {reset}
-              {muted}\\\\││{reset}    {muted}││//{reset}     {fg}▟{accent}████▓█{fg}▙{reset}   {reset}
-                 {fg}▛▀▀▀▀▀▀▜{muted}/{reset}        {fg}▟{accent}▓▓▓▓{fg}▙{reset}    {reset}
-                 {fg}▌{muted}▓▓▓▓▓▓{fg}▐{reset}         {muted}▓▓{reset}        {reset}
-                 {fg}▌{muted}▒▒▒▒▒▒▓{fg}▐{reset}       {muted}▓▓{reset}         {reset}
-                 {fg}▙▄▄▄▄▄▄▟{reset}       {muted}▓▓{reset}          {reset}
-           {fg}▛▀{accent_secondary}●{fg}▀▀▀▀▀▀▀▀▀▀{accent_secondary}●{fg}▀▜{reset}    {muted}▓▓{reset}           {reset}
- {fg}▛▀▀▀▀▀▀▜{reset}  {fg}▌{muted}▓▓▓▓▓▓▓▓▓▓▓▓▓▓{fg}▐{reset}                 {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▛▀▀▀▀▀▀▀▀▀▜{reset}                  {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▌{muted}▓▓▓▓▓▓▓▓▓{fg}▐{reset}                  {reset}
- {fg}▌{accent}██████{fg}▐{reset}      {fg}▙▄▄▄▄▄▄▄▄▄▟{reset}                  {reset}
- {fg}▌{accent}██████{fg}▐{muted}▓▓▓{reset}   {fg}▛▀▀▀▀▀▀▀▀▀▜{reset}                  {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▌{muted}▓▒▓▓▓▓▓▓▒{fg}▐{reset}                  {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▙▄▄▄▄▄▄▄▄▄▟{reset}                  {reset}
- {fg}▌{muted}▒▒{accent}██{muted}▒▒{fg}▐{reset}      {fg}▛▀▀▀▀▀▀▀▀▀▜{reset}                  {reset}
- {fg}▙▄▄▄▄▄▄▟{reset}      {fg}▌{muted}▓▓▓▓▓▓▓▓▓{fg}▐{reset}                  {reset}
-               {fg}▙▄▄▄▄▄▄▄▄▄▟{reset}                  {reset}
-            {muted}╲{fg}╲{reset}    {fg}▛▀▀▀▀▀▜{reset}     {fg}╲{muted}╱{reset}            {reset}
-           {muted}╲{fg}╲{reset}     {fg}▌{muted}▓▓▓▓▓{fg}▐{reset}      {fg}╲{muted}╱{reset}           {reset}
-          {muted}╲{reset}        {fg}▛▀▀▀▀▜{reset}        {muted}╱{reset}          {reset}
-                   {fg}▙▄▄▄▄▟{reset}                   {reset}
-                    {fg}▛▀▀▀▜{reset}                   {reset}
-                  {fg}▛▀▀▜{reset}  {fg}▛▀▀▜{reset}                {reset}
+# blackshield-mercenary — pixel-accurate conversion of the
+# blackshield-knight petdex pet (idle f0 + f3, crest sway).
+# Generated by scripts/petdex-to-ans.py — edit the script, not the art.
+          {accent}▄▄{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}▄▄{reset}
+  {bone}▄▄{reset}      {accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{bg}▄▄{reset}{bg}▄▄{reset}
+  {bone}[48;2;216;211;200m▀▀{reset}    {muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}
+  {bone}[48;2;216;211;200m▀▀{reset}    {muted}▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}▀▀{reset}
+  {bone}[48;2;193;18;31m▀▀{reset}{muted}▀▀{reset}{bg}▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{muted}▄▄{reset}{muted}▄▄{reset}
+{muted}▀▀{reset}{muted}▀▀{reset}{muted}▀▀{reset}  {muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;201;162;39m▀▀{reset}{bg}[48;2;201;162;39m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}
+    {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{accent_secondary}[48;2;13;13;17m▀▀{reset}{accent_secondary}[48;2;201;162;39m▀▀{reset}{accent_secondary}[48;2;201;162;39m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}
+        {muted}▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{bone}▀▀{reset}{bone}▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;201;162;39m▀▀{reset}{accent_secondary}[48;2;138;143;152m▀▀{reset}{muted}▀▀{reset}
+          {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}    {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}  {muted}▀▀{reset}
+          {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}    {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}
+        {muted}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{muted}▀▀{reset}
+---frame---        {accent}▄▄{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}▄▄{reset}
+  {bone}▄▄{reset}    {accent}▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{bg}▄▄{reset}{bg}▄▄{reset}{bg}▄▄{reset}
+  {bone}[48;2;216;211;200m▀▀{reset}    {muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;193;18;31m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}
+  {bone}[48;2;216;211;200m▀▀{reset}    {muted}▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}▀▀{reset}
+  {bone}[48;2;193;18;31m▀▀{reset}{muted}▀▀{reset}{bg}▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{bg}[48;2;138;143;152m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{muted}▄▄{reset}{muted}▄▄{reset}
+{muted}▀▀{reset}{muted}▀▀{reset}{muted}▀▀{reset}  {muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{accent}[48;2;193;18;31m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;201;162;39m▀▀{reset}{bg}[48;2;201;162;39m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}
+    {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{accent}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{accent_secondary}[48;2;13;13;17m▀▀{reset}{accent_secondary}[48;2;201;162;39m▀▀{reset}{accent_secondary}[48;2;201;162;39m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}
+        {muted}▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{bone}▀▀{reset}{bone}▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{bone}[48;2;13;13;17m▀▀{reset}{muted}[48;2;138;143;152m▀▀{reset}{bg}[48;2;201;162;39m▀▀{reset}{accent_secondary}[48;2;138;143;152m▀▀{reset}{muted}▀▀{reset}
+          {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}    {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}  {muted}▀▀{reset}
+          {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}    {bg}[48;2;13;13;17m▀▀{reset}{bg}[48;2;13;13;17m▀▀{reset}
+        {muted}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{bg}▀▀{reset}{muted}▀▀{reset}
