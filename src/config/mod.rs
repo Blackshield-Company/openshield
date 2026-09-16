@@ -301,6 +301,19 @@ pub struct ModelConfig {
     pub capabilities: Vec<String>,
 }
 
+/// Expand a leading `~` in a config-provided path (e.g. "~/.config/x").
+/// Without this, a path like "~/.config/openshield/memory.db" is treated as
+/// relative to the process cwd and a literal `~` directory gets created.
+fn expand_tilde_path(path: &std::path::Path) -> std::path::PathBuf {
+    let s = path.to_string_lossy();
+    if s == "~" || s.starts_with("~/") {
+        let expanded = shellexpand::tilde(&s).to_string();
+        std::path::PathBuf::from(expanded)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 impl Config {
     /// Load config from an explicit directory (created if missing).
     /// Used by embedded hosts (Android) where `dirs::config_dir()` is None.
@@ -324,6 +337,10 @@ impl Config {
         // Embedded hosts (Android): dirs::data_dir() is None, so Config::default()
         // falls back to a relative memory_db_path ("./openshield/memory.db") that
         // resolves against a read-only cwd like "/". Rebase it under config_dir.
+        // Expand any leading "~" FIRST — "~/..." is not detected as relative by
+        // Path::is_relative() and would otherwise be rebased into a literal
+        // "~" directory under the cwd (see load_or_default for the same fix).
+        config.memory_db_path = expand_tilde_path(&config.memory_db_path);
         if config.memory_db_path.is_relative() {
             config.memory_db_path = config_dir.join("memory.db");
         }
@@ -337,18 +354,26 @@ impl Config {
 
         let config_path = config_dir.join("config.toml");
 
-        if config_path.exists() {
+        let mut config = if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)
                 .with_context(|| format!("Failed to read {}", config_path.display()))?;
             let mut config: Config =
                 toml::from_str(&content).context("Failed to parse config.toml")?;
             config.resolve_env_keys()?;
-            Ok(config)
+            config
         } else {
             let config = Config::default();
             let _ = config.save();
-            Ok(config)
-        }
+            config
+        };
+
+        // Config files commonly set memory_db_path = "~/.config/openshield/memory.db".
+        // Without expansion, "~" is a literal directory created relative to the
+        // process cwd — session history silently lands in "<cwd>/~/..." instead
+        // of the real home. Expand it before any use.
+        config.memory_db_path = expand_tilde_path(&config.memory_db_path);
+
+        Ok(config)
     }
 
     /// Resolve env vars and env files for provider API keys and gateway tokens.
@@ -849,6 +874,44 @@ mod tests {
         let config = Config::load_from_dir(&dir).unwrap();
         assert_eq!(config.memory_db_path, dir.join("memory.db"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_from_dir_expands_tilde_in_memory_db_path() {
+        // config.toml may set memory_db_path = "~/..." — without expansion a
+        // literal "~" directory is created relative to the process cwd and
+        // session history lands in the wrong database entirely.
+        let dir = std::env::temp_dir().join(format!("openshield-test-tilde-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cfg = Config::default();
+        cfg.memory_db_path = std::path::PathBuf::from("~/openshield-test-memory.db");
+        let content = toml::to_string_pretty(&cfg).unwrap();
+        std::fs::write(dir.join("config.toml"), content).unwrap();
+        let config = Config::load_from_dir(&dir).unwrap();
+        let home = dirs::home_dir().expect("home dir");
+        assert_eq!(
+            config.memory_db_path,
+            home.join("openshield-test-memory.db")
+        );
+        assert!(
+            !config.memory_db_path.to_string_lossy().contains('~'),
+            "tilde must be expanded, got: {:?}",
+            config.memory_db_path
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_expand_tilde_path_leaves_other_paths_alone() {
+        assert_eq!(
+            expand_tilde_path(std::path::Path::new("/tmp/x.db")),
+            std::path::PathBuf::from("/tmp/x.db")
+        );
+        assert_eq!(
+            expand_tilde_path(std::path::Path::new("relative/x.db")),
+            std::path::PathBuf::from("relative/x.db")
+        );
     }
 
     fn create_test_config() -> Config {

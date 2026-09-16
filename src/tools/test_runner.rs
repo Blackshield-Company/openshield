@@ -8,17 +8,21 @@ const MAX_OUTPUT_BYTES: usize = 128 * 1024;
 /// Maximum lines of output to capture.
 const MAX_OUTPUT_LINES: usize = 2000;
 /// Paths that should never be treated as project roots for test discovery.
-const BLOCKED_PATH_PREFIXES: &[&str] = &[
-    "/home/synth/.cargo",
-    "/home/synth/.cache",
-    "/home/synth/.local/share",
-    "/home/synth/.rustup",
-    "/usr",
-    "/var",
-    "/tmp",
-    "/etc",
-    "/opt",
-];
+/// System dirs are static; the home-relative entries are derived from the
+/// ACTUAL home directory (not hardcoded) so the guard works for any user.
+fn blocked_path_prefixes() -> Vec<String> {
+    let mut prefixes: Vec<String> = ["/usr", "/var", "/tmp", "/etc", "/opt"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if let Some(home) = dirs::home_dir() {
+        let home = home.to_string_lossy().to_string();
+        for sub in [".cargo", ".cache", ".local/share", ".rustup"] {
+            prefixes.push(format!("{}/{}", home, sub));
+        }
+    }
+    prefixes
+}
 
 pub struct TestTool;
 
@@ -77,8 +81,8 @@ fn validate_test_path(path: &str) -> Result<()> {
 
     let canonical_str = canonical.to_string_lossy();
 
-    for blocked in BLOCKED_PATH_PREFIXES {
-        if canonical_str.starts_with(*blocked) {
+    for blocked in blocked_path_prefixes() {
+        if canonical_str.starts_with(blocked.as_str()) {
             anyhow::bail!(
                 "Path '{}' is in a blocked directory ({}). \
                  These directories contain system/package files, not project tests. \
@@ -90,12 +94,15 @@ fn validate_test_path(path: &str) -> Result<()> {
     }
 
     // Warn if the path is the home directory itself — almost never intentional
-    if canonical_str == "/home/synth" || canonical_str == "/home/synth/" {
-        anyhow::bail!(
-            "Refusing to run tests from home directory (/home/synth). \
-             This would recursively execute every test file on your system. \
-             cd into a project directory or set working_directory in config."
-        );
+    if let Some(home) = dirs::home_dir() {
+        if canonical == home {
+            anyhow::bail!(
+                "Refusing to run tests from home directory ({}). \
+                 This would recursively execute every test file on your system. \
+                 cd into a project directory or set working_directory in config.",
+                home.display()
+            );
+        }
     }
 
     Ok(())
@@ -579,7 +586,10 @@ mod tests {
 
     #[test]
     fn test_validate_blocks_cargo_registry() {
-        let result = validate_test_path("/home/synth/.cargo/registry/src");
+        let home = dirs::home_dir().expect("home dir");
+        let registry = home.join(".cargo/registry/src");
+        let registry = registry.to_string_lossy().to_string();
+        let result = validate_test_path(&registry);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("blocked directory"));
@@ -587,10 +597,32 @@ mod tests {
 
     #[test]
     fn test_validate_blocks_home_dir() {
-        let result = validate_test_path("/home/synth");
+        let home = dirs::home_dir().expect("home dir");
+        let result = validate_test_path(&home.to_string_lossy());
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("home directory"));
+    }
+
+    #[test]
+    fn test_validate_blocks_are_derived_from_home_dir() {
+        // The guard must not depend on a hardcoded user: any path under the
+        // real home dir's .cargo/.cache/.local/share/.rustup is blocked, and
+        // a sibling directory directly under home is allowed.
+        let home = dirs::home_dir().expect("home dir");
+        let blocked = home.join(".rustup/toolchains");
+        assert!(validate_test_path(&blocked.to_string_lossy()).is_err());
+
+        let allowed = home.join(format!(".tmp_testrunner_sibling_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&allowed);
+        fs::create_dir_all(&allowed).unwrap();
+        // A bare directory under home is not a project (no test markers), but
+        // validation itself must pass — framework detection happens later.
+        assert!(
+            validate_test_path(&allowed.to_string_lossy()).is_ok(),
+            "home-dir guard must only block the home dir itself, not its children"
+        );
+        let _ = fs::remove_dir_all(&allowed);
     }
 
     #[test]
