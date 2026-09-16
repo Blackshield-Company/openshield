@@ -362,6 +362,31 @@ fn format_message_for_selection(
     };
     lines.push(header);
 
+    // Mirror the inline tool diff/preview block from components::chat so
+    // row-to-text mapping stays exact. Same line emission: header line, then
+    // body lines wrapped at width-4 with a 2-space indent.
+    if let Some(ref tr) = msg.tool_render {
+        let theme = crate::tui::theme::current_theme();
+        let op_label = match tr.op {
+            "write" => "write",
+            "patch" => "patch",
+            _ => "edit",
+        };
+        lines.push(format!(
+            "{}⚒ {} → {}{}",
+            ansi_fg(theme.accent_tertiary),
+            op_label,
+            tr.path,
+            ansi_reset()
+        ));
+        for body_line in tr.body.lines() {
+            let wrapped = wrap_line(body_line, width.saturating_sub(4));
+            for w in wrapped {
+                lines.push(format!("{}  {}{}", ansi_fg(theme.muted), w, ansi_reset()));
+            }
+        }
+    }
+
     for content_line in msg.content.lines() {
         let wrapped = wrap_line(content_line, width.saturating_sub(2));
         for w in wrapped {

@@ -7,7 +7,7 @@ use crate::tools::ToolSuggestion;
 use chrono::Utc;
 use uuid::Uuid;
 
-use super::{App, AppMode};
+use super::{App, AppMode, build_inline_tool_render};
 
 /// Events sent from the background streaming task to the main TUI loop.
 #[derive(Debug)]
@@ -297,6 +297,15 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             app.add_system_message(summary);
 
             for r in &results {
+                // Show inline diffs/previews for code-writing tools in the batch.
+                if let Some(render) = build_inline_tool_render(&r.name, &r.args) {
+                    let display = if r.success {
+                        format!("Result: {}", crate::utils::truncate_str(&r.result, 200))
+                    } else {
+                        format!("Tool execution failed: {}", r.result)
+                    };
+                    app.add_tool_render_message(render, display);
+                }
                 let tool_call = ToolCall {
                     id: Uuid::new_v4().to_string(),
                     session_id: app.session_id.clone(),
@@ -329,7 +338,12 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
             } else {
                 format!("Tool execution failed: {}", result)
             };
-            app.add_system_message(display);
+            // Show the actual code written/edited inline in the scrollback.
+            if let Some(render) = build_inline_tool_render(&name, &args) {
+                app.add_tool_render_message(render, display);
+            } else {
+                app.add_system_message(display);
+            }
 
             let tool_call = ToolCall {
                 id: Uuid::new_v4().to_string(),
