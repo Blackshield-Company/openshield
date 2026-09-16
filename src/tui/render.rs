@@ -79,6 +79,16 @@ pub fn draw_ui(app: &mut App) -> io::Result<()> {
 
     // ── Draw unified chat feed (full width, scrolls everything) ─────────────
     let chat_area = (0, status_height, full_width, chat_height);
+    // Publish the feed geometry so mouse selection (highlight overlay +
+    // copy-on-release) maps terminal rows to feed lines exactly. Without
+    // this, selection falls back to a hardcoded 80x24 rect and the row
+    // model diverges from the real render on any other terminal size.
+    app.chat_area_rect = Some(mouse::Rect {
+        x: 0,
+        y: status_height,
+        width: full_width,
+        height: chat_height,
+    });
     chat::draw_unified_feed(&mut out, app, chat_area)?;
 
     // ── Draw input bar (full width, bottom) ─────────────────────────────────
