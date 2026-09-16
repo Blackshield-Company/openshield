@@ -452,7 +452,7 @@ mod tests {
             max_agents: Some(2),
         });
 
-        start_swarm(State(state.clone()), Some(body))
+        let _ = start_swarm(State(state.clone()), Some(body))
             .await
             .into_response();
         let snap = swarm_snapshot(&state.swarm, false).await;
@@ -466,7 +466,7 @@ mod tests {
         roles.sort();
         assert_eq!(roles, vec!["Architect", "Tester"]);
 
-        stop_swarm(State(state)).await.into_response();
+        let _ = stop_swarm(State(state)).await.into_response();
     }
 
     #[tokio::test]
