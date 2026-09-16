@@ -2982,7 +2982,10 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/new" {
         let session_id = Uuid::new_v4().to_string();
-        let _ = if app.project_path.is_empty() {
+        // Log, don't swallow: if the session row fails to create here, every
+        // subsequent save_message for this session fails its FK silently
+        // (SQLite runs with foreign_keys off) and history is lost.
+        if let Err(e) = if app.project_path.is_empty() {
             app.memory
                 .create_session(&session_id, &app.model, "general")
         } else {
@@ -2992,7 +2995,9 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                 "general",
                 &app.project_path,
             )
-        };
+        } {
+            tracing::warn!("Failed to persist new session {}: {}", session_id, e);
+        }
         app.clear_conversation();
         app.session_id = session_id.clone();
         app.add_system_message(format!("🆕 New session #{}", &session_id[..8]));
