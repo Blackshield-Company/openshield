@@ -16,7 +16,9 @@
 //! | GET    | /api/v1/diagnostics | All LSP diagnostics |
 //! | GET    | /api/v1/diagnostics/:file | Diagnostics for a file |
 //! | GET    | /api/v1/sessions | List sessions |
-//! | GET    | /api/v1/sessions/:id | Get session details |
+//! | GET    | /api/v1/sessions/:id | Session details + full history (messages, tool calls) |
+//! | GET    | /api/v1/approvals | Pending security-gate approvals (M3, High/Critical risk) |
+//! | POST   | /api/v1/approvals/:id | approve / reject / approve-always a pending approval |
 //! | POST   | /api/v1/chat | Send a chat message (non-streaming) |
 //! | POST   | /api/v1/agent | Run agent task (returns task ID) |
 //! | GET    | /api/v1/agent/:id | Get agent task status |
@@ -33,13 +35,14 @@
 //! `openshield serve` attaches bearer-token auth (see `auth`). Enforcement
 //! engages only in LAN mode; loopback and embedded hosts run open.
 
+pub mod approvals;
 pub mod auth;
 pub mod handlers;
 pub mod ws;
 
 use axum::Router;
 use axum::middleware;
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -56,6 +59,10 @@ pub struct AppState {
     /// hosts). Set by `openshield serve` from the `[desktop]` config —
     /// enforcement engages only in LAN mode (design doc §3.1/§6).
     pub auth: Option<Arc<auth::AuthState>>,
+    /// Human-in-the-loop approval bridge (M3): pending High/Critical tool
+    /// calls, the `/ws/v1/chat` approval event broadcast, and the WS client
+    /// counter that decides whether the human gate engages.
+    pub approvals: Arc<approvals::ApprovalsState>,
     /// Server start time, for real uptime reporting on /api/v1/health.
     pub started: std::time::Instant,
 }
@@ -179,11 +186,18 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/sessions",
             get(handlers::list_sessions).post(handlers::create_session),
         )
-        .route("/api/v1/sessions/{id}", delete(handlers::close_session))
+        .route(
+            "/api/v1/sessions/{id}",
+            get(handlers::get_session_detail).delete(handlers::close_session),
+        )
         .route(
             "/api/v1/sessions/{id}/messages",
             get(handlers::session_messages),
         )
+        // Approvals (M3, design doc §3.1/§4): the human gate over WS-held
+        // High/Critical tool calls.
+        .route("/api/v1/approvals", get(approvals::list_approvals))
+        .route("/api/v1/approvals/{id}", post(approvals::resolve_approval))
         // Agent
         .route("/api/v1/agent", post(handlers::start_agent_task))
         .route("/api/v1/agent/{id}", get(handlers::get_agent_task))
@@ -196,6 +210,13 @@ pub fn build_router(state: AppState) -> Router {
             middleware_state,
             auth::require_bearer,
         ))
+        // CORS: allow any origin. Loopback mode serves local GUI webviews
+        // (Tauri dev server, browser dev) whose origins vary by port; LAN
+        // mode also allows any origin by design — the bearer token is the
+        // gate (design doc §3.1/§6), not the Origin header. Registered last
+        // so it sits outermost and answers preflight OPTIONS itself before
+        // the auth middleware ever sees them.
+        .layer(tower_http::cors::CorsLayer::permissive())
 }
 
 /// Start the API server on the given address.
