@@ -17,8 +17,13 @@
 //! | GET    | /api/v1/diagnostics/:file | Diagnostics for a file |
 //! | GET    | /api/v1/sessions | List sessions |
 //! | GET    | /api/v1/sessions/:id | Session details + full history (messages, tool calls) |
+//! | GET    | /api/v1/memory | Search persistent memory |
+//! | GET    | /api/v1/memory/search | Alias of `/api/v1/memory` (design-doc URL, §3.1) |
 //! | GET    | /api/v1/approvals | Pending security-gate approvals (M3, High/Critical risk) |
 //! | POST   | /api/v1/approvals/:id | approve / reject / approve-always a pending approval |
+//! | GET    | /api/v1/swarm | Swarm state (engine, agents, consensus, last event; offline state when idle) |
+//! | POST   | /api/v1/swarm/start | Idempotent swarm start (`{seed, roles, max_agents}` optional) |
+//! | POST   | /api/v1/swarm/stop | Idempotent swarm stop |
 //! | POST   | /api/v1/chat | Send a chat message (non-streaming) |
 //! | POST   | /api/v1/agent | Run agent task (returns task ID) |
 //! | GET    | /api/v1/agent/:id | Get agent task status |
@@ -38,6 +43,7 @@
 pub mod approvals;
 pub mod auth;
 pub mod handlers;
+pub mod swarm;
 pub mod ws;
 
 use axum::Router;
@@ -63,6 +69,11 @@ pub struct AppState {
     /// calls, the `/ws/v1/chat` approval event broadcast, and the WS client
     /// counter that decides whether the human gate engages.
     pub approvals: Arc<approvals::ApprovalsState>,
+    /// Swarm engine handle (M5): the engine owned by this API server
+    /// process, created on first `POST /api/v1/swarm/start` or attached by
+    /// an embedded host. `GET /api/v1/swarm` reports a valid offline state
+    /// while no engine exists.
+    pub swarm: Arc<swarm::SwarmState>,
     /// Server start time, for real uptime reporting on /api/v1/health.
     pub started: std::time::Instant,
 }
@@ -176,6 +187,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/stats", get(handlers::stats))
         .route("/api/v1/models", get(handlers::list_models))
         .route("/api/v1/memory", get(handlers::memory_search))
+        // Alias so the design-doc URL works (§3.1 memory browser)
+        .route("/api/v1/memory/search", get(handlers::memory_search))
         // Doctor + pairing (desktop/pocket companions, design doc §3.1)
         .route("/api/v1/doctor", get(handlers::doctor))
         .route("/api/v1/pair", post(handlers::pair))
@@ -198,6 +211,10 @@ pub fn build_router(state: AppState) -> Router {
         // High/Critical tool calls.
         .route("/api/v1/approvals", get(approvals::list_approvals))
         .route("/api/v1/approvals/{id}", post(approvals::resolve_approval))
+        // Swarm (M5, design doc §3.1): monitor + start/stop from the GUI
+        .route("/api/v1/swarm", get(swarm::get_swarm))
+        .route("/api/v1/swarm/start", post(swarm::start_swarm))
+        .route("/api/v1/swarm/stop", post(swarm::stop_swarm))
         // Agent
         .route("/api/v1/agent", post(handlers::start_agent_task))
         .route("/api/v1/agent/{id}", get(handlers::get_agent_task))
