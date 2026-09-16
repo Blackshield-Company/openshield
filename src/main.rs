@@ -1723,6 +1723,7 @@ async fn main() -> anyhow::Result<()> {
                 config_dir: None,
                 auth: Some(auth),
                 approvals: Arc::new(crate::api::approvals::ApprovalsState::new()),
+                swarm: Arc::new(crate::api::swarm::SwarmState::new()),
                 started: std::time::Instant::now(),
             };
             if let Err(e) = crate::api::serve(state, &bind_addr).await {
