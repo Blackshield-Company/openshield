@@ -266,6 +266,9 @@ pub(crate) struct App {
     /// Active mascot sprite for the splash screen. None = banner-only
     /// (`sprite = "none"` in config or explicitly disabled).
     sprite: Option<crate::tui::sprites::Sprite>,
+    /// Compact `<sprite>-mini` variant drawn bottom-right of the chat area
+    /// at all times (petdex-style). None when no mini variant exists.
+    sprite_mini: Option<crate::tui::sprites::Sprite>,
 }
 
 #[derive(Debug, Clone)]
@@ -511,6 +514,13 @@ impl App {
                     crate::tui::sprites::load_sprite_or_stock(configured_sprite);
                 (Some(sprite), warning)
             };
+        // Persistent corner mascot: the compact `<sprite>-mini` variant.
+        // Hidden automatically when no mini exists for the active sprite.
+        let sprite_mini = if sprite.is_some() {
+            crate::tui::sprites::load_mini(configured_sprite)
+        } else {
+            None
+        };
 
         let mut app = Self {
             input: String::new(),
@@ -669,6 +679,7 @@ impl App {
             chat_area_rect: None,
             copy_selected_idx: None,
             sprite,
+            sprite_mini,
         };
 
         // Surface unknown-sprite config warnings as a chat system message.
@@ -689,6 +700,7 @@ impl App {
         }
         if name.eq_ignore_ascii_case("none") {
             self.sprite = None;
+            self.sprite_mini = None;
             self.config.sprite = "none".to_string();
             self.add_system_message(
                 "🦞 Sprite disabled — splash screen is banner-only.".to_string(),
@@ -697,6 +709,7 @@ impl App {
             match crate::tui::sprites::load_sprite(name) {
                 Some(sprite) => {
                     self.add_system_message(format!("🦞 Sprite: {}", sprite.name));
+                    self.sprite_mini = crate::tui::sprites::load_mini(name);
                     self.sprite = Some(sprite);
                     self.config.sprite = name.to_string();
                 }
@@ -1931,6 +1944,8 @@ async fn run_app(app: &mut App, last_tick: &mut Instant) -> Result<()> {
             *last_tick = Instant::now();
             // Advance spinner frame every tick for smooth animation
             app.spinner_frame = app.spinner_frame.wrapping_add(1);
+            // Animate the corner mascot in place (no full redraw needed)
+            components::mascot::tick_redraw(app);
         }
 
         // Poll swarm status and inject updates into chat
