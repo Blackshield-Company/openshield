@@ -25,8 +25,16 @@ fn main() {
     println!("cargo:rustc-env=OS_GIT_HASH={hash}");
     println!("cargo:rustc-env=OS_BUILD_DATE={y}.{m}.{d}");
 
-    // Rebuild when the checked-out commit changes
+    // Rebuild when the checked-out commit changes. `.git/HEAD` alone is NOT
+    // enough: on a branch it just contains `ref: refs/heads/<name>`, which
+    // doesn't change when new commits land on that branch. Follow the ref
+    // and watch the ref file too, so the stamp tracks every commit.
     println!("cargo:rerun-if-changed=.git/HEAD");
+    if let Ok(head) = std::fs::read_to_string(".git/HEAD")
+        && let Some(refname) = head.trim().strip_prefix("ref: ")
+    {
+        println!("cargo:rerun-if-changed=.git/{refname}");
+    }
 }
 
 /// Days since Unix epoch -> (year, month, day). Howard Hinnant's algorithm.
