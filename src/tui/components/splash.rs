@@ -218,7 +218,7 @@ fn draw_sprite_frame(
 }
 
 /// Height of the tallest frame (all frames occupy the same row band).
-fn max_frame_height(sprite: &Sprite) -> usize {
+pub(crate) fn max_frame_height(sprite: &Sprite) -> usize {
     sprite
         .frames
         .iter()
@@ -228,7 +228,7 @@ fn max_frame_height(sprite: &Sprite) -> usize {
 }
 
 /// Widest visible line across all frames — the frame band's clear width.
-fn sprite_max_frame_width(sprite: &Sprite) -> usize {
+pub(crate) fn sprite_max_frame_width(sprite: &Sprite) -> usize {
     sprite
         .frames
         .iter()
@@ -266,7 +266,7 @@ fn detect_git_branch(dir: &str) -> String {
 }
 
 /// Calculate visible width of a string (ignoring ANSI escape codes).
-fn visible_width(s: &str) -> usize {
+pub(crate) fn visible_width(s: &str) -> usize {
     let mut width = 0usize;
     let mut in_escape = false;
     for ch in s.chars() {
