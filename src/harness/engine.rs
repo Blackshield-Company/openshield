@@ -781,9 +781,13 @@ impl HarnessEngine {
             // OpenAI) reject the whole request with 400 "tool_call_id is not
             // found". Skip tool-role rows outright; coerce anything that is
             // not user/assistant/system to "user".
+            // Remembered "system" rows (TUI notices, agent run markers) must
+            // NOT ride in as system messages: strict templates (stock Qwen3 /
+            // llama.cpp minijinja) reject any system message that is not
+            // messages[0]. Coerce them to user-role context instead.
             let role = match msg.role.as_str() {
                 "tool" | "function" => continue,
-                "user" | "assistant" | "system" => msg.role,
+                "user" | "assistant" => msg.role,
                 _ => "user".to_string(),
             };
             messages.push(Message {
@@ -796,8 +800,16 @@ impl HarnessEngine {
             });
         }
 
-        // 3. Current conversation history from state
+        // 3. Current conversation history from state.
+        // Skip stale system-role history entries (e.g. the TUI's own system
+        // prompt at model_messages[0]): the fresh system prompt built in
+        // step 1 supersedes them, and strict chat templates (stock Qwen3 /
+        // llama.cpp minijinja) reject any system message that is not
+        // messages[0] with "System message must be at the beginning."
         for msg in &self.state.messages {
+            if msg.role == "system" {
+                continue;
+            }
             messages.push(msg.clone());
         }
 
