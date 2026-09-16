@@ -31,7 +31,7 @@ claw-delegation = []
 opencode-delegation = []
 claude-delegation = []
 github-native = []
-web-api = ["axum", "tokio-util"]
+web-api = ["axum", "tokio-util", "tower-http"]
 
 [dependencies]
 # Allocator — glibc malloc retains freed heap in per-thread arenas, which
@@ -81,6 +81,7 @@ matrix-sdk = { version = "0.17", optional = true }
 octocrab = { version = "0.43", optional = true }
 axum = { version = "0.8", features = ["ws"], optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }
+tower-http = { version = "0.6", features = ["cors"], optional = true }
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 tungstenite = "0.29.0"
 
