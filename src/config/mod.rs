@@ -138,6 +138,41 @@ impl Default for FilesystemConfig {
     }
 }
 
+/// Desktop / mobile companion (OpenShield Desktop & Pocket) API server
+/// settings. Consumed by `openshield serve` — see
+/// docs/openshield-desktop-design.md §3.1.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct DesktopConfig {
+    /// Master switch for the desktop API surface (doctor warns when off).
+    pub enabled: bool,
+    /// Bind address. `127.0.0.1` = local clients only; `0.0.0.0` = LAN
+    /// (refused at startup unless `lan_mode = true`).
+    pub bind: String,
+    /// Port for the API server.
+    pub port: u16,
+    /// Path to the bearer token file (chmod 600, auto-generated if missing).
+    pub token_path: String,
+    /// Lifetime in seconds of pairing tokens issued by POST /api/v1/pair.
+    pub pair_ttl_secs: u64,
+    /// Explicit opt-in required before binding non-loopback addresses
+    /// (mobile/LAN access). Never enabled by default — see §6.
+    pub lan_mode: bool,
+}
+
+impl Default for DesktopConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: "127.0.0.1".to_string(),
+            port: 9310,
+            token_path: "~/.config/openshield/desktop.token".to_string(),
+            pair_ttl_secs: 120,
+            lan_mode: false,
+        }
+    }
+}
+
 fn default_max_file_size_mb() -> usize {
     10
 }
@@ -173,6 +208,9 @@ pub struct Config {
     pub context_compression: crate::memory::compression::ContextCompressionConfig,
     #[serde(default)]
     pub keybindings: KeybindingsConfig,
+    /// Desktop / mobile companion API server (`openshield serve`).
+    #[serde(default)]
+    pub desktop: DesktopConfig,
     /// Auto-commit changes after file edits.
     #[serde(default)]
     pub auto_commit: bool,
@@ -207,6 +245,13 @@ pub struct Config {
     /// repo scan on huge/non-project directories.
     #[serde(default = "default_code_index_enabled")]
     pub code_index_enabled: bool,
+    /// Mascot sprite shown on the splash screen. "blackshield-mercenary" is
+    /// the stock sprite; "none" disables the sprite (banner-only splash).
+    /// Custom sprites: drop `*.ans`/`*.txt` files in
+    /// ~/.config/openshield/sprites/ (they override stock sprites of the
+    /// same name). Switch at runtime with /sprite.
+    #[serde(default = "default_sprite")]
+    pub sprite: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -253,6 +298,10 @@ fn default_effort() -> String {
 
 fn default_code_index_enabled() -> bool {
     true
+}
+
+fn default_sprite() -> String {
+    "blackshield-mercenary".to_string()
 }
 
 // Deprecated: kept for backward compatibility. Use gateway instead.
@@ -822,6 +871,7 @@ impl Default for Config {
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: KeybindingsConfig::default(),
+            desktop: DesktopConfig::default(),
             auto_commit: false,
             auto_commit_model: None,
             weak_model: None,
@@ -832,6 +882,7 @@ impl Default for Config {
             auto_lint: true,
             effort_level: "medium".to_string(),
             code_index_enabled: true,
+            sprite: default_sprite(),
         }
     }
 }
@@ -881,7 +932,8 @@ mod tests {
         // config.toml may set memory_db_path = "~/..." — without expansion a
         // literal "~" directory is created relative to the process cwd and
         // session history lands in the wrong database entirely.
-        let dir = std::env::temp_dir().join(format!("openshield-test-tilde-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("openshield-test-tilde-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut cfg = Config::default();
@@ -974,6 +1026,7 @@ mod tests {
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: KeybindingsConfig::default(),
+            desktop: DesktopConfig::default(),
             auto_commit: false,
             auto_commit_model: None,
             weak_model: None,
@@ -984,6 +1037,7 @@ mod tests {
             auto_lint: false,
             effort_level: "medium".to_string(),
             code_index_enabled: true,
+            sprite: "blackshield-mercenary".to_string(),
         }
     }
 

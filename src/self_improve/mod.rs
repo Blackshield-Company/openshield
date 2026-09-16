@@ -860,6 +860,7 @@ mod tests {
             swarm: crate::swarm::SwarmConfig::default(),
             context_compression: crate::memory::compression::ContextCompressionConfig::default(),
             keybindings: crate::config::KeybindingsConfig::default(),
+            desktop: crate::config::DesktopConfig::default(),
             auto_commit: false,
             auto_commit_model: None,
             weak_model: None,
@@ -870,6 +871,7 @@ mod tests {
             auto_lint: false,
             effort_level: "medium".to_string(),
             code_index_enabled: true,
+            sprite: "blackshield-mercenary".to_string(),
         }
     }
 
