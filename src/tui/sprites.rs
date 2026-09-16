@@ -37,10 +37,16 @@ const FRAME_SEP: &str = "---frame---";
 pub const STOCK_SPRITE: &str = "blackshield-mercenary";
 
 /// Built-in sprites embedded into the binary: (name, file contents).
-const BUILTIN_SPRITES: &[(&str, &str)] = &[(
-    STOCK_SPRITE,
-    include_str!("../../assets/sprites/blackshield-mercenary.ans"),
-)];
+const BUILTIN_SPRITES: &[(&str, &str)] = &[
+    (
+        STOCK_SPRITE,
+        include_str!("../../assets/sprites/blackshield-mercenary.ans"),
+    ),
+    (
+        "blackshield-mercenary-mini",
+        include_str!("../../assets/sprites/blackshield-mercenary-mini.ans"),
+    ),
+];
 
 /// A loaded mascot sprite: named, with one or more animation frames.
 /// Each frame is a multi-line UTF-8 string; ANSI escapes are pre-baked.
@@ -146,6 +152,13 @@ fn load_sprite_with_user_dir(name: &str, user_dir: Option<&Path>) -> Option<Spri
         return Some(sprite);
     }
     builtin_sprite(name).and_then(|content| parse_sprite(name, content))
+}
+
+/// Load the compact `<name>-mini` mascot variant used for the persistent
+/// corner companion (user dir first, then built-ins). Returns None when no
+/// mini variant exists — the corner mascot simply stays hidden.
+pub fn load_mini(name: &str) -> Option<Sprite> {
+    load_sprite(&format!("{name}-mini"))
 }
 
 /// Load the stock sprite. Always succeeds — it is embedded in the binary.

@@ -1,0 +1,20 @@
+# blackshield-mercenary-mini — compact corner mascot (petdex-style)
+# Persistent bottom-right companion. Theme tokens: {fg} {accent}
+# {accent_secondary} {muted} {reset}. Keep ≤ 22 visible cols x 8 rows.
+   {muted}\\\{fg}  {accent_secondary}●│●{fg}  {muted}///{reset}
+    {fg}▛▀▀▀▀▀▀▜{reset}
+ {fg}▛▀▀▜{reset} {fg}▌▓▓▓▓▐{reset}  {fg}▛──▜{reset}
+ {fg}▌{accent}██{fg}▐{reset} {fg}▌▓▓▓▓▐{reset}  {fg}▌{accent}██{fg}▐{reset}
+ {fg}▌{accent}██{fg}▐{reset} {fg}▛▀▀▀▀▜{reset}  {fg}▙──▟{reset}
+ {fg}▙▄▄▟{reset} {fg}▌▓▓▓▓▐{reset}
+      {fg}▙▄▄▄▄▟{reset}
+     {fg}▛▀▜  ▛▀▜{reset}
+---frame---
+   {muted}\\\{fg}  {accent_secondary}●│●{fg}  {muted}///{reset}   {fg}▛──▜{reset}
+    {fg}▛▀▀▀▀▀▀▜{reset}   {fg}▌{accent}██{fg}▐{reset}
+ {fg}▛▀▀▜{reset} {fg}▌▓▓▓▓▐{reset}  {fg}▙──▟{reset}
+ {fg}▌{accent}██{fg}▐{reset} {fg}▌▓▓▓▓▐{reset}
+ {fg}▌{accent}██{fg}▐{reset} {fg}▛▀▀▀▀▜{reset}
+ {fg}▙▄▄▟{reset} {fg}▌▓▓▓▓▐{reset}
+      {fg}▙▄▄▄▄▟{reset}
+     {fg}▛▀▜  ▛▀▜{reset}
