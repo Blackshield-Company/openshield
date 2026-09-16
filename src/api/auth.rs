@@ -10,11 +10,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use axum::Json;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde_json::json;
 
 /// Auth material attached to `AppState` by the `serve` command.
@@ -137,12 +137,8 @@ mod tests {
         assert!(auth.accepts("pair1"));
 
         // Force expiry, then confirm rejection + pruning.
-        *auth
-            .pair_tokens
-            .lock()
-            .unwrap()
-            .get_mut("pair1")
-            .unwrap() = chrono::Utc::now() - chrono::Duration::seconds(1);
+        *auth.pair_tokens.lock().unwrap().get_mut("pair1").unwrap() =
+            chrono::Utc::now() - chrono::Duration::seconds(1);
         assert!(!auth.accepts("pair1"));
         assert!(auth.pair_tokens.lock().unwrap().is_empty());
     }
