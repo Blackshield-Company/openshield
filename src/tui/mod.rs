@@ -30,6 +30,7 @@ mod vim_input;
 
 mod ascii_art;
 mod chat;
+pub(crate) mod code_display;
 mod render;
 mod sprites;
 mod stream;

@@ -355,10 +355,18 @@ fn format_message_for_selection(
         }
     }
 
-    for content_line in msg.content.lines() {
-        let wrapped = wrap_line(content_line, width.saturating_sub(2));
-        for w in wrapped {
-            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
+    if msg.role == "assistant" {
+        lines.extend(crate::tui::code_display::render_content_lines(
+            &msg.content,
+            width.saturating_sub(2),
+            theme.fg,
+        ));
+    } else {
+        for content_line in msg.content.lines() {
+            let wrapped = wrap_line(content_line, width.saturating_sub(2));
+            for w in wrapped {
+                lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
+            }
         }
     }
 
@@ -393,12 +401,11 @@ fn format_streaming_for_selection(content: &str, width: usize) -> Vec<String> {
     );
     lines.push(header);
 
-    for line in content.lines() {
-        let wrapped = wrap_line(line, width.saturating_sub(2));
-        for w in wrapped {
-            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
-        }
-    }
+    lines.extend(crate::tui::code_display::render_content_lines(
+        content,
+        width.saturating_sub(2),
+        theme.fg,
+    ));
     lines
 }
 
