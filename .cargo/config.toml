@@ -1,0 +1,6 @@
+# The unit suite mutates process-global state (checkpoint.rs tests chdir into
+# temp git repos while cwd-sensitive tool tests run concurrently), which makes
+# parallel runs flaky. The suite finishes in ~3s, so serialization costs
+# nothing and kills the race deterministically.
+[env]
+RUST_TEST_THREADS = "1"

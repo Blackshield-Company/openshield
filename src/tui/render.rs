@@ -19,7 +19,7 @@ use crossterm::{
 
 use crossterm::style::Color;
 
-use crate::tui::components::{chat, mascot, splash};
+use crate::tui::components::{chat, splash};
 use crate::tui::mouse;
 use crate::tui::theme::*;
 use crate::tui::{App, AppMode};
@@ -118,9 +118,7 @@ pub fn draw_ui(app: &mut App) -> io::Result<()> {
         draw_bookmark_overlay(&mut out, app, term_width, term_height)?;
     }
 
-    // ── Persistent corner mascot (bottom-right of chat area) ─────────────
-    mascot::draw_mascot(&mut out, app, term_width, status_height + chat_height)?;
-
+    // ── Mouse selection overlay ──────────────────────────────────────────
     mouse::draw_selection_overlay(&mut out, app)?;
 
     // Position cursor in input area — account for text wrapping on narrow terminals

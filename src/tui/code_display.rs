@@ -31,7 +31,11 @@ pub(crate) fn render_content_lines(content: &str, width: usize, base: Color) -> 
             } else {
                 in_code = true;
                 lang = rest.trim().to_string();
-                out.push(border_line(&format!("┌─ code{}", lang_suffix(&lang)), width, false));
+                out.push(border_line(
+                    &format!("┌─ code{}", lang_suffix(&lang)),
+                    width,
+                    false,
+                ));
             }
             continue;
         }
@@ -68,10 +72,17 @@ fn lang_suffix(lang: &str) -> String {
 
 fn border_line(label: &str, width: usize, pulse: bool) -> String {
     let theme = current_theme();
-    let color = if pulse { theme.highlight } else { theme.accent_tertiary };
+    let color = if pulse {
+        theme.highlight
+    } else {
+        theme.accent_tertiary
+    };
     // Keep borders short and deterministic; the code body carries the signal.
     let body = if width > 24 {
-        format!("{label} {}", "─".repeat(width.saturating_sub(label.chars().count() + 2).min(18)))
+        format!(
+            "{label} {}",
+            "─".repeat(width.saturating_sub(label.chars().count() + 2).min(18))
+        )
     } else {
         label.to_string()
     };
@@ -83,7 +94,11 @@ fn render_code_block(code: &[String], lang: &str, width: usize) -> Vec<String> {
     let mut out = Vec::new();
     for line in code {
         if line.is_empty() {
-            out.push(format!("{}  {}", ansi_fg(current_theme().muted), ansi_reset()));
+            out.push(format!(
+                "{}  {}",
+                ansi_fg(current_theme().muted),
+                ansi_reset()
+            ));
             continue;
         }
         for segment in wrap_line(line, code_width) {
@@ -98,7 +113,11 @@ fn render_code_block(code: &[String], lang: &str, width: usize) -> Vec<String> {
         }
     }
     if code.is_empty() {
-        out.push(format!("{}  …{}", ansi_fg(current_theme().muted), ansi_reset()));
+        out.push(format!(
+            "{}  …{}",
+            ansi_fg(current_theme().muted),
+            ansi_reset()
+        ));
     }
     out
 }
@@ -159,7 +178,11 @@ mod tests {
 
     #[test]
     fn fenced_code_gets_borders_and_highlighting() {
-        let lines = render_content_lines("before\n```rust\nfn main() {}\n```\nafter", 80, Color::White);
+        let lines = render_content_lines(
+            "before\n```rust\nfn main() {}\n```\nafter",
+            80,
+            Color::White,
+        );
         let joined = plain(&lines);
         assert!(joined.contains("┌─ code: rust"));
         assert!(joined.contains("fn main() {}"));

@@ -1093,10 +1093,7 @@ impl HarnessEngine {
                             tool_call_id: tool_call.id.clone(),
                             tool_name: tool_name.clone(),
                             args: args.clone(),
-                            result: format!(
-                                "Approval denied: {} (risk: {:?})",
-                                reason, risk_level
-                            ),
+                            result: format!("Approval denied: {} (risk: {:?})", reason, risk_level),
                             success: false,
                             execution_time_ms: start.elapsed().as_millis() as u64,
                         });
@@ -1409,12 +1406,13 @@ mod tests {
         let mut engine = gate_test_engine();
         // "rm -rf" is Critical risk → RequireApproval. A rejecting gate must
         // stop the call BEFORE it reaches the terminal tool.
-        let gate: ApprovalGate =
-            std::sync::Arc::new(|_req| Box::pin(async { false }));
+        let gate: ApprovalGate = std::sync::Arc::new(|_req| Box::pin(async { false }));
         engine.set_approval_gate(Some(gate));
 
         let result = engine
-            .execute_tool_call(&critical_tool_call("rm -rf /tmp/openshield-gate-test-never"))
+            .execute_tool_call(&critical_tool_call(
+                "rm -rf /tmp/openshield-gate-test-never",
+            ))
             .await
             .expect("tool call result");
         assert!(!result.success);
@@ -1430,8 +1428,7 @@ mod tests {
         let mut engine = gate_test_engine();
         // An approving gate lets the held call proceed: the tool actually
         // executes ("format" trips the Critical pattern; `echo` is harmless).
-        let gate: ApprovalGate =
-            std::sync::Arc::new(|_req| Box::pin(async { true }));
+        let gate: ApprovalGate = std::sync::Arc::new(|_req| Box::pin(async { true }));
         engine.set_approval_gate(Some(gate));
 
         let result = engine
@@ -1452,7 +1449,9 @@ mod tests {
         // No gate installed: historical behavior — the call is refused with
         // "Approval required" and never executes.
         let result = engine
-            .execute_tool_call(&critical_tool_call("rm -rf /tmp/openshield-gate-test-never"))
+            .execute_tool_call(&critical_tool_call(
+                "rm -rf /tmp/openshield-gate-test-never",
+            ))
             .await
             .expect("tool call result");
         assert!(!result.success);
