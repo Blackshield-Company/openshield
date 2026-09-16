@@ -55,11 +55,7 @@ pub fn draw_unified_feed(
     // Separator
     all_lines.push(format!(
         "{}─{}",
-        ansi_fg(Color::Rgb {
-            r: 140,
-            g: 120,
-            b: 160,
-        }),
+        ansi_fg(current_theme().border),
         ansi_reset()
     ));
 
@@ -125,61 +121,22 @@ pub fn draw_unified_feed(
 fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<String> {
     let mut lines = Vec::new();
 
+    let theme = current_theme();
     let (role_icon, role_color, role_name) = match msg.role.as_str() {
-        "user" => (
-            "👤",
-            Color::Rgb {
-                r: 201,
-                g: 162,
-                b: 39,
-            },
-            "You",
-        ), // War-gold
-        "assistant" => (
-            "🛡",
-            Color::Rgb {
-                r: 193,
-                g: 18,
-                b: 31,
-            },
-            "OpenShield",
-        ), // Blood
-        "system" => (
-            "📋",
-            Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152,
-            },
-            "System",
-        ), // Ash
-        _ => (
-            "❓",
-            Color::Rgb {
-                r: 220,
-                g: 220,
-                b: 220,
-            },
-            "Unknown",
-        ),
+        "user" => ("👤", theme.accent_secondary, "You"), // war-gold
+        "assistant" => ("🛡", theme.accent, "OpenShield"), // blood
+        "system" => ("📋", theme.muted, "System"),       // ash
+        _ => ("❓", theme.fg, "Unknown"),                // bone
     };
 
     // Role header with icon and name
     let header = if is_selected {
         format!(
             "{}▶ {} {} {}{}{}",
-            ansi_fg(Color::Rgb {
-                r: 201,
-                g: 162,
-                b: 39,
-            }),
+            ansi_fg(theme.accent_secondary),
             role_icon,
             role_name,
-            ansi_fg(Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152,
-            }),
+            ansi_fg(theme.muted),
             " [COPY]",
             ansi_reset()
         )
@@ -189,11 +146,7 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
             ansi_fg(role_color),
             role_icon,
             role_name,
-            ansi_fg(Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152,
-            }),
+            ansi_fg(theme.muted),
             ansi_reset()
         )
     };
@@ -235,16 +188,7 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
     for content_line in msg.content.lines() {
         let wrapped = wrap_line(content_line, width.saturating_sub(2));
         for w in wrapped {
-            lines.push(format!(
-                "{}{}{}",
-                ansi_fg(Color::Rgb {
-                    r: 216,
-                    g: 211,
-                    b: 200,
-                }),
-                w,
-                ansi_reset()
-            ));
+            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
         }
     }
 
@@ -252,11 +196,7 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
     for response in &msg.multi_model_responses {
         lines.push(format!(
             "{}  ↳ {} ({}ms, {}tok){}",
-            ansi_fg(Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152,
-            }),
+            ansi_fg(theme.muted),
             response.model_name,
             response.latency_ms,
             response.tokens,
@@ -265,16 +205,7 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
         for line in response.content.lines() {
             let wrapped = wrap_line(line, width.saturating_sub(6));
             for w in wrapped {
-                lines.push(format!(
-                    "{}    {}{}",
-                    ansi_fg(Color::Rgb {
-                        r: 140,
-                        g: 120,
-                        b: 160,
-                    }),
-                    w,
-                    ansi_reset()
-                ));
+                lines.push(format!("{}    {}{}", ansi_fg(theme.muted), w, ansi_reset()));
             }
         }
     }
@@ -284,18 +215,11 @@ fn format_message(msg: &ChatMessage, width: usize, is_selected: bool) -> Vec<Str
 
 fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
+    let theme = current_theme();
     let header = format!(
         "{}🛡 Shield {}(streaming…){}",
-        ansi_fg(Color::Rgb {
-            r: 255,
-            g: 77,
-            b: 158,
-        }),
-        ansi_fg(Color::Rgb {
-            r: 140,
-            g: 120,
-            b: 160,
-        }),
+        ansi_fg(theme.highlight),
+        ansi_fg(theme.muted),
         ansi_reset()
     );
     lines.push(header);
@@ -303,16 +227,7 @@ fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
     for line in content.lines() {
         let wrapped = wrap_line(line, width.saturating_sub(2));
         for w in wrapped {
-            lines.push(format!(
-                "{}{}{}",
-                ansi_fg(Color::Rgb {
-                    r: 216,
-                    g: 211,
-                    b: 200,
-                }),
-                w,
-                ansi_reset()
-            ));
+            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
         }
     }
     lines
@@ -320,18 +235,11 @@ fn format_streaming_content(content: &str, width: usize) -> Vec<String> {
 
 fn format_reasoning_content(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
+    let theme = current_theme();
     let header = format!(
         "{}💭 Reasoning {}(thinking…){}",
-        ansi_fg(Color::Rgb {
-            r: 140,
-            g: 120,
-            b: 160,
-        }),
-        ansi_fg(Color::Rgb {
-            r: 100,
-            g: 100,
-            b: 120,
-        }),
+        ansi_fg(theme.muted),
+        ansi_fg(theme.muted),
         ansi_reset()
     );
     lines.push(header);
@@ -339,32 +247,16 @@ fn format_reasoning_content(content: &str, width: usize) -> Vec<String> {
     for line in content.lines() {
         let wrapped = wrap_line(line, width.saturating_sub(2));
         for w in wrapped {
-            lines.push(format!(
-                "{}{}{}",
-                ansi_fg(Color::Rgb {
-                    r: 140,
-                    g: 140,
-                    b: 160,
-                }),
-                w,
-                ansi_reset()
-            ));
+            lines.push(format!("{}{}{}", ansi_fg(theme.muted), w, ansi_reset()));
         }
     }
     lines
 }
 
 fn format_info_line(label: &str, value: &str, width: usize) -> String {
-    let label_color = ansi_fg(Color::Rgb {
-        r: 140,
-        g: 120,
-        b: 160,
-    });
-    let value_color = ansi_fg(Color::Rgb {
-        r: 220,
-        g: 220,
-        b: 220,
-    });
+    let theme = current_theme();
+    let label_color = ansi_fg(theme.muted);
+    let value_color = ansi_fg(theme.fg);
     let reset = ansi_reset();
     let label_w = 10usize;
     let value_w = width.saturating_sub(label_w + 2);
@@ -460,16 +352,8 @@ pub fn draw_input_bar(
 ) -> io::Result<()> {
     let (x, y, width, height) = area;
 
-    let gold = Color::Rgb {
-        r: 255,
-        g: 215,
-        b: 0,
-    };
-    let muted = Color::Rgb {
-        r: 140,
-        g: 120,
-        b: 160,
-    };
+    let gold = current_theme().accent_secondary;
+    let muted = current_theme().muted;
 
     // Separator line
     let sep = format!("{}─{}", ansi_fg(muted), ansi_reset());
@@ -496,11 +380,7 @@ pub fn draw_input_bar(
         queue!(out, MoveTo(x + 1, y + 1), Print(&line), ResetColor)?;
     } else {
         // Wrap input text across multiple lines if needed
-        let input_color = ansi_fg(Color::Rgb {
-            r: 220,
-            g: 220,
-            b: 220,
-        });
+        let input_color = ansi_fg(current_theme().fg);
         let reset = ansi_reset();
 
         let wrapped = wrap_input_text(&app.input, available_width);

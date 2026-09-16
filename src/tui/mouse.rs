@@ -242,11 +242,7 @@ pub fn build_rendered_lines(app: &crate::tui::App, width: usize) -> (Vec<String>
     // Separator
     all_lines.push(format!(
         "{}─{}",
-        ansi_fg(crate::tui::theme::Color::Rgb {
-            r: 138,
-            g: 143,
-            b: 152
-        }),
+        ansi_fg(crate::tui::theme::current_theme().border),
         ansi_reset()
     ));
 
@@ -275,16 +271,9 @@ pub fn build_rendered_lines(app: &crate::tui::App, width: usize) -> (Vec<String>
 }
 
 fn format_info_line(label: &str, value: &str, width: usize) -> String {
-    let label_color = ansi_fg(crate::tui::theme::Color::Rgb {
-        r: 138,
-        g: 143,
-        b: 152,
-    });
-    let value_color = ansi_fg(crate::tui::theme::Color::Rgb {
-        r: 216,
-        g: 211,
-        b: 200,
-    });
+    let theme = crate::tui::theme::current_theme();
+    let label_color = ansi_fg(theme.muted);
+    let value_color = ansi_fg(theme.fg);
     let reset = ansi_reset();
     let label_w = 10usize;
     let value_w = width.saturating_sub(label_w + 2);
@@ -311,60 +300,21 @@ fn format_message_for_selection(
 ) -> Vec<String> {
     let mut lines = Vec::new();
 
+    let theme = crate::tui::theme::current_theme();
     let (role_icon, role_color, role_name) = match msg.role.as_str() {
-        "user" => (
-            "👤",
-            crate::tui::theme::Color::Rgb {
-                r: 201,
-                g: 162,
-                b: 39,
-            },
-            "You",
-        ),
-        "assistant" => (
-            "🛡",
-            crate::tui::theme::Color::Rgb {
-                r: 193,
-                g: 18,
-                b: 31,
-            },
-            "OpenShield",
-        ),
-        "system" => (
-            "📋",
-            crate::tui::theme::Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152,
-            },
-            "System",
-        ),
-        _ => (
-            "❓",
-            crate::tui::theme::Color::Rgb {
-                r: 216,
-                g: 211,
-                b: 200,
-            },
-            "Unknown",
-        ),
+        "user" => ("👤", theme.accent_secondary, "You"),
+        "assistant" => ("🛡", theme.accent, "OpenShield"),
+        "system" => ("📋", theme.muted, "System"),
+        _ => ("❓", theme.fg, "Unknown"),
     };
 
     let header = if is_selected {
         format!(
             "{}▶ {} {} {}{}{}",
-            ansi_fg(crate::tui::theme::Color::Rgb {
-                r: 201,
-                g: 162,
-                b: 39
-            }),
+            ansi_fg(theme.accent_secondary),
             role_icon,
             role_name,
-            ansi_fg(crate::tui::theme::Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152
-            }),
+            ansi_fg(theme.muted),
             " [COPY]",
             ansi_reset()
         )
@@ -374,11 +324,7 @@ fn format_message_for_selection(
             ansi_fg(role_color),
             role_icon,
             role_name,
-            ansi_fg(crate::tui::theme::Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152
-            }),
+            ansi_fg(theme.muted),
             ansi_reset()
         )
     };
@@ -412,27 +358,14 @@ fn format_message_for_selection(
     for content_line in msg.content.lines() {
         let wrapped = wrap_line(content_line, width.saturating_sub(2));
         for w in wrapped {
-            lines.push(format!(
-                "{}{}{}",
-                ansi_fg(crate::tui::theme::Color::Rgb {
-                    r: 216,
-                    g: 211,
-                    b: 200
-                }),
-                w,
-                ansi_reset()
-            ));
+            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
         }
     }
 
     for response in &msg.multi_model_responses {
         lines.push(format!(
             "{}  ↳ {} ({}ms, {}tok){}",
-            ansi_fg(crate::tui::theme::Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152
-            }),
+            ansi_fg(theme.muted),
             response.model_name,
             response.latency_ms,
             response.tokens,
@@ -441,16 +374,7 @@ fn format_message_for_selection(
         for line in response.content.lines() {
             let wrapped = wrap_line(line, width.saturating_sub(6));
             for w in wrapped {
-                lines.push(format!(
-                    "{}    {}{}",
-                    ansi_fg(crate::tui::theme::Color::Rgb {
-                        r: 138,
-                        g: 143,
-                        b: 152
-                    }),
-                    w,
-                    ansi_reset()
-                ));
+                lines.push(format!("{}    {}{}", ansi_fg(theme.muted), w, ansi_reset()));
             }
         }
     }
@@ -460,18 +384,11 @@ fn format_message_for_selection(
 
 fn format_streaming_for_selection(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
+    let theme = crate::tui::theme::current_theme();
     let header = format!(
         "{}🛡 Shield {}(streaming…){}",
-        ansi_fg(crate::tui::theme::Color::Rgb {
-            r: 193,
-            g: 18,
-            b: 31
-        }),
-        ansi_fg(crate::tui::theme::Color::Rgb {
-            r: 138,
-            g: 143,
-            b: 152
-        }),
+        ansi_fg(theme.highlight),
+        ansi_fg(theme.muted),
         ansi_reset()
     );
     lines.push(header);
@@ -479,16 +396,7 @@ fn format_streaming_for_selection(content: &str, width: usize) -> Vec<String> {
     for line in content.lines() {
         let wrapped = wrap_line(line, width.saturating_sub(2));
         for w in wrapped {
-            lines.push(format!(
-                "{}{}{}",
-                ansi_fg(crate::tui::theme::Color::Rgb {
-                    r: 216,
-                    g: 211,
-                    b: 200
-                }),
-                w,
-                ansi_reset()
-            ));
+            lines.push(format!("{}{}{}", ansi_fg(theme.fg), w, ansi_reset()));
         }
     }
     lines
@@ -496,18 +404,11 @@ fn format_streaming_for_selection(content: &str, width: usize) -> Vec<String> {
 
 fn format_reasoning_for_selection(content: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
+    let theme = crate::tui::theme::current_theme();
     let header = format!(
         "{}💭 Reasoning {}(thinking…){}",
-        ansi_fg(crate::tui::theme::Color::Rgb {
-            r: 138,
-            g: 143,
-            b: 152
-        }),
-        ansi_fg(crate::tui::theme::Color::Rgb {
-            r: 138,
-            g: 143,
-            b: 152
-        }),
+        ansi_fg(theme.muted),
+        ansi_fg(theme.muted),
         ansi_reset()
     );
     lines.push(header);
@@ -515,16 +416,7 @@ fn format_reasoning_for_selection(content: &str, width: usize) -> Vec<String> {
     for line in content.lines() {
         let wrapped = wrap_line(line, width.saturating_sub(2));
         for w in wrapped {
-            lines.push(format!(
-                "{}{}{}",
-                ansi_fg(crate::tui::theme::Color::Rgb {
-                    r: 140,
-                    g: 140,
-                    b: 160
-                }),
-                w,
-                ansi_reset()
-            ));
+            lines.push(format!("{}{}{}", ansi_fg(theme.muted), w, ansi_reset()));
         }
     }
     lines

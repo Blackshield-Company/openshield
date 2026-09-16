@@ -22,8 +22,8 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     let (x, y, width, height) = area;
     let mut out = stdout();
 
-    let _border_color = current_theme().border;
-    let gold = Color::Rgb { r: 201, g: 162, b: 39 };
+    let theme = current_theme();
+    let gold = theme.accent_secondary;
 
     // Outer border with gold accent
     queue!(out, MoveTo(x, y), SetForegroundColor(gold))?;
@@ -53,7 +53,7 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     // Header: shield wordmark (compact)
     let header = format!(
         "{}🛡 {} v{}",
-        ansi_fg(Color::Rgb { r: 193, g: 18, b: 31 }),
+        ansi_fg(theme.accent),
         bold("OpenShield", gold),
         env!("CARGO_PKG_VERSION")
     ) + ansi_reset();
@@ -61,7 +61,7 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     queue!(out, MoveTo(header_x, y + row), Print(&header), ResetColor)?;
     row += 1;
 
-    let tagline = italic("Steel. Precision. Resolve.", Color::Rgb { r: 138, g: 143, b: 152 });
+    let tagline = italic("Steel. Precision. Resolve.", theme.muted);
     let tagline_x = inner_x + ((inner_width - unicode_width::UnicodeWidthStr::width(tagline.as_str())) / 2) as u16;
     queue!(out, MoveTo(tagline_x, y + row), Print(&tagline), ResetColor)?;
     row += 2;
@@ -99,9 +99,9 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     for (key, desc) in shortcuts {
         let line = format!(
             "{}{:8}{} {}",
-            ansi_fg(Color::Rgb { r: 123, g: 157, b: 196 }),
+            ansi_fg(theme.accent_tertiary),
             key,
-            ansi_fg(Color::Rgb { r: 216, g: 211, b: 200 }),
+            ansi_fg(theme.fg),
             desc
         );
         queue!(out, MoveTo(inner_x, y + row), Print(&line), Clear(ClearType::UntilNewLine), ResetColor)?;
@@ -117,9 +117,9 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
     for t in tools.iter().take(6) {
         let line = format!(
             "{}{}{} {}",
-            ansi_fg(Color::Rgb { r: 123, g: 157, b: 196 }),
+            ansi_fg(theme.accent_tertiary),
             t.name(),
-            ansi_fg(Color::Rgb { r: 138, g: 143, b: 152 }),
+            ansi_fg(theme.muted),
             t.description()
         );
         queue!(out, MoveTo(inner_x, y + row), Print(&line), Clear(ClearType::UntilNewLine), ResetColor)?;
@@ -162,8 +162,9 @@ pub fn draw_sidebar(app: &App, area: (u16, u16, u16, u16)) -> io::Result<()> {
 
 /// Format a two-column info line: "Label      Value"
 fn format_info_line(label: &str, value: &str, width: usize) -> String {
-    let label_color = ansi_fg(Color::Rgb { r: 138, g: 143, b: 152 });
-    let value_color = ansi_fg(Color::Rgb { r: 216, g: 211, b: 200 });
+    let theme = current_theme();
+    let label_color = ansi_fg(theme.muted);
+    let value_color = ansi_fg(theme.fg);
     let reset = ansi_reset();
     let label_width = 8usize;
     let value_width = width.saturating_sub(label_width + 1);
@@ -210,10 +211,11 @@ fn format_status_bar(
     stream_start: Option<std::time::Instant>,
     _tokens: u64,
 ) -> String {
-    let cyan = ansi_fg(Color::Rgb { r: 123, g: 157, b: 196 });
-    let gold = ansi_fg(Color::Rgb { r: 201, g: 162, b: 39 });
-    let green = ansi_fg(Color::Rgb { r: 106, g: 153, b: 78 });
-    let muted = ansi_fg(Color::Rgb { r: 138, g: 143, b: 152 });
+    let theme = current_theme();
+    let cyan = ansi_fg(theme.accent_tertiary);
+    let gold = ansi_fg(theme.accent_secondary);
+    let green = ansi_fg(theme.success);
+    let muted = ansi_fg(theme.muted);
     let reset = ansi_reset();
 
     let model_short = model.split('/').next_back().unwrap_or(model);

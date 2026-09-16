@@ -31,6 +31,7 @@ mod vim_input;
 mod ascii_art;
 mod chat;
 mod render;
+mod sprites;
 mod stream;
 mod syntax_highlight;
 mod thinking;
@@ -262,6 +263,9 @@ pub(crate) struct App {
     chat_area_rect: Option<crate::tui::mouse::Rect>,
     /// Index of the currently selected message for copy mode.
     copy_selected_idx: Option<usize>,
+    /// Active mascot sprite for the splash screen. None = banner-only
+    /// (`sprite = "none"` in config or explicitly disabled).
+    sprite: Option<crate::tui::sprites::Sprite>,
 }
 
 #[derive(Debug, Clone)]
@@ -496,7 +500,19 @@ impl App {
             crate::security::SecurityConfig::load().unwrap_or_default(),
         )?;
 
-        Ok(Self {
+        // Resolve the mascot sprite from config. "none" disables it;
+        // unknown names warn in the chat and fall back to the stock sprite.
+        let configured_sprite = config.sprite.trim();
+        let (sprite, sprite_warning): (Option<crate::tui::sprites::Sprite>, Option<String>) =
+            if configured_sprite.eq_ignore_ascii_case("none") || configured_sprite.is_empty() {
+                (None, None)
+            } else {
+                let (sprite, warning) =
+                    crate::tui::sprites::load_sprite_or_stock(configured_sprite);
+                (Some(sprite), warning)
+            };
+
+        let mut app = Self {
             input: String::new(),
             cursor_position: 0,
             messages: Vec::new(),
@@ -566,40 +582,43 @@ impl App {
                 if !config.code_index_enabled {
                     None
                 } else {
-                let config_dir = dirs::config_dir()
-                    .map(|d| d.join("openshield"))
-                    .unwrap_or_else(|| std::path::PathBuf::from(".openshield"));
-                let db_path = config_dir.join("code_index.db");
-                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-                match crate::code_index::CodeIndex::open(
-                    db_path.to_str().unwrap_or(".openshield/code_index.db"),
-                    cwd.to_str().unwrap_or("."),
-                ) {
-                    Ok(index) => {
-                        let arc = Arc::new(index);
-                        // Spawn background refresh every 5 minutes — but only in
-                        // a real project root. Scanning $HOME or a random dir on
-                        // a timer is what caused idle RSS/CPU blowups.
-                        if crate::repo_map::looks_like_project_root(&cwd) {
-                            let interval_secs = std::env::var("OPENSHIELD_INDEX_REFRESH_SECS")
-                                .ok()
-                                .and_then(|v| v.parse::<u64>().ok())
-                                .filter(|&s| s >= 10)
-                                .unwrap_or(300);
-                            arc.spawn_background_refresh(std::time::Duration::from_secs(interval_secs));
-                        } else {
-                            tracing::info!(
-                                "Code index background refresh disabled: '{}' is not a project root",
-                                cwd.display()
-                            );
+                    let config_dir = dirs::config_dir()
+                        .map(|d| d.join("openshield"))
+                        .unwrap_or_else(|| std::path::PathBuf::from(".openshield"));
+                    let db_path = config_dir.join("code_index.db");
+                    let cwd =
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    match crate::code_index::CodeIndex::open(
+                        db_path.to_str().unwrap_or(".openshield/code_index.db"),
+                        cwd.to_str().unwrap_or("."),
+                    ) {
+                        Ok(index) => {
+                            let arc = Arc::new(index);
+                            // Spawn background refresh every 5 minutes — but only in
+                            // a real project root. Scanning $HOME or a random dir on
+                            // a timer is what caused idle RSS/CPU blowups.
+                            if crate::repo_map::looks_like_project_root(&cwd) {
+                                let interval_secs = std::env::var("OPENSHIELD_INDEX_REFRESH_SECS")
+                                    .ok()
+                                    .and_then(|v| v.parse::<u64>().ok())
+                                    .filter(|&s| s >= 10)
+                                    .unwrap_or(300);
+                                arc.spawn_background_refresh(std::time::Duration::from_secs(
+                                    interval_secs,
+                                ));
+                            } else {
+                                tracing::info!(
+                                    "Code index background refresh disabled: '{}' is not a project root",
+                                    cwd.display()
+                                );
+                            }
+                            Some(arc)
                         }
-                        Some(arc)
+                        Err(e) => {
+                            tracing::warn!("Failed to open code index: {}", e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to open code index: {}", e);
-                        None
-                    }
-                }
                 }
             },
             swarm: None,
@@ -649,7 +668,74 @@ impl App {
             smart_context: crate::context_pinner::SmartContext::load(&session_id),
             chat_area_rect: None,
             copy_selected_idx: None,
-        })
+            sprite,
+        };
+
+        // Surface unknown-sprite config warnings as a chat system message.
+        if let Some(warning) = sprite_warning {
+            app.add_system_message(warning);
+        }
+
+        Ok(app)
+    }
+
+    /// Switch the active mascot sprite at runtime and persist to config.
+    /// `"none"` disables the sprite; unknown names warn and keep the current one.
+    fn set_sprite(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.list_sprites();
+            return;
+        }
+        if name.eq_ignore_ascii_case("none") {
+            self.sprite = None;
+            self.config.sprite = "none".to_string();
+            self.add_system_message(
+                "🦞 Sprite disabled — splash screen is banner-only.".to_string(),
+            );
+        } else {
+            match crate::tui::sprites::load_sprite(name) {
+                Some(sprite) => {
+                    self.add_system_message(format!("🦞 Sprite: {}", sprite.name));
+                    self.sprite = Some(sprite);
+                    self.config.sprite = name.to_string();
+                }
+                None => {
+                    self.add_system_message(format!(
+                        "❌ Unknown sprite '{}'. Run /sprite to list available sprites.",
+                        name
+                    ));
+                    return;
+                }
+            }
+        }
+        if let Err(e) = self.config.save() {
+            self.add_system_message(format!("⚠️ Sprite changed but config save failed: {}", e));
+        }
+    }
+
+    /// List available sprites and mark the active one.
+    fn list_sprites(&mut self) {
+        let names = crate::tui::sprites::list_sprites();
+        let active = self
+            .sprite
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .unwrap_or("none");
+        let mut lines = vec![format!("🦞 Sprites (active: {}):", active)];
+        for name in &names {
+            let marker = if *name == active { "▸" } else { " " };
+            let origin = if *name == crate::tui::sprites::STOCK_SPRITE {
+                " (stock)"
+            } else {
+                ""
+            };
+            lines.push(format!(" {} {}{}", marker, name, origin));
+        }
+        lines.push(String::new());
+        lines.push("Use /sprite <name> to switch, /sprite none to disable.".to_string());
+        lines.push("Custom sprites: ~/.config/openshield/sprites/*.ans|*.txt".to_string());
+        self.add_system_message(lines.join("\n"));
     }
 
     fn create_branch(&mut self, name: &str) {
@@ -2885,6 +2971,11 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             Image commands:\n\
             • /image <path>     — Attach an image to your next message\n\
             \n\
+            Sprite commands:\n\
+            • /sprite           — List available mascot sprites\n\
+            • /sprite <name>    — Switch sprite (persisted to config)\n\
+            • /sprite none      — Disable sprite (banner-only splash)\n\
+            \n\
             Branch commands:\n\
             • /branch <name>    — Create new branch\n\
             • /branches         — List branches\n\
@@ -3153,6 +3244,16 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 
     if input == "/multi" {
         app.toggle_multi_model();
+        return Ok(());
+    }
+
+    // ── Mascot sprite command ────────────────────────────────────────────────
+    if input == "/sprite" {
+        app.list_sprites();
+        return Ok(());
+    }
+    if let Some(name) = input.strip_prefix("/sprite ") {
+        app.set_sprite(name);
         return Ok(());
     }
 

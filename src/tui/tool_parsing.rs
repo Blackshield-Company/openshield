@@ -349,10 +349,7 @@ const WRITE_PREVIEW_MAX_LINES: usize = 30;
 /// Build an inline diff/preview for a code-writing tool call, parsed from the
 /// tool-call arguments (JSON or normalized mini-language) — never re-reads
 /// files from disk. Returns None for non-edit tools or unparseable args.
-pub(crate) fn build_inline_tool_render(
-    tool_name: &str,
-    args: &str,
-) -> Option<InlineToolRender> {
+pub(crate) fn build_inline_tool_render(tool_name: &str, args: &str) -> Option<InlineToolRender> {
     let (op, path, old, new) = parse_edit_args(tool_name, args)?;
 
     let body = match op {
@@ -407,16 +404,9 @@ fn parse_edit_args_json(
     };
 
     let path = get_str(&["file", "path", "filename"])?;
-    let old = get_str(&["old_string", "old_lines", "old", "old_content"])
-        .unwrap_or_default();
-    let new = get_str(&[
-        "new_string",
-        "new_lines",
-        "new_content",
-        "content",
-        "new",
-    ])
-    .unwrap_or_default();
+    let old = get_str(&["old_string", "old_lines", "old", "old_content"]).unwrap_or_default();
+    let new =
+        get_str(&["new_string", "new_lines", "new_content", "content", "new"]).unwrap_or_default();
 
     let op = get_str(&["operation"])
         .map(|s| s.to_lowercase())
@@ -606,11 +596,7 @@ mod inline_render_tests {
     fn large_diff_is_capped_with_footer() {
         let old: Vec<String> = (0..50).map(|i| format!("old{i}")).collect();
         let new: Vec<String> = (0..50).map(|i| format!("new{i}")).collect();
-        let args = format!(
-            "replace big.rs {} ||| {}",
-            old.join("\n"),
-            new.join("\n")
-        );
+        let args = format!("replace big.rs {} ||| {}", old.join("\n"), new.join("\n"));
         let render = build_inline_tool_render("edit", &args).unwrap();
         let body_lines: Vec<&str> = render.body.lines().collect();
         assert_eq!(body_lines.len(), INLINE_DIFF_MAX_LINES + 1);

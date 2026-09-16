@@ -151,31 +151,85 @@ const GLYPH_ROWS: usize = 7;
 fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
     match ch {
         'O' => [
-            "█████", "█   █", "█   █", "█   █", "█   █", "█   █", "█████",
+            "█████",
+            "█   █",
+            "█   █",
+            "█   █",
+            "█   █",
+            "█   █",
+            "█████",
         ],
         'P' => [
-            "█████", "█   █", "█   █", "█████", "█    ", "█    ", "█    ",
+            "█████",
+            "█   █",
+            "█   █",
+            "█████",
+            "█    ",
+            "█    ",
+            "█    ",
         ],
         'E' => [
-            "█████", "█    ", "█    ", "████ ", "█    ", "█    ", "█████",
+            "█████",
+            "█    ",
+            "█    ",
+            "████ ",
+            "█    ",
+            "█    ",
+            "█████",
         ],
         'N' => [
-            "█   █", "██  █", "██  █", "█ █ █", "█  ██", "█  ██", "█   █",
+            "█   █",
+            "██  █",
+            "██  █",
+            "█ █ █",
+            "█  ██",
+            "█  ██",
+            "█   █",
         ],
         'S' => [
-            "█████", "█    ", "█    ", "█████", "    █", "    █", "█████",
+            "█████",
+            "█    ",
+            "█    ",
+            "█████",
+            "    █",
+            "    █",
+            "█████",
         ],
         'H' => [
-            "█   █", "█   █", "█   █", "█████", "█   █", "█   █", "█   █",
+            "█   █",
+            "█   █",
+            "█   █",
+            "█████",
+            "█   █",
+            "█   █",
+            "█   █",
         ],
         'I' => [
-            "█████", "  █  ", "  █  ", "  █  ", "  █  ", "  █  ", "█████",
+            "█████",
+            "  █  ",
+            "  █  ",
+            "  █  ",
+            "  █  ",
+            "  █  ",
+            "█████",
         ],
         'L' => [
-            "█    ", "█    ", "█    ", "█    ", "█    ", "█    ", "█████",
+            "█    ",
+            "█    ",
+            "█    ",
+            "█    ",
+            "█    ",
+            "█    ",
+            "█████",
         ],
         'D' => [
-            "████ ", "█   █", "█   █", "█   █", "█   █", "█   █", "████ ",
+            "████ ",
+            "█   █",
+            "█   █",
+            "█   █",
+            "█   █",
+            "█   █",
+            "████ ",
         ],
         _ => ["     "; GLYPH_ROWS],
     }
@@ -183,9 +237,9 @@ fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
 
 fn face_color(row: usize) -> Color {
     match row {
-        0 => C_BLOOD_BRIGHT,     // top edge highlight, like light on carved stone
-        1..=5 => C_BLOOD,        // deep blood face
-        _ => C_BLOOD_DARK,       // dried-blood base
+        0 => C_BLOOD_BRIGHT, // top edge highlight, like light on carved stone
+        1..=5 => C_BLOOD,    // deep blood face
+        _ => C_BLOOD_DARK,   // dried-blood base
     }
 }
 
@@ -262,7 +316,10 @@ const SHIELD_ROWS: &[&str] = &[
 ];
 
 fn compact_shield() -> Vec<String> {
-    SHIELD_ROWS.iter().map(|row| render_shield_row(row)).collect()
+    SHIELD_ROWS
+        .iter()
+        .map(|row| render_shield_row(row))
+        .collect()
 }
 
 fn render_shield_row(row: &str) -> String {
