@@ -94,6 +94,7 @@ pub async fn serve_in_process(config_dir: &std::path::Path, addr: &str) -> anyho
         config_dir: Some(config_dir.to_path_buf()),
         // Embedded hosts bind loopback inside the device; no token enforcement.
         auth: None,
+        approvals: std::sync::Arc::new(api::approvals::ApprovalsState::new()),
         started: std::time::Instant::now(),
     };
     api::serve(state, addr).await

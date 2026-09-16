@@ -226,6 +226,30 @@ impl MemoryStore {
         Ok(sessions)
     }
 
+    /// Fetch one session row by id (archived or not). Returns Ok(None) for
+    /// unknown ids — used by GET /api/v1/sessions/{id} to answer 404.
+    pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, model, task_type, project_path, archived
+             FROM sessions WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        Ok(Some(Session {
+            id: row.get(0)?,
+            started_at: row
+                .get::<_, String>(1)?
+                .parse()
+                .unwrap_or_else(|_| Utc::now()),
+            model: row.get(2)?,
+            task_type: row.get(3)?,
+            project_path: row.get(4)?,
+            archived: row.get::<_, i32>(5).unwrap_or(0) != 0,
+        }))
+    }
+
     pub fn create_session(&self, id: &str, model: &str, task_type: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO sessions (id, started_at, model, task_type, project_path, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
