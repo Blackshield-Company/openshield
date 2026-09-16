@@ -16,21 +16,26 @@ OUT_DIR = os.path.expanduser("~/Projects/active/openshield/assets/sprites")
 CELL = 8
 COLS, ROWS = 24, 26
 
-# Blackshield palette: token name -> RGB (matches theme.rs blackshield())
-PALETTE = [
-    ("bg", (13, 13, 17)),          # void — outlines, legs
-    ("bone", (216, 211, 200)),     # white face/sword
-    ("accent", (193, 18, 31)),     # blood — helmet, shield
-    ("accent_secondary", (201, 162, 39)),  # war-gold — eyes
-    ("accent_tertiary", (91, 127, 166)),   # steel-blue — armor
-    ("muted", (138, 143, 152)),    # ash
+# Source sheet palette -> (emit_rgb_for_halfblock_bg, fg_emit_string)
+# Theme tokens where they fit (theme-tracking), raw truecolor where the
+# theme has no suitable color (navy armor, maroon sigil must stay readable
+# on black terminals — {bg} alone would be invisible).
+REFS = [
+    ((27, 31, 40), (43, 50, 69), "\x1b[38;2;43;50;69m"),    # navy armor
+    ((13, 16, 23), (13, 13, 17), "{bg}"),                   # void outline
+    ((143, 163, 189), (138, 143, 152), "{muted}"),          # steel trim -> ash
+    ((220, 229, 242), (216, 211, 200), "{bone}"),           # blade/belt -> bone
+    ((224, 85, 95), (193, 18, 31), "{accent}"),             # crest/visor/cross -> blood
+    ((255, 107, 114), (193, 18, 31), "{accent}"),           # bright red -> blood
+    ((142, 47, 56), (142, 47, 56), "\x1b[38;2;142;47;56m"),  # maroon sigil
 ]
-FG_TOKEN = {name: f"{{{name}}}" for name, _ in PALETTE}
-BG_ANSI = {name: f"\x1b[48;2;{r};{g};{b}m" for name, (r, g, b) in PALETTE}
 
 
 def nearest(r, g, b):
-    return min(PALETTE, key=lambda p: (r - p[1][0]) ** 2 + (g - p[1][1]) ** 2 + (b - p[1][2]) ** 2)[0]
+    ref, emit_rgb, fg = min(
+        REFS, key=lambda p: (r - p[0][0]) ** 2 + (g - p[0][1]) ** 2 + (b - p[0][2]) ** 2
+    )
+    return (emit_rgb, fg)
 
 
 def cell_color(frame, cx, cy):
@@ -67,11 +72,13 @@ def render(g, hscale=1):
         out = []
         for t, b in zip(top_row, bot_row):
             if t and b:
-                ch = FG_TOKEN[t] + BG_ANSI[b] + "▀" * hscale + "{reset}"
+                (tr, tg, tb), tfg = t
+                (br, bg_, bb), _ = b
+                ch = tfg + f"\x1b[48;2;{br};{bg_};{bb}m" + "▀" * hscale + "{reset}"
             elif t:
-                ch = FG_TOKEN[t] + "▀" * hscale + "{reset}"
+                ch = t[1] + "▀" * hscale + "{reset}"
             elif b:
-                ch = FG_TOKEN[b] + "▄" * hscale + "{reset}"
+                ch = b[1] + "▄" * hscale + "{reset}"
             else:
                 ch = " " * hscale
             out.append(ch)
@@ -80,7 +87,7 @@ def render(g, hscale=1):
     if len(g) % 2 == 1:
         out = []
         for t in g[-1]:
-            out.append(FG_TOKEN[t] + "▀" * hscale + "{reset}" if t else " " * hscale)
+            out.append(t[1] + "▀" * hscale + "{reset}" if t else " " * hscale)
         lines.append("".join(out).rstrip())
     return lines
 
@@ -116,9 +123,8 @@ def main():
 
     # Big sprite: half-block, 2x horizontal
     big = ["---frame---".join("\n".join(render(f, hscale=2)) + "\n" for f in frames)]
-    # Mini: 2x downsample, half-block, 1x horizontal
-    mini_frames = [downsample(f) for f in frames]
-    mini = ["---frame---".join("\n".join(render(f, hscale=1)) + "\n" for f in mini_frames)]
+    # Mini: same grid, half-block, 1x horizontal (16 cols — petdex size)
+    mini = ["---frame---".join("\n".join(render(f, hscale=1)) + "\n" for f in frames)]
 
     header_big = (
         "# blackshield-mercenary — pixel-accurate conversion of the\n"
