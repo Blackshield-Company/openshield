@@ -5,7 +5,7 @@ Samples the 8px-cell grid, quantizes colors to the Blackshield theme palette
 (emitted as theme tokens for fg + truecolor ANSI for half-block bg), and
 renders half-block art. Outputs:
   - assets/sprites/blackshield-mercenary.ans       (splash, 2x horizontal)
-  - assets/sprites/blackshield-mercenary-mini.ans  (corner mascot, downsampled)
+  - assets/sprites/blackshield-mercenary-mini.ans  (corner mascot, 2x downsampled)
 """
 import os
 from PIL import Image
@@ -123,8 +123,8 @@ def main():
 
     # Big sprite: half-block, 2x horizontal
     big = ["---frame---".join("\n".join(render(f, hscale=2)) + "\n" for f in frames)]
-    # Mini: same grid, half-block, 1x horizontal (16 cols — petdex size)
-    mini = ["---frame---".join("\n".join(render(f, hscale=1)) + "\n" for f in frames)]
+    # Mini: 2x grid downsample + half-block, 1x horizontal (~8 cols — corner mascot)
+    mini = ["---frame---".join("\n".join(render(downsample(f), hscale=1)) + "\n" for f in frames)]
 
     header_big = (
         "# blackshield-mercenary — pixel-accurate conversion of the\n"
