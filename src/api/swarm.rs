@@ -200,18 +200,9 @@ pub(crate) async fn swarm_snapshot(swarm: &SwarmState, enabled: bool) -> Value {
         })
         .collect();
 
-    let pending = entries
-        .iter()
-        .filter(|e| e["status"] == "pending")
-        .count();
-    let approved = entries
-        .iter()
-        .filter(|e| e["status"] == "approved")
-        .count();
-    let rejected = entries
-        .iter()
-        .filter(|e| e["status"] == "rejected")
-        .count();
+    let pending = entries.iter().filter(|e| e["status"] == "pending").count();
+    let approved = entries.iter().filter(|e| e["status"] == "approved").count();
+    let rejected = entries.iter().filter(|e| e["status"] == "rejected").count();
 
     json!({
         "running": status.running,
@@ -428,18 +419,14 @@ mod tests {
         assert!(agents.iter().any(|a| a["role"] == "Architect"));
 
         // Stop → success with the (now idle) engine state still attached.
-        let response = stop_swarm(State(state.clone()))
-            .await
-            .into_response();
+        let response = stop_swarm(State(state.clone())).await.into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let snap = swarm_snapshot(&state.swarm, false).await;
         assert_eq!(snap["running"], false);
         assert_eq!(snap["agent_count"], 4);
 
         // Double-stop is idempotent, not an error.
-        let response = stop_swarm(State(state.clone()))
-            .await
-            .into_response();
+        let response = stop_swarm(State(state.clone())).await.into_response();
         assert_eq!(response.status(), StatusCode::OK);
     }
 
@@ -477,9 +464,7 @@ mod tests {
             roles: Some(vec![]),
             max_agents: None,
         });
-        let response = start_swarm(State(state), Some(body))
-            .await
-            .into_response();
+        let response = start_swarm(State(state), Some(body)).await.into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
@@ -507,10 +492,7 @@ mod tests {
                 assert_eq!(snap["consensus"]["entry_count"], 1);
                 assert_eq!(snap["consensus"]["pending"], 1);
                 let agents = snap["agents"].as_array().unwrap();
-                let arch = agents
-                    .iter()
-                    .find(|a| a["id"] == "architect-1")
-                    .unwrap();
+                let arch = agents.iter().find(|a| a["id"] == "architect-1").unwrap();
                 assert_eq!(arch["status"], "waiting_for_consensus");
                 assert_eq!(arch["task"], Value::Null);
                 let entry = &snap["consensus"]["entries"][0];

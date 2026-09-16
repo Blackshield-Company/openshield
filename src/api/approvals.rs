@@ -168,11 +168,7 @@ impl ApprovalsState {
     /// Register a request, broadcast `approval_req`, and await the human
     /// decision. `true` = execute the tool call. Timeout (or abandoned
     /// receiver) resolves to `false` — deny by default.
-    pub async fn request(
-        &self,
-        session: String,
-        req: ApprovalRequest,
-    ) -> bool {
+    pub async fn request(&self, session: String, req: ApprovalRequest) -> bool {
         let id = uuid::Uuid::new_v4().to_string();
         let risk = format!("{:?}", req.risk).to_lowercase();
         let args = serde_json::from_str(&req.args)

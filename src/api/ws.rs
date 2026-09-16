@@ -183,8 +183,7 @@ async fn run_harness_turn(
         // short-circuits to allow when no client is connected, so behavior
         // without a GUI is unchanged.
         engine.set_approval_gate(Some(crate::api::approvals::make_gate(
-            approvals,
-            session_id,
+            approvals, session_id,
         )));
         engine.run_turn_streaming(&message, h_tx, true).await?;
         anyhow::Ok(())
