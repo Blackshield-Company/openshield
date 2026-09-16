@@ -159,8 +159,13 @@ impl ChannelState {
         }
     }
 
-    /// Switch the active model.
+    /// Switch the active model. "default" resolves to the configured default model.
     pub fn switch_model(&mut self, model_name: &str, config: &Config) -> anyhow::Result<()> {
+        let model_name = if model_name == "default" {
+            config.default_model.clone()
+        } else {
+            model_name.to_string()
+        };
         for (provider_name, provider_cfg) in &config.providers {
             if let Some(model_cfg) = provider_cfg.models.iter().find(|m| m.name == model_name) {
                 self.model = model_cfg.name.clone();

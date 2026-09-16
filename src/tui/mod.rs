@@ -825,6 +825,13 @@ impl App {
     }
 
     fn switch_model(&mut self, model_name: &str) -> Result<()> {
+        // "default" resolves to the configured default model, so
+        // `/model default` and mode-switch paths can never fail lookup.
+        let model_name = if model_name == "default" {
+            self.config.default_model.clone()
+        } else {
+            model_name.to_string()
+        };
         for (provider_name, provider) in &self.config.providers {
             if let Some(model_config) = provider.models.iter().find(|m| m.name == model_name) {
                 self.model = model_config.name.clone();
