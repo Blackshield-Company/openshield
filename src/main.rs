@@ -244,12 +244,13 @@ enum Commands {
         #[arg(default_value = "")]
         name: String,
     },
-    /// Start HTTP + WebSocket API server
+    /// Start the HTTP + WebSocket API server (desktop/pocket companion API)
     #[cfg(feature = "web-api")]
     Serve {
-        /// Bind address (default: 127.0.0.1:8080)
-        #[arg(short, long, default_value = "127.0.0.1:8080")]
-        addr: String,
+        /// Override the [desktop] bind address, e.g. "127.0.0.1:9310" or
+        /// "0.0.0.0:9310" (the latter requires lan_mode = true)
+        #[arg(short, long)]
+        addr: Option<String>,
     },
     /// Start HTTP server for mobile app connectivity
     #[cfg(feature = "web-api")]
@@ -1664,13 +1665,66 @@ async fn main() -> anyhow::Result<()> {
         }
         #[cfg(feature = "web-api")]
         Some(Commands::Serve { addr }) => {
-            info!("Starting OpenShield API server on {}", addr);
+            let desktop = config.desktop.clone();
+            if !desktop.enabled {
+                eprintln!(
+                    "⚠️  [desktop] enabled = false in config.toml — serving anyway (explicit command)"
+                );
+            }
+
+            let bind_addr = addr.unwrap_or_else(|| format!("{}:{}", desktop.bind, desktop.port));
+            let bind_ip: std::net::IpAddr = match bind_addr.parse::<std::net::SocketAddr>() {
+                Ok(sa) => sa.ip(),
+                Err(_) => {
+                    eprintln!(
+                        "❌ Invalid bind address '{}': expected host:port (e.g. 127.0.0.1:{})",
+                        bind_addr, desktop.port
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            // Design doc §6: lan_mode defaults to false and binding a
+            // non-loopback address without it refuses to start.
+            let lan_mode = !bind_ip.is_loopback();
+            if lan_mode && !desktop.lan_mode {
+                eprintln!(
+                    "❌ Refusing to bind {}: non-loopback addresses require lan_mode = true in [desktop] (config.toml).",
+                    bind_addr
+                );
+                eprintln!(
+                    "   LAN exposure makes the harness reachable from other devices — set it deliberately, then restart."
+                );
+                std::process::exit(1);
+            }
+
+            // Auto-generate (or load) the desktop token in both modes; it is
+            // only ENFORCED in LAN mode (design doc §3.1).
+            let token = match crate::api::auth::ensure_token_file(&desktop.token_path) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("❌ Failed to prepare desktop token: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            let auth = crate::api::auth::AuthState::new(token, lan_mode);
+
+            let mode = if lan_mode {
+                "LAN mode — Bearer token REQUIRED on every request (HTTP + WS)"
+            } else {
+                "local mode — loopback only, token accepted but not required"
+            };
+            println!("🛡 OpenShield serve — http://{} ({})", bind_addr, mode);
+            info!("Starting OpenShield API server on {}", bind_addr);
+
             let state = crate::api::AppState {
                 config: Arc::new(config),
                 running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
                 config_dir: None,
+                auth: Some(auth),
+                started: std::time::Instant::now(),
             };
-            if let Err(e) = crate::api::serve(state, &addr).await {
+            if let Err(e) = crate::api::serve(state, &bind_addr).await {
                 eprintln!("❌ API server error: {}", e);
                 std::process::exit(1);
             }
