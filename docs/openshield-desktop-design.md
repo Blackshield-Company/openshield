@@ -35,8 +35,8 @@ same `openshield serve` process.
 │                                                              │
 │  ┌──────────────────┐      ┌──────────────────────────────┐  │
 │  │ OpenShield       │      │ openshield serve             │  │
-│  │ Desktop (Flutter)│─────▶│ (axum REST + WS, existing    │  │
-│  │ lib/             │ WS+  │  src/api/, extended)         │  │
+│  │ Desktop          │─────▶│ (axum REST + WS, existing    │  │
+│  │ Tauri2+Svelte5   │ WS+  │  src/api/, extended)         │  │
 │  └──────────────────┘ HTTP │  127.0.0.1:9310 (default)    │  │
 │                            │  0.0.0.0:9310  (LAN mode)    │  │
 │                            └──────────┬───────────────────┘  │
@@ -51,8 +51,8 @@ same `openshield serve` process.
                                        │ LAN (token auth)
                               ┌────────▼─────────┐
                               │ OpenShield       │
-                              │ Pocket (Flutter) │
-                              │ Pixel 8a first   │
+                              │ Pocket (Tauri 2  │
+                              │ Android)         │
                               └──────────────────┘
 ```
 
@@ -110,28 +110,36 @@ lan_mode = false           # explicit opt-in for mobile access
 `POST /api/v1/pair` → returns `{host, port, token, expires}` → rendered as QR
 on the desktop. Phone scans, stores creds, validates with `/api/v1/health`.
 
-### 3.2 OpenShield Desktop — Flutter desktop app
+### 3.2 OpenShield Desktop — Tauri 2 + Svelte 5 app
 
-Monorepo layout (mirrors hermes-wingman patterns):
+Stack mirrors OpenClaw Pincers (~/Projects/active/openclaw-pincers) —
+Tauri 2 + SvelteKit 2 (adapter-static) + TypeScript + Rust in `src-tauri/`.
+One codebase serves desktop (Linux/macOS/Windows) and Pocket (Android via
+Tauri mobile, `src-tauri/gen/android`) — a pairing flow Pincers already
+proved on the target device.
+
+Monorepo layout:
 
 ```
 openshield-desktop/
-├── lib/                    # Flutter (desktop + mobile same codebase)
-│   ├── main.dart
-│   ├── main_shell.dart     # desktop nav rail / mobile bottom nav
-│   ├── screens/            # chat, sessions, swarm, memory, skills,
-│   │                       # doctor, settings, config
-│   ├── services/
-│   │   ├── backend_service.dart   # ChangeNotifier, connects in
-│   │   │                          # background Future, NEVER blocks runApp()
-│   │   ├── chat_ws.dart           # WS client, event → widget stream
-│   │   └── pairing_service.dart   # QR payload parse/store (secure storage)
-│   ├── widgets/            # message bubbles, tool-call cards,
-│   │                       # approval cards, diff viewer, model picker
-│   └── themes/             # see §5
-├── rust/                   # ONLY if needed (tray, keyring); start without
-└── pubspec.yaml            # com.openshield.desktop
+├── AGENTS.md               # agent brief / hard rules
+├── docs/                   # design docs
+├── src/                    # SvelteKit frontend (routes, components)
+│   ├── lib/services/       # backend.ts (REST+WS client), pairing.ts
+│   ├── lib/themes/         # CSS-variable theme system
+│   └── routes/             # chat, sessions, approvals, swarm,
+│                           # memory, doctor, settings
+├── static/                 # assets (icons, wordmark)
+├── src-tauri/              # Rust shell: window config, tray, keyring,
+│   │                       # secure token storage, tauri commands
+│   └── gen/android/        # Pocket Android target
+└── package.json            # com.openshield.desktop
 ```
+
+Frontend talks to `openshield serve` over plain HTTP fetch + native
+WebSocket (not Tauri IPC) — the same code path works on desktop, Android,
+and browser dev. CSP must allow `connect-src 'self' http://127.0.0.1:*
+ws://127.0.0.1:* http://* ws://*` (LAN hosts for Pocket).
 
 Screens (v0.1):
 
@@ -149,24 +157,25 @@ Screens (v0.1):
    editor pickers fed by `/api/v1/models`), theme picker, pair-device button
    (shows QR).
 
-### 3.3 OpenShield Pocket — mobile app (same Flutter codebase)
+### 3.3 OpenShield Pocket — Android app (same Tauri codebase)
 
-Same `lib/`, platform-gated per the wingman playbook:
+Same SvelteKit frontend + `src-tauri/gen/android` target, platform-gated
+per the Pincers playbook:
 
-- **Pairing:** QR scan of the desktop's pairing payload. Wingman precedent:
-  `mobile_scanner` triggers gralloc5 black screens on Android 16 (Pixel 8a) —
-  v0.1 ships **manual entry + paste-payload fallback**, QR scan behind a
-  feature flag until an alternative scanner package is validated. Gate the
-  widget behind `Platform.isAndroid || Platform.isIOS` via a getter (never a
-  library-level `final`).
-- **Startup:** never block `runApp()` on connection; fast-fail
-  127.0.0.1/localhost instantly; connection banner instead of LAN scanning.
-- **Screens:** Chat, Sessions, Approvals (push-style badge), Settings/Config
-  (last tab in bottom nav, per wingman `_mobileIndexMap` lesson).
-- **Foreground-only for v0.1.** No background service, no push server. If the
-  desktop is off, Pocket shows the disconnected banner and reconnects
-  automatically when the LAN host answers.
-- **App ID:** `com.openshield.pocket`. Test device: Pixel 8a / Android 16.
+- **Pairing:** Pincers already proves Tauri-Android pairing on the target
+  Pixel 8a — QR scan or manual entry of the `/api/v1/pair` payload
+  (host/port/token), validated against `/api/v1/health`. Manual entry is
+  the guaranteed fallback; QR via a scanner plugin validated on-device
+  before shipping.
+- **Startup:** connection starts in the background and never blocks first
+  render; disconnected state shows a tappable banner opening connection
+  settings; no LAN subnet scanning.
+- **Screens:** Chat, Sessions, Approvals (badge), Settings — bottom nav
+  on mobile widths, same routes as desktop.
+- **Foreground-only for v0.1.** No background service, no push server.
+  Desktop unreachable = disconnected banner + auto-retry.
+- **App ID:** `com.openshield.pocket`. Test device: Pixel 8a / Android 16
+  (Pincers' pairing already works on this exact device).
 
 ## 4. Protocol — WS Event Envelope
 
@@ -191,8 +200,8 @@ then deny), resumes on `POST /api/v1/approvals/:id`.
 
 ## 5. Theming & Branding
 
-Flutter `AppColorScheme` pattern from Wingman (Provider +
-`context.watch<ThemeManager>()`), flagship themes:
+CSS-variable theme system with a Svelte store (Pincers' 13-theme approach
+is the reference), flagship themes:
 
 - **Blackshield** (identity theme): matte black `#101014`, steel `#8F959C`,
   blood `#C1121F`, bone `#D8D3C8`. Blood-red cross on black for the app icon.
@@ -207,7 +216,8 @@ branding workflow. Credit line: "Made by synth with Blackclaw."
 - All remote surfaces inherit OpenShield's L1–L4 engine: sandbox paths,
   guardrail risk assessment, PII redaction — nothing bypasses it.
 - Token auth mandatory in LAN mode; token never leaves the pairing payload
-  unencrypted (stored in Flutter secure storage on the phone).
+  unencrypted (stored via Tauri stronghold/keyring on desktop and Android
+  keystore-backed storage on Pocket).
 - `lan_mode` defaults to **false**; binding 0.0.0.0 without it refuses to
   start (doctor warns).
 - Approval timeout defaults to deny. Sudo/sensitive-path/PII checks are never
@@ -228,11 +238,14 @@ branding workflow. Credit line: "Made by synth with Blackclaw."
 
 ## 8. Decisions (locked 2026-09-15)
 
-1. Tray + autostart: systemd --user unit vs in-app tray first? (Wingman uses
-   `system_tray`; desktop-only package, mobile gets the stub.) — DEFER to M5.
+1. Tray + autostart: systemd --user unit vs in-app tray first? — DEFER to M5.
 2. Voice input on Pocket — DEFER to v0.2.
 3. **Pocket is STRICTLY REMOTE.** No offline direct-to-provider chat. Locked.
 4. **Repo: separate wingman-style monorepo `openshield-desktop`.** Locked.
-   Depends on the installed `openshield` binary. Flutter `lib/` for
-   desktop + Pocket mobile, `docs/` for design, `server/` only if a tray or
-   keyring shim is ever needed (start without).
+   Depends on the installed `openshield` binary.
+5. **Stack: Tauri 2 + SvelteKit 2 (adapter-static) + TypeScript + Rust
+   `src-tauri/`.** Locked — supersedes the original Flutter choice. Rationale:
+   OpenClaw Pincers (~/Projects/active/openclaw-pincers, v0.3.3) ships this
+   exact stack cross-platform INCLUDING Android with working device pairing
+   on the target Pixel 8a; same patterns transfer; Rust shell sits next to
+   openshield serve. The Flutter M1 scaffold remains in git history only.
