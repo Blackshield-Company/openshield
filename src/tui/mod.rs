@@ -1801,7 +1801,9 @@ async fn run_app(app: &mut App, last_tick: &mut Instant) -> Result<()> {
                                                 height: 24,
                                             });
                                         let chat_width = chat_rect.width.saturating_sub(2) as usize;
-                                        let content_top = chat_rect.y.saturating_add(1) as usize;
+                                        // Feed row 0 is drawn at chat_rect.y
+                                        // (see draw_unified_feed), not y+1.
+                                        let content_top = chat_rect.y as usize;
                                         let rel_start_row = start_row.saturating_sub(content_top);
                                         let rel_end_row = end_row.saturating_sub(content_top);
                                         let (all_lines, scroll) =
