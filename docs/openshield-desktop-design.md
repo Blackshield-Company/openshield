@@ -87,6 +87,8 @@ New CLI subcommand + hardened API surface. Existing endpoints stay; additions:
 | GET    | /api/v1/skills | Skill registry listing + toggle |
 | GET    | /api/v1/doctor | Doctor report (reuse `openshield doctor` logic) |
 | GET    | /api/v1/swarm | Swarm status (engine state, agents, consensus doc) |
+| POST   | /api/v1/swarm/start | Start swarm (idempotent; optional `{seed, roles, max_agents}` body) |
+| POST   | /api/v1/swarm/stop | Stop swarm (idempotent) |
 | POST   | /api/v1/pair | Issue a short-lived pairing token + payload for QR |
 | GET    | /api/v1/perf | Per-session perf (tokens/sec, cost) — TUI already tracks this |
 
@@ -109,6 +111,41 @@ lan_mode = false           # explicit opt-in for mobile access
 **Pairing flow:** `openshield serve --pair` (or desktop app button) calls
 `POST /api/v1/pair` → returns `{host, port, token, expires}` → rendered as QR
 on the desktop. Phone scans, stores creds, validates with `/api/v1/health`.
+
+**Swarm payload (M5, implemented 2026-09-16):** `GET /api/v1/swarm` always
+returns 200. With no swarm active it returns the offline state
+(`running: false`, empty `agents`/`consensus`, `last_event: null`) — never
+404/500. Active shape:
+
+```json
+{
+  "running": true,
+  "enabled": true,
+  "agent_count": 4,
+  "agents": [
+    { "id": "architect-1", "name": "Architect 1", "role": "Architect",
+      "status": "working", "model": "…", "task": "Design the system…",
+      "last_activity": "…", "cycles_completed": 0, "errors_count": 0,
+      "success_rate": 1.0 }
+  ],
+  "consensus": { "entry_count": 1, "pending": 1, "approved": 0, "rejected": 0,
+                 "entries": [{ "id": "…", "author": "…", "task": "…",
+                               "status": "pending", "approvals": 1,
+                               "rejections": 0, "timestamp": 1758000000 }] },
+  "cycles": { "completed": 1, "limit": 50 },
+  "last_event": { "type": "work_completed", "agent": "architect-1", "at": "…" }
+}
+```
+
+`POST /api/v1/swarm/start` / `stop` return `{success: true, state: <snapshot>,
+message: "…"}`; both are idempotent (start on a running swarm and stop on an
+idle one are successes, not errors). Failures are `{error: "…"}` with a 4xx/5xx
+status. The endpoints drive the same `swarm::SwarmEngine` the TUI uses —
+start/stop from the phone spawns real agent runs against `[swarm]` config, with
+optional body overrides for the seed prompt, roles, and agent cap.
+`GET /api/v1/memory/search` is a pure alias of `GET /api/v1/memory` (same
+handler, query params, and response shape) — the canonical endpoint is kept
+intact for existing clients.
 
 ### 3.2 OpenShield Desktop — Tauri 2 + Svelte 5 app
 
