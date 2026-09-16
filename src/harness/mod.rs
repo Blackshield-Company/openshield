@@ -8,5 +8,5 @@ pub mod engine;
 pub mod event;
 pub mod response;
 
-pub use engine::{HarnessConfig, HarnessEngine};
+pub use engine::{ApprovalGate, ApprovalRequest, HarnessConfig, HarnessEngine};
 pub use event::HarnessEvent;
