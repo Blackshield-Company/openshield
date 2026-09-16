@@ -33,6 +33,26 @@ use crate::tools::{execute_tool, get_openai_tool_definitions, normalize_tool_arg
 use super::event::HarnessEvent;
 use super::response::{HarnessResponse, HarnessState, ModelResponse, ToolExecutionResult};
 
+/// Human-in-the-loop approval request raised by the L4 security gate when a
+/// tool call is held for a human decision (design doc §4 `approval_req`).
+#[derive(Debug, Clone)]
+pub struct ApprovalRequest {
+    pub tool_name: String,
+    pub args: String,
+    pub risk: crate::security::RiskLevel,
+    pub reason: String,
+}
+
+/// Async resolver for approval requests, injected by surfaces that have a
+/// human on the other end (`openshield serve` WS chat). Returns true when the
+/// tool call may execute; false denies it. The engine awaits this inline, so
+/// the tool call stays blocked until the future resolves.
+pub type ApprovalGate = std::sync::Arc<
+    dyn Fn(ApprovalRequest) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Configuration for the harness engine.
 #[derive(Debug, Clone)]
 pub struct HarnessConfig {
@@ -100,6 +120,10 @@ pub struct HarnessEngine {
     skill_registry: Option<SkillRegistry>,
     state: HarnessState,
     session_id: String,
+    /// Human-in-the-loop gate for High/Critical tool calls. `None` (the
+    /// default on every existing constructor) preserves historical behavior
+    /// exactly; `openshield serve` installs one when WS clients are connected.
+    approval_gate: Option<ApprovalGate>,
 }
 
 #[allow(dead_code)]
@@ -195,7 +219,15 @@ impl HarnessEngine {
             skill_registry,
             state: HarnessState::new(session_id.clone()),
             session_id,
+            approval_gate: None,
         })
+    }
+
+    /// Install (or replace) the human-in-the-loop approval gate. Used by
+    /// `openshield serve` for the M3 WS approval flow; TUI/headless callers
+    /// never set this and keep their existing behavior.
+    pub fn set_approval_gate(&mut self, gate: Option<ApprovalGate>) {
+        self.approval_gate = gate;
     }
 
     /// Create a harness engine for an existing session with an initial conversation history.
@@ -1037,7 +1069,41 @@ impl HarnessEngine {
         match self.security_engine.check_tool_call(tool_name, args) {
             SecurityDecision::Allow => {}
             SecurityDecision::RequireApproval { reason, risk_level } => {
-                if self.config.require_tool_approval {
+                if let Some(gate) = self.approval_gate.clone() {
+                    // M3 serve approval flow: a human is reachable over WS.
+                    // The gate blocks until approve/reject (or timeout deny),
+                    // then we either execute or deny — the L4 assessment is
+                    // never silently overridden.
+                    let approved = gate(ApprovalRequest {
+                        tool_name: tool_name.clone(),
+                        args: args.clone(),
+                        risk: risk_level.clone(),
+                        reason: reason.clone(),
+                    })
+                    .await;
+                    if !approved {
+                        self.security_engine.audit(
+                            tool_name,
+                            args,
+                            false,
+                            risk_level.clone(),
+                            &format!("{} (human decision: denied)", reason),
+                        );
+                        return Ok(ToolExecutionResult {
+                            tool_call_id: tool_call.id.clone(),
+                            tool_name: tool_name.clone(),
+                            args: args.clone(),
+                            result: format!(
+                                "Approval denied: {} (risk: {:?})",
+                                reason, risk_level
+                            ),
+                            success: false,
+                            execution_time_ms: start.elapsed().as_millis() as u64,
+                        });
+                    }
+                    // Approved by a human — fall through to execution; the
+                    // post-execution audit records the override.
+                } else if self.config.require_tool_approval {
                     return Ok(ToolExecutionResult {
                         tool_call_id: tool_call.id.clone(),
                         tool_name: tool_name.clone(),
@@ -1294,5 +1360,102 @@ mod tests {
         };
         assert!(!response.had_tool_calls);
         assert_eq!(response.primary.content, "Done");
+    }
+
+    /// Build a bare engine (no provider reachable) for gate tests. The tool
+    /// calls used below are chosen so the security engine's default config
+    /// (auto-approve up to High) returns RequireApproval only for Critical
+    /// risk, which is what the approval gate intercepts.
+    fn gate_test_engine() -> HarnessEngine {
+        let db = std::env::temp_dir()
+            .join(format!("openshield-gate-test-{}", Uuid::new_v4()))
+            .join("memory.db");
+        let memory = MemoryStore::new(&db).expect("temp memory store");
+        let security = SecurityEngine::new(crate::security::SecurityConfig::default())
+            .expect("security engine");
+        HarnessEngine {
+            config: HarnessConfig::default(),
+            app_config: Config::default(),
+            memory,
+            primary_provider: crate::providers::Provider::new(
+                "test".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "test".to_string(),
+                crate::config::ProviderKind::OpenAiCompatible,
+                std::collections::HashMap::new(),
+            ),
+            secondary_providers: Vec::new(),
+            security_engine: security,
+            skill_registry: None,
+            state: HarnessState::new("gate-test".to_string()),
+            session_id: "gate-test".to_string(),
+            approval_gate: None,
+        }
+    }
+
+    fn critical_tool_call(args: &str) -> ToolCallRequest {
+        ToolCallRequest {
+            id: "call-1".to_string(),
+            r#type: "function".to_string(),
+            function: crate::providers::ToolCallFunction {
+                name: "terminal".to_string(),
+                arguments: format!(r#"{{"command":{}}}"#, serde_json::to_string(args).unwrap()),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_approval_gate_denies_without_executing() {
+        let mut engine = gate_test_engine();
+        // "rm -rf" is Critical risk → RequireApproval. A rejecting gate must
+        // stop the call BEFORE it reaches the terminal tool.
+        let gate: ApprovalGate =
+            std::sync::Arc::new(|_req| Box::pin(async { false }));
+        engine.set_approval_gate(Some(gate));
+
+        let result = engine
+            .execute_tool_call(&critical_tool_call("rm -rf /tmp/openshield-gate-test-never"))
+            .await
+            .expect("tool call result");
+        assert!(!result.success);
+        assert!(
+            result.result.contains("Approval denied"),
+            "unexpected result: {}",
+            result.result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_approval_gate_approve_resumes_execution() {
+        let mut engine = gate_test_engine();
+        // An approving gate lets the held call proceed: the tool actually
+        // executes ("format" trips the Critical pattern; `echo` is harmless).
+        let gate: ApprovalGate =
+            std::sync::Arc::new(|_req| Box::pin(async { true }));
+        engine.set_approval_gate(Some(gate));
+
+        let result = engine
+            .execute_tool_call(&critical_tool_call("echo format ok"))
+            .await
+            .expect("tool call result");
+        assert!(
+            result.success,
+            "approved call must resume and execute: {}",
+            result.result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_gate_preserves_require_tool_approval_block() {
+        let mut engine = gate_test_engine();
+        engine.config.require_tool_approval = true;
+        // No gate installed: historical behavior — the call is refused with
+        // "Approval required" and never executes.
+        let result = engine
+            .execute_tool_call(&critical_tool_call("rm -rf /tmp/openshield-gate-test-never"))
+            .await
+            .expect("tool call result");
+        assert!(!result.success);
+        assert!(result.result.contains("Approval required"));
     }
 }
