@@ -43,8 +43,8 @@ pub(crate) use stream::{
 };
 pub(crate) use thinking::emergency_truncate_messages;
 pub(crate) use tool_parsing::{
-    extract_args_from_json, generate_edit_diff, is_edit_tool, parse_embedded_tools,
-    strip_think_tags, strip_tool_lines,
+    InlineToolRender, build_inline_tool_render, extract_args_from_json, generate_edit_diff,
+    is_edit_tool, parse_embedded_tools, strip_think_tags, strip_tool_lines,
 };
 
 #[allow(dead_code)]
@@ -71,6 +71,9 @@ struct ChatMessage {
     multi_model_responses: Vec<SecondaryResponse>,
     /// Persistent reasoning/thinking content from the model.
     reasoning: Option<String>,
+    /// Inline diff/preview for a code-writing tool call (edit/write/patch),
+    /// rendered in the scrollback above the tool result line.
+    tool_render: Option<InlineToolRender>,
 }
 
 /// Compact count formatting: 1234 → "1.2k", 1048576 → "1.0M".
@@ -868,6 +871,7 @@ impl App {
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
             reasoning: None,
+            tool_render: None,
         };
         self.messages.push(msg);
         self.truncate_messages_if_needed();
@@ -914,6 +918,7 @@ impl App {
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
             reasoning: reasoning.clone(),
+            tool_render: None,
         };
         self.messages.push(msg);
         self.truncate_messages_if_needed();
@@ -951,6 +956,34 @@ impl App {
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
             reasoning: None,
+            tool_render: None,
+        };
+        self.messages.push(msg);
+
+        let memory_msg = MemoryMessage {
+            id: Uuid::new_v4().to_string(),
+            session_id: self.session_id.clone(),
+            role: "system".to_string(),
+            content,
+            created_at: Utc::now(),
+            tokens_used: None,
+        };
+        let _ = self.memory.save_message(&memory_msg);
+    }
+
+    /// Add a system/tool message carrying an inline diff/preview of the code
+    /// a tool wrote (edit/write/patch). The render is shown in the scrollback;
+    /// `content` (the terse tool result line) is kept as the message body.
+    fn add_tool_render_message(&mut self, render: InlineToolRender, content: String) {
+        self.truncate_messages_if_needed();
+        let msg = ChatMessage {
+            role: "system".to_string(),
+            content: content.clone(),
+            images: None,
+            timestamp: Utc::now(),
+            multi_model_responses: Vec::new(),
+            reasoning: None,
+            tool_render: Some(render),
         };
         self.messages.push(msg);
 
@@ -1028,6 +1061,7 @@ impl App {
                 timestamp: m.created_at,
                 multi_model_responses: Vec::new(),
                 reasoning: None,
+                tool_render: None,
             });
             Arc::make_mut(&mut self.model_messages).push(Message {
                 role: m.role.clone(),
@@ -1063,6 +1097,7 @@ impl App {
             timestamp: Utc::now(),
             multi_model_responses: Vec::new(),
             reasoning: None,
+            tool_render: None,
         });
         new_messages.extend(self.messages.iter().rev().take(keep_last).rev().cloned());
         self.messages = new_messages;
@@ -3476,6 +3511,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                         timestamp: m.timestamp,
                         multi_model_responses: Vec::new(),
                         reasoning: m.reasoning.clone(),
+                        tool_render: None,
                     })
                     .collect();
 
@@ -3495,6 +3531,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
                                 timestamp: m.timestamp,
                                 multi_model_responses: Vec::new(),
                                 reasoning: m.reasoning.clone(),
+                                tool_render: None,
                             })
                             .collect(),
                         model_messages: std::sync::Arc::new(Vec::new()),
