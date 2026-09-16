@@ -1359,14 +1359,21 @@ mod tests {
             .iter()
             .filter(|m| m["role"].as_str() == Some("system"))
             .collect();
-        assert_eq!(system_msgs.len(), 1, "must merge to a single system message");
+        assert_eq!(
+            system_msgs.len(),
+            1,
+            "must merge to a single system message"
+        );
         assert_eq!(messages[0]["role"].as_str(), Some("system"));
         let merged = messages[0]["content"].as_str().unwrap();
         assert!(merged.contains("PROMPT-A"));
         assert!(merged.contains("PROMPT-B"));
         assert!(merged.contains("PROMPT-C"));
         // Non-system order preserved.
-        let roles: Vec<_> = messages.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        let roles: Vec<_> = messages
+            .iter()
+            .map(|m| m["role"].as_str().unwrap())
+            .collect();
         assert_eq!(roles, vec!["system", "user", "assistant", "user"]);
     }
 

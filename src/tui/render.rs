@@ -145,26 +145,11 @@ fn draw_top_status_bar(
     width: u16,
     _height: u16,
 ) -> io::Result<()> {
-    let gold = Color::Rgb {
-        r: 201,
-        g: 162,
-        b: 39,
-    };
-    let cyan = Color::Rgb {
-        r: 123,
-        g: 157,
-        b: 196,
-    };
-    let green = Color::Rgb {
-        r: 106,
-        g: 153,
-        b: 78,
-    };
-    let muted = Color::Rgb {
-        r: 138,
-        g: 143,
-        b: 152,
-    };
+    let theme = current_theme();
+    let gold = theme.accent_secondary;
+    let cyan = theme.accent_tertiary;
+    let green = theme.success;
+    let muted = theme.muted;
 
     let model_short = app.model.split('/').next_back().unwrap_or(&app.model);
     let model_part = format!("{}{}{}", ansi_fg(cyan), model_short, ansi_reset());

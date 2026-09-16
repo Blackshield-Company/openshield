@@ -156,7 +156,10 @@ static SYMBOL_PATTERNS: LazyLock<HashMap<&'static str, Vec<(SymbolKind, regex::R
     LazyLock::new(|| {
         let mut m = HashMap::new();
         let compile = |kind: SymbolKind, pat: &str| {
-            (kind, regex::Regex::new(pat).expect("symbol regex must compile"))
+            (
+                kind,
+                regex::Regex::new(pat).expect("symbol regex must compile"),
+            )
         };
         m.insert(
             "rust",
@@ -170,7 +173,10 @@ static SYMBOL_PATTERNS: LazyLock<HashMap<&'static str, Vec<(SymbolKind, regex::R
                 compile(SymbolKind::Trait, r"^\s*(?:pub\s+)?trait\s+(\w+)"),
                 compile(SymbolKind::Impl, r"^\s*impl\s+(?:<[^>]+>\s+)?(\w+)"),
                 compile(SymbolKind::Module, r"^\s*(?:pub\s+)?mod\s+(\w+)"),
-                compile(SymbolKind::Const, r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+"),
+                compile(
+                    SymbolKind::Const,
+                    r"^\s*(?:pub\s+)?const\s+\w+:\s+[^=]+=\s+",
+                ),
                 compile(SymbolKind::Macro, r"^\s*macro_rules!\s+(\w+)"),
                 compile(SymbolKind::Type, r"^\s*(?:pub\s+)?type\s+(\w+)"),
             ],
@@ -520,11 +526,22 @@ version = "0.1.0"
         fs::write(format!("{}/big.rs", dir), "fn x() {}\n".repeat(100_000)).unwrap();
         let map = build_repo_map(&dir).unwrap();
 
-        let bin = map.files.iter().find(|f| f.path.ends_with("blob.bin")).unwrap();
+        let bin = map
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("blob.bin"))
+            .unwrap();
         assert_eq!(bin.lines, 0);
-        let big = map.files.iter().find(|f| f.path.ends_with("big.rs")).unwrap();
+        let big = map
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("big.rs"))
+            .unwrap();
         assert_eq!(big.lines, 0, "files over MAX_FILE_BYTES must not be read");
-        assert!(map.find_symbol("main").is_some(), "normal files still indexed");
+        assert!(
+            map.find_symbol("main").is_some(),
+            "normal files still indexed"
+        );
 
         cleanup(&dir);
     }

@@ -75,6 +75,9 @@ default_model = "gpt-4o"
 auto_route = true
 cost_limit_usd = 10.0
 theme = "blackshield"
+# Mascot sprite on the splash screen ("none" disables it).
+# Custom sprites: ~/.config/openshield/sprites/*.ans|*.txt
+sprite = "blackshield-mercenary"
 
 [providers.openai]
 base_url = "https://api.openai.com/v1"
