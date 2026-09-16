@@ -248,40 +248,54 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                 "refactor" => json!({
                     "type": "object",
                     "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["extract_function", "rename_symbol", "inline_variable"],
+                            "description": "The refactoring operation"
+                        },
                         "file": {
                             "type": "string",
                             "description": "The file path to refactor"
                         },
-                        "operation": {
+                        "line": {
+                            "type": "integer",
+                            "description": "Line number (LSP convention, 0-based)"
+                        },
+                        "column": {
+                            "type": "integer",
+                            "description": "Column number (LSP convention, 0-based)"
+                        },
+                        "new_name": {
                             "type": "string",
-                            "enum": ["extract_function", "rename", "inline", "reorder"],
-                            "description": "The refactoring operation"
+                            "description": "New symbol name (required for rename_symbol)"
                         }
                     },
-                    "required": ["file", "operation"]
+                    "required": ["operation", "file", "line", "column"]
                 }),
+                // Matches the positional interface in tools/lsp.rs:
+                //   lsp <symbols|def|hover|diagnostics> <file> [line] [col]
                 "lsp" => json!({
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
-                            "enum": ["goto_definition", "find_references", "hover", "completion", "diagnostics"],
-                            "description": "The LSP command to run"
+                            "enum": ["symbols", "def", "hover", "diagnostics"],
+                            "description": "The LSP command: symbols (list document symbols), def (go to definition), hover (type info), diagnostics (file issues)"
                         },
                         "file": {
                             "type": "string",
-                            "description": "The file path"
+                            "description": "The file path (use \"/all\" with diagnostics for all files)"
                         },
                         "line": {
                             "type": "integer",
-                            "description": "The line number (1-based)"
+                            "description": "Line number (required for def/hover)"
                         },
                         "column": {
                             "type": "integer",
-                            "description": "The column number (1-based)"
+                            "description": "Column number (required for def/hover)"
                         }
                     },
-                    "required": ["command", "file", "line", "column"]
+                    "required": ["command", "file"]
                 }),
                 // Web & Search capabilities
                 "web" | "web_search" => json!({
@@ -479,7 +493,7 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["list", "add", "complete", "remove"],
+                            "enum": ["list", "add", "complete", "cancel", "clear"],
                             "description": "The todo action"
                         },
                         "task": {
@@ -488,7 +502,7 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                         },
                         "id": {
                             "type": "string",
-                            "description": "Task ID (for complete/remove)"
+                            "description": "Task ID (for complete/cancel)"
                         }
                     },
                     "required": ["action"]
@@ -498,12 +512,12 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["list", "create", "remove", "run"],
+                            "enum": ["list", "create", "remove"],
                             "description": "The cronjob action"
                         },
                         "schedule": {
                             "type": "string",
-                            "description": "Cron schedule expression (for create)"
+                            "description": "Cron schedule expression (for create, e.g. '0 9 * * *')"
                         },
                         "prompt": {
                             "type": "string",
@@ -511,7 +525,7 @@ pub fn get_openai_tool_definitions() -> Vec<crate::providers::ToolDefinition> {
                         },
                         "job_id": {
                             "type": "string",
-                            "description": "Job ID (for remove/run)"
+                            "description": "Job name (for create: optional name; for remove: the job to remove)"
                         }
                     },
                     "required": ["action"]
@@ -893,24 +907,42 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
             }
         })(),
         "refactor" => {
-            if let (Some(file), Some(operation)) = (get_str("file"), get_str("operation")) {
-                Some(format!("{} {}", file, operation))
+            // Positional interface (tools/refactor.rs):
+            //   refactor <operation> <file> <line> <col> [new_name]
+            if let (Some(operation), Some(file)) = (get_str("operation"), get_str("file")) {
+                let line = get_str("line").unwrap_or_else(|| "0".to_string());
+                let col = get_str("column").unwrap_or_else(|| "0".to_string());
+                let mut result = format!("{} {} {} {}", operation, file, line, col);
+                if let Some(name) = get_str("new_name") {
+                    result.push(' ');
+                    result.push_str(&name);
+                }
+                Some(result)
             } else {
                 None
             }
         }
-        "lsp" => {
-            if let (Some(command), Some(file), Some(line), Some(column)) = (
-                get_str("command"),
-                get_str("file"),
-                get_str("line"),
-                get_str("column"),
-            ) {
-                Some(format!("{} {} {} {}", command, file, line, column))
-            } else {
-                None
+        "lsp" => (|| {
+            // Positional interface (tools/lsp.rs):
+            //   lsp <symbols|def|hover|diagnostics> <file> [line] [col]
+            let command = get_str("command")?;
+            // Tolerate alternate spellings the implementation accepts.
+            let command = match command.as_str() {
+                "definition" | "goto_definition" => "def",
+                other => other,
+            };
+            let file = get_str("file")?;
+            let mut result = format!("{} {}", command, file);
+            if let Some(line) = get_str("line") {
+                result.push(' ');
+                result.push_str(&line);
+                if let Some(col) = get_str("column").or_else(|| get_str("col")) {
+                    result.push(' ');
+                    result.push_str(&col);
+                }
             }
-        }
+            Some(result)
+        })(),
         "memory" => (|| {
             if let Some(args_str) = get_str("args") {
                 return Some(args_str);
@@ -965,13 +997,57 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
             }
             Some(result)
         })(),
-        "todo" | "cronjob" => {
+        "todo" => {
+            // TodoTool (capabilities/productivity.rs):
+            //   todo --add <task> | --complete <id> | --cancel <id> | --list | --clear
             if let Some(args_str) = get_str("args") {
                 Some(args_str)
             } else {
-                get_str("task").map(|task| format!("--add {}", task))
+                let action = get_str("action").unwrap_or_else(|| {
+                    if get_str("task").is_some() {
+                        "add".to_string()
+                    } else {
+                        "list".to_string()
+                    }
+                });
+                match action.as_str() {
+                    "add" => get_str("task").map(|task| format!("--add {}", task)),
+                    "complete" => get_str("id").map(|id| format!("--complete {}", id)),
+                    "cancel" => get_str("id").map(|id| format!("--cancel {}", id)),
+                    "clear" => Some("--clear".to_string()),
+                    "list" => Some("--list".to_string()),
+                    _ => None,
+                }
             }
         }
+        "cronjob" => (|| {
+            // CronjobTool (capabilities/productivity.rs):
+            //   cronjob --create --schedule <cron> --prompt <task> [--name <name>] | --list | --remove <name>
+            if let Some(args_str) = get_str("args") {
+                return Some(args_str);
+            }
+            let action = get_str("action").unwrap_or_else(|| "list".to_string());
+            match action.as_str() {
+                "create" => {
+                    // Matches CronjobTool defaults: schedule is optional,
+                    // prompt is required.
+                    let schedule = get_str("schedule").unwrap_or_else(|| "0 9 * * *".to_string());
+                    let prompt = get_str("prompt")?;
+                    let mut result =
+                        format!("--create --schedule {} --prompt {}", schedule, prompt);
+                    if let Some(name) = get_str("name").or_else(|| get_str("job_id")) {
+                        result.push_str(&format!(" --name {}", name));
+                    }
+                    Some(result)
+                }
+                "remove" => {
+                    let name = get_str("job_id").or_else(|| get_str("name"))?;
+                    Some(format!("--remove {}", name))
+                }
+                "list" => Some("--list".to_string()),
+                _ => None,
+            }
+        })(),
         "skills" => (|| {
             if let Some(args_str) = get_str("args") {
                 return Some(args_str);
@@ -1469,5 +1545,85 @@ mod normalize_tests {
         // Language must NOT end up inside the temp .py file
         let args = r#"{"language":"python","code":"print(2+2)"}"#;
         assert_eq!(normalize_tool_args("code_execution", args), "print(2+2)");
+    }
+
+    // ── lsp/refactor/todo/cronjob schema-alignment regressions ───────────
+    // Schemas must describe the positional interfaces the tools implement.
+
+    #[test]
+    fn lsp_symbols_without_line_col() {
+        // symbols takes no line/col — old normalizer demanded all four fields
+        let args = r#"{"command":"symbols","file":"src/main.rs"}"#;
+        assert_eq!(normalize_tool_args("lsp", args), "symbols src/main.rs");
+    }
+
+    #[test]
+    fn lsp_def_with_position() {
+        let args = r#"{"command":"def","file":"src/main.rs","line":10,"column":5}"#;
+        assert_eq!(normalize_tool_args("lsp", args), "def src/main.rs 10 5");
+    }
+
+    #[test]
+    fn lsp_tolerates_goto_definition_spelling() {
+        let args = r#"{"command":"goto_definition","file":"a.rs","line":3,"column":1}"#;
+        assert_eq!(normalize_tool_args("lsp", args), "def a.rs 3 1");
+    }
+
+    #[test]
+    fn refactor_json_maps_to_positional_order() {
+        // Implementation expects: <operation> <file> <line> <col> [new_name]
+        let args = r#"{"operation":"rename_symbol","file":"src/lib.rs","line":42,"column":7,"new_name":"new_name"}"#;
+        assert_eq!(
+            normalize_tool_args("refactor", args),
+            "rename_symbol src/lib.rs 42 7 new_name"
+        );
+    }
+
+    #[test]
+    fn refactor_defaults_position_to_zero() {
+        let args = r#"{"operation":"extract_function","file":"src/lib.rs"}"#;
+        assert_eq!(
+            normalize_tool_args("refactor", args),
+            "extract_function src/lib.rs 0 0"
+        );
+    }
+
+    #[test]
+    fn cronjob_create_uses_cron_flags() {
+        // Old arm copy-pasted todo: emitted "--add <task>" which CronjobTool
+        // cannot parse (it only understands --create/--list/--remove).
+        let args = r#"{"action":"create","schedule":"0 9 * * *","prompt":"run tests","job_id":"morning"}"#;
+        assert_eq!(
+            normalize_tool_args("cronjob", args),
+            "--create --schedule 0 9 * * * --prompt run tests --name morning"
+        );
+    }
+
+    #[test]
+    fn cronjob_list_and_remove() {
+        assert_eq!(normalize_tool_args("cronjob", r#"{"action":"list"}"#), "--list");
+        assert_eq!(
+            normalize_tool_args("cronjob", r#"{"action":"remove","job_id":"morning"}"#),
+            "--remove morning"
+        );
+    }
+
+    #[test]
+    fn todo_complete_uses_id_not_task() {
+        // Old arm ignored "action" and only looked at "task"
+        let args = r#"{"action":"complete","id":"3"}"#;
+        assert_eq!(normalize_tool_args("todo", args), "--complete 3");
+    }
+
+    #[test]
+    fn todo_add_and_cancel() {
+        assert_eq!(
+            normalize_tool_args("todo", r#"{"action":"add","task":"write docs"}"#),
+            "--add write docs"
+        );
+        assert_eq!(
+            normalize_tool_args("todo", r#"{"action":"cancel","id":"2"}"#),
+            "--cancel 2"
+        );
     }
 }
