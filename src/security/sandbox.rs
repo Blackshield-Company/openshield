@@ -105,7 +105,8 @@ impl Sandbox {
                 if !self.is_in_allowed_paths(&path) {
                     return Err(format!(
                         "Path '{}' is outside the allowed directories. \
-                         Allowed: {:?}",
+                         Allowed: {:?}. \
+                         Retry with a path inside one of the allowed directories.",
                         path_str,
                         self.allowed_paths
                             .iter()
@@ -136,8 +137,10 @@ impl Sandbox {
             if !canonical.starts_with(&wd_canonical) {
                 return Err(format!(
                     "Path '{}' is outside the allowed working directory '{}'. \
-                     Use --allow-escape or change working directory.",
+                     Retry with a path inside '{}' (e.g. a scratch/demo folder there). \
+                     To permit outside paths: use --allow-escape or change working directory.",
                     path_str,
+                    wd.display(),
                     wd.display()
                 ));
             }
