@@ -32,7 +32,8 @@ impl Tool for TestTool {
     }
 
     fn description(&self) -> &str {
-        "Auto-detect and run tests. Usage: test [run|list|watch] [path]"
+        "Auto-detect and run tests. Usage: test [run|list|watch] [path] [framework]. \
+         Framework is optional (cargo|jest|pytest|go) and overrides auto-detection."
     }
 
     fn execute(&self, args: &str) -> Result<String> {
@@ -40,12 +41,30 @@ impl Tool for TestTool {
         let cmd = parts.first().copied().unwrap_or("run");
         let path = parts.get(1).copied().unwrap_or(".");
 
+        // Optional explicit framework: `test run <path> pytest`. A hint the
+        // model gives us MUST be honored over auto-detection — detection
+        // guesses from directory markers and can pick the parent project's
+        // framework when the actual target is a scratch dir inside it.
+        let explicit = match parts.get(2) {
+            None => None,
+            Some(f) => match parse_framework(f) {
+                Some(fw) => Some(fw),
+                None => {
+                    return Ok(format!(
+                        "Unknown test framework: '{}'. Supported: cargo, jest, pytest, go\n{}",
+                        f,
+                        self.usage()
+                    ));
+                }
+            },
+        };
+
         // Validate path before doing anything
         if let Err(e) = validate_test_path(path) {
             return Ok(format!("Test path validation failed: {}", e));
         }
 
-        let framework = detect_test_framework(path);
+        let framework = explicit.unwrap_or_else(|| detect_test_framework(path));
 
         match cmd {
             "run" => run_tests(path, &framework),
@@ -59,10 +78,22 @@ impl Tool for TestTool {
 impl TestTool {
     fn usage(&self) -> String {
         "Test tool usage:\n\
-         test run [path]   - Run tests (default)\n\
-         test list [path]  - List test files\n\
-         test watch [path] - Run tests on file changes"
+         test run [path] [framework]   - Run tests (default)\n\
+         test list [path] [framework]  - List test files\n\
+         test watch [path] [framework] - Run tests on file changes\n\
+         framework: cargo|jest|pytest|go (optional, overrides auto-detection)"
             .to_string()
+    }
+}
+
+/// Parse an explicit framework name from the command line.
+fn parse_framework(s: &str) -> Option<TestFramework> {
+    match s.to_ascii_lowercase().as_str() {
+        "cargo" | "rust" => Some(TestFramework::Cargo),
+        "jest" | "npm" | "node" => Some(TestFramework::Jest),
+        "pytest" | "python" => Some(TestFramework::Pytest),
+        "go" | "gotest" | "go-test" => Some(TestFramework::GoTest),
+        _ => None,
     }
 }
 
@@ -111,39 +142,45 @@ fn validate_test_path(path: &str) -> Result<()> {
 fn detect_test_framework(path: &str) -> TestFramework {
     let p = Path::new(path);
 
-    if p.join("Cargo.toml").exists()
-        || p.parent()
-            .map(|pp| pp.join("Cargo.toml").exists())
-            .unwrap_or(false)
-    {
-        return TestFramework::Cargo;
-    }
-    if p.join("package.json").exists() {
-        return TestFramework::Jest;
-    }
-    if p.join("pytest.ini").exists()
-        || p.join("setup.py").exists()
-        || p.join("pyproject.toml").exists()
-    {
-        return TestFramework::Pytest;
-    }
-    if p.join("go.mod").exists() {
-        return TestFramework::GoTest;
+    // 1. Markers at the exact path always win — the caller pointed here on
+    //    purpose. Previously a parent Cargo.toml outranked an exact-path
+    //    package.json/pytest.ini, which mis-detected scratch dirs inside
+    //    foreign repos.
+    if let Some(f) = detect_markers_at(p) {
+        return f;
     }
 
+    // 2. Nearest ancestor wins (up to 3 levels), all marker kinds checked at
+    //    each level — pytest markers included (they used to be exact-path
+    //    only, so `repo-with-pytest.ini/subdir` detected as Cargo if a Rust
+    //    project lived closer).
     for ancestor in p.ancestors().skip(1).take(3) {
-        if ancestor.join("Cargo.toml").exists() {
-            return TestFramework::Cargo;
-        }
-        if ancestor.join("package.json").exists() {
-            return TestFramework::Jest;
-        }
-        if ancestor.join("go.mod").exists() {
-            return TestFramework::GoTest;
+        if let Some(f) = detect_markers_at(ancestor) {
+            return f;
         }
     }
 
     TestFramework::Unknown
+}
+
+/// Detect a test framework from marker files in a single directory.
+fn detect_markers_at(dir: &Path) -> Option<TestFramework> {
+    if dir.join("Cargo.toml").exists() {
+        return Some(TestFramework::Cargo);
+    }
+    if dir.join("package.json").exists() {
+        return Some(TestFramework::Jest);
+    }
+    if dir.join("pytest.ini").exists()
+        || dir.join("setup.py").exists()
+        || dir.join("pyproject.toml").exists()
+    {
+        return Some(TestFramework::Pytest);
+    }
+    if dir.join("go.mod").exists() {
+        return Some(TestFramework::GoTest);
+    }
+    None
 }
 
 fn run_tests(path: &str, framework: &TestFramework) -> Result<String> {
@@ -794,5 +831,73 @@ mod tests {
         assert_eq!(extract_count("420 passed; 0 failed", "failed"), Some(0));
         assert_eq!(extract_count("3 failed", "failed"), Some(3));
         assert_eq!(extract_count("no match here", "passed"), None);
+    }
+
+    #[test]
+    fn test_parse_framework_aliases() {
+        assert!(matches!(
+            parse_framework("cargo"),
+            Some(TestFramework::Cargo)
+        ));
+        assert!(matches!(
+            parse_framework("rust"),
+            Some(TestFramework::Cargo)
+        ));
+        assert!(matches!(parse_framework("JEST"), Some(TestFramework::Jest)));
+        assert!(matches!(
+            parse_framework("pytest"),
+            Some(TestFramework::Pytest)
+        ));
+        assert!(matches!(
+            parse_framework("python"),
+            Some(TestFramework::Pytest)
+        ));
+        assert!(matches!(parse_framework("go"), Some(TestFramework::GoTest)));
+        assert!(parse_framework("mocha").is_none());
+    }
+
+    #[test]
+    fn test_exact_path_markers_beat_parent_cargo() {
+        // Regression: a scratch dir with its own python markers inside a Rust
+        // repo must detect as Pytest, not Cargo (parent used to win).
+        let dir = temp_dir();
+        let root = std::path::Path::new(&dir);
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let scratch = root.join("scratch");
+        fs::create_dir_all(&scratch).unwrap();
+        fs::write(scratch.join("pytest.ini"), "[pytest]\n").unwrap();
+
+        assert!(matches!(
+            detect_test_framework(scratch.to_str().unwrap()),
+            TestFramework::Pytest
+        ));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_ancestor_pytest_markers_detected() {
+        // Regression: pytest markers were never checked on ancestors, so
+        // <python-repo>/<subdir> detected as Unknown/Cargo instead of Pytest.
+        let dir = temp_dir();
+        let root = std::path::Path::new(&dir);
+        fs::write(root.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+        let sub = root.join("a/b");
+        fs::create_dir_all(&sub).unwrap();
+
+        assert!(matches!(
+            detect_test_framework(sub.to_str().unwrap()),
+            TestFramework::Pytest
+        ));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn test_execute_rejects_unknown_framework() {
+        let dir = temp_dir();
+        let tool = TestTool;
+        let out = tool.execute(&format!("run {} mocha", dir)).unwrap();
+        assert!(out.contains("Unknown test framework"));
+        assert!(out.contains("cargo, jest, pytest, go"));
+        cleanup(&dir);
     }
 }
