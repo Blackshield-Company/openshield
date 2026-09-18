@@ -1098,8 +1098,13 @@ impl HarnessEngine {
                             execution_time_ms: start.elapsed().as_millis() as u64,
                         });
                     }
-                    // Approved by a human — fall through to execution; the
-                    // post-execution audit records the override.
+                    // Approved by a human — record any external paths as
+                    // session-approved (OpenCode "always" parity) so repeat
+                    // access to the same directories doesn't re-ask, then
+                    // fall through to execution; the post-execution audit
+                    // records the override.
+                    self.security_engine
+                        .record_session_approval(tool_name, args);
                 } else if self.config.require_tool_approval {
                     return Ok(ToolExecutionResult {
                         tool_call_id: tool_call.id.clone(),

@@ -37,6 +37,11 @@ pub struct SecurityConfig {
     pub working_directory: Option<PathBuf>,
     /// Whether to allow commands outside working directory.
     pub allow_escape_working_dir: bool,
+    /// External (outside working dir) filesystem policy: "ask" (default,
+    /// OpenCode parity — routes to the human approval gate), "deny"
+    /// (legacy hard jail), "allow" (no restriction; same as allow_escape).
+    #[serde(default = "default_external_access")]
+    pub external_access: String,
     /// Sudo configuration.
     pub sudo: SudoConfig,
     /// Tool permission levels.
@@ -108,6 +113,10 @@ pub struct IdentityConfig {
     pub blocked_endpoints: Vec<String>,
 }
 
+fn default_external_access() -> String {
+    "ask".to_string()
+}
+
 impl Default for SecurityConfig {
     fn default() -> Self {
         let mut tool_permissions = HashMap::new();
@@ -126,6 +135,7 @@ impl Default for SecurityConfig {
             version: crate::VERSION.to_string(),
             working_directory: None,
             allow_escape_working_dir: false,
+            external_access: default_external_access(),
             sudo: SudoConfig {
                 enabled: true,
                 persist_password: false,
@@ -306,6 +316,12 @@ impl SecurityEngine {
     pub fn new(config: SecurityConfig) -> Result<Self> {
         let mut sandbox = Sandbox::new(config.working_directory.clone())?;
         sandbox.set_allowed_paths(config.allowed_paths.clone());
+        let external_mode = if config.allow_escape_working_dir {
+            ExternalMode::Allow
+        } else {
+            ExternalMode::parse(&config.external_access)
+        };
+        sandbox.set_external_mode(external_mode);
         let pii_detector = PiiDetector::new(&config.sensitive_patterns);
         let guardrails = Guardrails::new(config.prompt_injection_detection_enabled);
         let identity_manager = IdentityManager::new(config.identity.clone());
@@ -328,6 +344,12 @@ impl SecurityEngine {
     pub fn set_autonomous_mode(&self, enabled: bool) {
         self.autonomous_mode
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Record session approval for external paths after a human approves
+    /// at the gate (OpenCode "always" parity — repeat access flows).
+    pub fn record_session_approval(&self, tool_name: &str, args: &str) {
+        self.sandbox.record_session_approval(tool_name, args);
     }
 
     /// Set yolo mode on the security engine.
@@ -356,9 +378,20 @@ impl SecurityEngine {
         autonomous_mode: bool,
         yolo_mode: bool,
     ) -> SecurityDecision {
-        // L1: Check sandbox / working directory restrictions
-        if let Err(reason) = self.sandbox.validate_path(tool_name, args) {
-            return SecurityDecision::Deny { reason };
+        // L1: Sandbox / working directory restrictions (OpenCode-parity:
+        // inside = allow, tmp = allow, outside = ask via the human gate,
+        // strict "deny" mode = refuse with guidance)
+        match self.sandbox.evaluate(tool_name, args) {
+            SandboxVerdict::Allow => {}
+            SandboxVerdict::Ask { reason, .. } => {
+                return SecurityDecision::RequireApproval {
+                    reason,
+                    risk_level: RiskLevel::Medium,
+                };
+            }
+            SandboxVerdict::Deny { reason } => {
+                return SecurityDecision::Deny { reason };
+            }
         }
 
         // L2: Check tool permissions
