@@ -12,6 +12,10 @@ pub enum ProviderKind {
     OpenAiCompatible,
     Anthropic,
     Gemini,
+    /// ChatGPT-account Codex backend (Responses API) with OAuth credentials
+    /// shared with the Codex CLI at ~/.codex/auth.json.
+    #[serde(rename = "openai_codex")]
+    OpenAiCodex,
 }
 
 impl std::fmt::Display for ProviderKind {
@@ -20,6 +24,7 @@ impl std::fmt::Display for ProviderKind {
             ProviderKind::OpenAiCompatible => write!(f, "openai_compatible"),
             ProviderKind::Anthropic => write!(f, "anthropic"),
             ProviderKind::Gemini => write!(f, "gemini"),
+            ProviderKind::OpenAiCodex => write!(f, "openai_codex"),
         }
     }
 }

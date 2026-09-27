@@ -1,3 +1,5 @@
+pub mod codex_auth;
+
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -327,6 +329,11 @@ impl Provider {
                 builder = builder.header("x-api-key", &self.api_key);
                 builder = builder.header("anthropic-version", "2023-06-01");
             }
+            ProviderKind::OpenAiCodex => {
+                // Auth headers require an async OAuth token refresh —
+                // applied by the async call sites (send_with_retry /
+                // chat_stream_realtime) via apply_codex_auth().
+            }
         }
 
         // Add custom headers from config
@@ -335,6 +342,32 @@ impl Provider {
         }
 
         builder
+    }
+
+    /// Endpoint path for chat requests, per provider kind.
+    fn chat_path(&self) -> &'static str {
+        match self.kind {
+            ProviderKind::OpenAiCodex => "/responses",
+            _ => "/chat/completions",
+        }
+    }
+
+    /// Apply Codex OAuth headers (Bearer token, account id, Responses API
+    /// beta headers, session id) after ensuring the token is fresh.
+    /// `force_refresh` re-fetches a new token after a 401.
+    async fn apply_codex_auth(
+        &self,
+        builder: reqwest::RequestBuilder,
+        force_refresh: bool,
+    ) -> Result<reqwest::RequestBuilder> {
+        let creds = codex_auth::ensure_fresh(force_refresh).await?;
+        Ok(builder
+            .header("Authorization", format!("Bearer {}", creds.access_token))
+            .header("chatgpt-account-id", &creds.account_id)
+            .header("OpenAI-Beta", "responses=experimental")
+            .header("originator", "codex_cli_rs")
+            .header("Accept", "text/event-stream")
+            .header("session_id", codex_auth::session_id()))
     }
 
     /// Convert messages to the provider's native format.
@@ -516,6 +549,101 @@ impl Provider {
                     "contents": contents,
                 })
             }
+            ProviderKind::OpenAiCodex => {
+                // OpenAI Responses API (chatgpt.com/backend-api/codex/responses).
+                // System-role content goes into the top-level "instructions"
+                // field (merged like the OpenAiCompatible arm — the harness
+                // can emit multiple system messages); conversation turns go
+                // into "input" as Responses API items.
+                let instructions = request
+                    .messages
+                    .iter()
+                    .filter(|m| m.role == "system")
+                    .map(|m| m.content.trim())
+                    .filter(|c| !c.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+
+                let mut input: Vec<serde_json::Value> = Vec::new();
+                for m in request.messages.iter().filter(|m| m.role != "system") {
+                    match m.role.as_str() {
+                        "user" => {
+                            let mut parts =
+                                vec![json!({"type": "input_text", "text": m.content})];
+                            if let Some(ref images) = m.images {
+                                for img in images {
+                                    parts.push(json!({
+                                        "type": "input_image",
+                                        "image_url": img
+                                    }));
+                                }
+                            }
+                            input.push(json!({
+                                "type": "message",
+                                "role": "user",
+                                "content": parts,
+                            }));
+                        }
+                        "assistant" => {
+                            if !m.content.trim().is_empty() {
+                                input.push(json!({
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": m.content}],
+                                }));
+                            }
+                            if let Some(ref tool_calls) = m.tool_calls {
+                                for tc in tool_calls {
+                                    input.push(json!({
+                                        "type": "function_call",
+                                        "call_id": tc.id,
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    }));
+                                }
+                            }
+                        }
+                        "tool" => {
+                            input.push(json!({
+                                "type": "function_call_output",
+                                "call_id": m.tool_call_id.clone().unwrap_or_default(),
+                                "output": m.content,
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+
+                let mut body = json!({
+                    "model": request.model,
+                    "instructions": instructions,
+                    "input": input,
+                    "tool_choice": "auto",
+                    "parallel_tool_calls": false,
+                    "reasoning": {"effort": "medium", "summary": "auto"},
+                    "store": false,
+                    "stream": request.stream,
+                    "include": [],
+                });
+                if let Some(ref tools) = request.tools {
+                    // Convert OpenAI chat-completions tool defs to Responses
+                    // API function tools.
+                    let responses_tools: Vec<serde_json::Value> = tools
+                        .iter()
+                        .map(|t| {
+                            json!({
+                                "type": "function",
+                                "name": t.function.name,
+                                "description": t.function.description,
+                                "strict": false,
+                                "parameters": t.function.parameters,
+                            })
+                        })
+                        .collect();
+                    body["tools"] = json!(responses_tools);
+                }
+                body
+            }
         }
     }
 
@@ -653,6 +781,97 @@ impl Provider {
                     usage,
                 })
             }
+            ProviderKind::OpenAiCodex => {
+                // Responses API non-streaming response: output array holds
+                // message items (output_text) and function_call items.
+                let raw: serde_json::Value = serde_json::from_str(body)
+                    .with_context(|| format!("Failed to parse Codex response: {}", body))?;
+
+                let mut content = String::new();
+                let mut tool_calls: Vec<ToolCallRequest> = Vec::new();
+                if let Some(items) = raw.get("output").and_then(|o| o.as_array()) {
+                    for item in items {
+                        match item.get("type").and_then(|t| t.as_str()) {
+                            Some("message") => {
+                                if let Some(parts) =
+                                    item.get("content").and_then(|c| c.as_array())
+                                {
+                                    for part in parts {
+                                        if part.get("type").and_then(|t| t.as_str())
+                                            == Some("output_text")
+                                            && let Some(text) =
+                                                part.get("text").and_then(|t| t.as_str())
+                                        {
+                                            content.push_str(text);
+                                        }
+                                    }
+                                }
+                            }
+                            Some("function_call") => {
+                                let id = item
+                                    .get("call_id")
+                                    .and_then(|c| c.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let name = item
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let arguments = item
+                                    .get("arguments")
+                                    .and_then(|a| a.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                tool_calls.push(ToolCallRequest {
+                                    id,
+                                    r#type: "function".to_string(),
+                                    function: ToolCallFunction { name, arguments },
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                let usage = raw.get("usage").map(|u| {
+                    let prompt = u["input_tokens"].as_u64().unwrap_or(0) as u32;
+                    let completion = u["output_tokens"].as_u64().unwrap_or(0) as u32;
+                    Usage {
+                        prompt_tokens: prompt,
+                        completion_tokens: completion,
+                        total_tokens: u["total_tokens"]
+                            .as_u64()
+                            .map(|t| t as u32)
+                            .unwrap_or(prompt + completion),
+                    }
+                });
+
+                let finish_reason = if tool_calls.is_empty() {
+                    Some("stop".to_string())
+                } else {
+                    Some("tool_calls".to_string())
+                };
+
+                Ok(ChatResponse {
+                    choices: vec![Choice {
+                        message: Message {
+                            role: "assistant".to_string(),
+                            content,
+                            images: None,
+                            tool_call_id: None,
+                            tool_calls: if tool_calls.is_empty() {
+                                None
+                            } else {
+                                Some(tool_calls)
+                            },
+                            reasoning_content: None,
+                        },
+                        finish_reason,
+                    }],
+                    usage,
+                })
+            }
         }
     }
 
@@ -707,6 +926,8 @@ impl Provider {
     ) -> Result<reqwest::Response> {
         let body = self.build_chat_body(request);
         let mut last_error = String::new();
+        // For Codex: after a 401, force one token refresh and retry.
+        let mut codex_force_refresh = false;
 
         for attempt in 0..=max_retries {
             if attempt > 0 {
@@ -714,13 +935,15 @@ impl Provider {
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             }
 
-            let response = match self
-                .build_request_builder(reqwest::Method::POST, "/chat/completions")
+            let mut builder = self
+                .build_request_builder(reqwest::Method::POST, self.chat_path())
                 .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await
-            {
+                .json(&body);
+            if self.kind == ProviderKind::OpenAiCodex {
+                builder = self.apply_codex_auth(builder, codex_force_refresh).await?;
+            }
+
+            let response = match builder.send().await {
                 Ok(r) => r,
                 Err(e) => {
                     last_error = e.to_string();
@@ -739,6 +962,15 @@ impl Provider {
 
             let body_text = response.text().await.unwrap_or_default();
             last_error = format!("{}: {}", status, body_text);
+
+            // Codex: on 401, force a token refresh once and retry.
+            if status.as_u16() == 401
+                && self.kind == ProviderKind::OpenAiCodex
+                && !codex_force_refresh
+            {
+                codex_force_refresh = true;
+                continue;
+            }
 
             // Retry on rate limit or server errors
             if status.as_u16() == 429 || status.is_server_error() {
@@ -869,6 +1101,17 @@ impl Provider {
                                 .and_then(|p| p.get(0))
                                 .and_then(|p| p.get("text"))
                                 .and_then(|t| t.as_str()),
+                            ProviderKind::OpenAiCodex => {
+                                // Responses API SSE: text arrives in
+                                // response.output_text.delta events.
+                                if event.get("type").and_then(|t| t.as_str())
+                                    == Some("response.output_text.delta")
+                                {
+                                    event.get("delta").and_then(|d| d.as_str())
+                                } else {
+                                    None
+                                }
+                            }
                         };
 
                         if let Some(delta) = delta_content {
@@ -960,10 +1203,14 @@ impl Provider {
 
         // Spawn the streaming work in a background task so the caller can start receiving immediately
         tokio::spawn(async move {
+            let path = match kind {
+                ProviderKind::OpenAiCodex => "/responses",
+                _ => "/chat/completions",
+            };
             let mut request_builder = client
                 .request(
                     reqwest::Method::POST,
-                    format!("{}{}", base_url.trim_end_matches('/'), "/chat/completions"),
+                    format!("{}{}", base_url.trim_end_matches('/'), path),
                 )
                 .header("Content-Type", "application/json")
                 .json(&body);
@@ -976,6 +1223,29 @@ impl Provider {
                 ProviderKind::Anthropic => {
                     request_builder = request_builder.header("x-api-key", &api_key);
                     request_builder = request_builder.header("anthropic-version", "2023-06-01");
+                }
+                ProviderKind::OpenAiCodex => {
+                    match codex_auth::ensure_fresh(false).await {
+                        Ok(creds) => {
+                            request_builder = request_builder
+                                .header(
+                                    "Authorization",
+                                    format!("Bearer {}", creds.access_token),
+                                )
+                                .header("chatgpt-account-id", &creds.account_id)
+                                .header("OpenAI-Beta", "responses=experimental")
+                                .header("originator", "codex_cli_rs")
+                                .header("Accept", "text/event-stream")
+                                .header("session_id", codex_auth::session_id());
+                        }
+                        Err(e) => {
+                            let _ = tx.send(StreamChunk::Content(format!(
+                                "[codex auth error: {}]",
+                                e
+                            )));
+                            return;
+                        }
+                    }
                 }
             }
             for (key, val) in &headers {
@@ -1220,6 +1490,101 @@ impl Provider {
                                         let _ = tx.send(StreamChunk::Content(t.to_string()));
                                     }
                                 }
+                                ProviderKind::OpenAiCodex => {
+                                    // Responses API SSE: event kind is in the
+                                    // JSON "type" field of each data payload.
+                                    let event_type = event
+                                        .get("type")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("");
+                                    match event_type {
+                                        "response.output_text.delta" => {
+                                            if let Some(d) =
+                                                event.get("delta").and_then(|d| d.as_str())
+                                                && !d.is_empty()
+                                            {
+                                                if first_token_time.is_none() {
+                                                    first_token_time = Some(Instant::now());
+                                                }
+                                                let _ = tx.send(StreamChunk::Content(
+                                                    d.to_string(),
+                                                ));
+                                            }
+                                        }
+                                        "response.reasoning_summary_text.delta" => {
+                                            if let Some(d) =
+                                                event.get("delta").and_then(|d| d.as_str())
+                                                && !d.is_empty()
+                                            {
+                                                let _ = tx.send(StreamChunk::Reasoning(
+                                                    d.to_string(),
+                                                ));
+                                            }
+                                        }
+                                        "response.output_item.done" => {
+                                            // Completed items may be function calls.
+                                            let item = event.get("item");
+                                            if item
+                                                .and_then(|i| i.get("type"))
+                                                .and_then(|t| t.as_str())
+                                                == Some("function_call")
+                                            {
+                                                let id = item
+                                                    .and_then(|i| i.get("call_id"))
+                                                    .and_then(|c| c.as_str())
+                                                    .unwrap_or_default()
+                                                    .to_string();
+                                                let name = item
+                                                    .and_then(|i| i.get("name"))
+                                                    .and_then(|n| n.as_str())
+                                                    .unwrap_or_default()
+                                                    .to_string();
+                                                let arguments = item
+                                                    .and_then(|i| i.get("arguments"))
+                                                    .and_then(|a| a.as_str())
+                                                    .unwrap_or_default()
+                                                    .to_string();
+                                                let _ = tx.send(StreamChunk::ToolCall {
+                                                    id,
+                                                    name,
+                                                    arguments,
+                                                });
+                                            }
+                                        }
+                                        "response.completed" => {
+                                            let _ = tx.send(StreamChunk::Finish(
+                                                "stop".to_string(),
+                                            ));
+                                        }
+                                        "response.failed" | "error" => {
+                                            let msg = event
+                                                .get("response")
+                                                .and_then(|r| r.get("error"))
+                                                .and_then(|e| e.get("message"))
+                                                .and_then(|m| m.as_str())
+                                                .or_else(|| {
+                                                    event
+                                                        .get("error")
+                                                        .and_then(|e| e.get("message"))
+                                                        .and_then(|m| m.as_str())
+                                                })
+                                                .or_else(|| {
+                                                    event
+                                                        .get("message")
+                                                        .and_then(|m| m.as_str())
+                                                })
+                                                .unwrap_or("unknown codex stream error");
+                                            let _ = tx.send(StreamChunk::Content(format!(
+                                                "[API error: {}]",
+                                                msg
+                                            )));
+                                            let _ = tx.send(StreamChunk::Finish(
+                                                "error".to_string(),
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                }
                             }
                         }
                     }
@@ -1252,6 +1617,11 @@ impl Provider {
 
     #[allow(dead_code)]
     pub async fn list_models(&self) -> Result<Vec<String>> {
+        // The Codex backend has no /models listing endpoint; models come
+        // from config.
+        if self.kind == ProviderKind::OpenAiCodex {
+            return Ok(Vec::new());
+        }
         let path = match self.kind {
             ProviderKind::Gemini => "/models",
             _ => "/models",
@@ -1269,6 +1639,7 @@ impl Provider {
             .with_context(|| "Failed to parse models response")?;
 
         let models = match self.kind {
+            ProviderKind::OpenAiCodex => Vec::new(),
             ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => body
                 .get("data")
                 .and_then(|d| d.as_array())
