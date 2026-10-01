@@ -1,4 +1,5 @@
 pub mod codex_auth;
+pub mod xai_auth;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
@@ -329,10 +330,10 @@ impl Provider {
                 builder = builder.header("x-api-key", &self.api_key);
                 builder = builder.header("anthropic-version", "2023-06-01");
             }
-            ProviderKind::OpenAiCodex => {
+            ProviderKind::OpenAiCodex | ProviderKind::XaiOauth => {
                 // Auth headers require an async OAuth token refresh —
-                // applied by the async call sites (send_with_retry /
-                // chat_stream_realtime) via apply_codex_auth().
+                // applied by the async call sites via apply_codex_auth()
+                // or apply_xai_auth().
             }
         }
 
@@ -370,10 +371,20 @@ impl Provider {
             .header("session_id", codex_auth::session_id()))
     }
 
+    /// Apply a fresh SuperGrok bearer. `force_refresh` re-fetches after a 401.
+    async fn apply_xai_auth(
+        &self,
+        builder: reqwest::RequestBuilder,
+        force_refresh: bool,
+    ) -> Result<reqwest::RequestBuilder> {
+        let token = xai_auth::ensure_fresh(force_refresh).await?;
+        Ok(builder.header("Authorization", format!("Bearer {token}")))
+    }
+
     /// Convert messages to the provider's native format.
     fn build_chat_body(&self, request: &ChatRequest) -> serde_json::Value {
         match self.kind {
-            ProviderKind::OpenAiCompatible => {
+            ProviderKind::OpenAiCompatible | ProviderKind::XaiOauth => {
                 // Merge ALL system-role messages into a single leading system
                 // message. Strict chat templates (stock Qwen3 / llama.cpp
                 // minijinja, incl. the custom synthclaw templates) hard-fail
@@ -651,7 +662,7 @@ impl Provider {
     /// Also extracts Kimi thinking content from `<think>...</think>` tags.
     fn parse_chat_response(&self, body: &str) -> Result<ChatResponse> {
         match self.kind {
-            ProviderKind::OpenAiCompatible => {
+            ProviderKind::OpenAiCompatible | ProviderKind::XaiOauth => {
                 // First try standard OpenAI format
                 if let Ok(response) = serde_json::from_str::<ChatResponse>(body) {
                     return Ok(response);
@@ -927,7 +938,7 @@ impl Provider {
         let body = self.build_chat_body(request);
         let mut last_error = String::new();
         // For Codex: after a 401, force one token refresh and retry.
-        let mut codex_force_refresh = false;
+        let mut oauth_force_refresh = false;
 
         for attempt in 0..=max_retries {
             if attempt > 0 {
@@ -940,7 +951,9 @@ impl Provider {
                 .header("Content-Type", "application/json")
                 .json(&body);
             if self.kind == ProviderKind::OpenAiCodex {
-                builder = self.apply_codex_auth(builder, codex_force_refresh).await?;
+                builder = self.apply_codex_auth(builder, oauth_force_refresh).await?;
+            } else if self.kind == ProviderKind::XaiOauth {
+                builder = self.apply_xai_auth(builder, oauth_force_refresh).await?;
             }
 
             let response = match builder.send().await {
@@ -965,10 +978,13 @@ impl Provider {
 
             // Codex: on 401, force a token refresh once and retry.
             if status.as_u16() == 401
-                && self.kind == ProviderKind::OpenAiCodex
-                && !codex_force_refresh
+                && matches!(
+                    self.kind,
+                    ProviderKind::OpenAiCodex | ProviderKind::XaiOauth
+                )
+                && !oauth_force_refresh
             {
-                codex_force_refresh = true;
+                oauth_force_refresh = true;
                 continue;
             }
 
@@ -1060,7 +1076,7 @@ impl Provider {
                     }
                     if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                         let delta_content = match self.kind {
-                            ProviderKind::OpenAiCompatible => {
+                            ProviderKind::OpenAiCompatible | ProviderKind::XaiOauth => {
                                 // Stream both content and reasoning_content (Kimi thinking)
                                 let content = event
                                     .get("choices")
@@ -1247,6 +1263,21 @@ impl Provider {
                         }
                     }
                 }
+                ProviderKind::XaiOauth => {
+                    match xai_auth::ensure_fresh(false).await {
+                        Ok(token) => {
+                            request_builder = request_builder
+                                .header("Authorization", format!("Bearer {token}"));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(StreamChunk::Content(format!(
+                                "[xai auth error: {}]",
+                                e
+                            )));
+                            return;
+                        }
+                    }
+                }
             }
             for (key, val) in &headers {
                 request_builder = request_builder.header(key, val);
@@ -1319,7 +1350,7 @@ impl Provider {
                         }
                         if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                             match kind {
-                                ProviderKind::OpenAiCompatible => {
+                                ProviderKind::OpenAiCompatible | ProviderKind::XaiOauth => {
                                     let delta = event
                                         .get("choices")
                                         .and_then(|c| c.get(0))
@@ -1627,8 +1658,11 @@ impl Provider {
             _ => "/models",
         };
 
-        let response = self
-            .build_request_builder(reqwest::Method::GET, path)
+        let mut models_req = self.build_request_builder(reqwest::Method::GET, path);
+        if self.kind == ProviderKind::XaiOauth {
+            models_req = self.apply_xai_auth(models_req, false).await?;
+        }
+        let response = models_req
             .send()
             .await
             .with_context(|| format!("Failed to list models from {}", self.base_url))?;
@@ -1640,7 +1674,7 @@ impl Provider {
 
         let models = match self.kind {
             ProviderKind::OpenAiCodex => Vec::new(),
-            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => body
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic | ProviderKind::XaiOauth => body
                 .get("data")
                 .and_then(|d| d.as_array())
                 .map(|arr| {

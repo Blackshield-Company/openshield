@@ -106,6 +106,11 @@ struct Cli {
 enum Commands {
     Tui,
     Setup,
+    /// Subscription device-code login. Currently: xai
+    Auth {
+        #[arg(default_value = "xai")]
+        provider: String,
+    },
     Stats,
     Memory {
         #[arg(default_value = "")]
@@ -507,6 +512,10 @@ async fn main() -> anyhow::Result<()> {
             println!("Run `openshield` to start the TUI.");
             config::setup::run().await?;
         }
+        Some(Commands::Auth { provider }) => match provider.as_str() {
+            "xai" => providers::xai_auth::login().await?,
+            other => anyhow::bail!("unsupported auth provider '{other}' (supported: xai)"),
+        },
         Some(Commands::Config) => {
             println!("🛡 OpenShield Config");
             let config_path = dirs::config_dir()
