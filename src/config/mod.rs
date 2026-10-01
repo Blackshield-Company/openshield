@@ -16,6 +16,10 @@ pub enum ProviderKind {
     /// shared with the Codex CLI at ~/.codex/auth.json.
     #[serde(rename = "openai_codex")]
     OpenAiCodex,
+    /// SuperGrok subscription OAuth. Tokens live in this harness's own
+    /// ~/.config/openshield/xai-auth.json — never copied from another harness.
+    #[serde(rename = "xai_oauth")]
+    XaiOauth,
 }
 
 impl std::fmt::Display for ProviderKind {
@@ -25,6 +29,7 @@ impl std::fmt::Display for ProviderKind {
             ProviderKind::Anthropic => write!(f, "anthropic"),
             ProviderKind::Gemini => write!(f, "gemini"),
             ProviderKind::OpenAiCodex => write!(f, "openai_codex"),
+            ProviderKind::XaiOauth => write!(f, "xai_oauth"),
         }
     }
 }
