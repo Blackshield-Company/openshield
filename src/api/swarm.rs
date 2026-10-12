@@ -469,7 +469,23 @@ mod tests {
     #[tokio::test]
     async fn test_snapshot_reports_agents_consensus_and_last_event() {
         let swarm = SwarmState::new();
-        let config = crate::config::Config::default();
+        // Point every provider at a local server that accepts connections but
+        // never answers, so background agent requests stay in flight instead of
+        // failing (and flipping agent status to Error) while we assert.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming().flatten() {
+                held.push(stream);
+            }
+        });
+        let mut config = crate::config::Config::default();
+        for provider in config.providers.values_mut() {
+            provider.base_url = format!("http://{}/v1", addr);
+            provider.api_key = "test-key".to_string();
+            provider.kind = crate::config::ProviderKind::OpenAiCompatible;
+        }
         let engine = Arc::new(SwarmEngine::new(config.swarm.clone()));
         engine.init("Test swarm", &config).await.unwrap();
         swarm.attach(engine.clone()).await;
