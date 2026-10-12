@@ -1,128 +1,179 @@
 #!/usr/bin/env bash
+# OpenShield installer
+#
+#   curl -fsSL https://raw.githubusercontent.com/Blackshield-Company/openshield/main/install.sh | bash
+#
+# Downloads the prebuilt release binary for your OS/arch from GitHub Releases,
+# verifies its SHA-256 checksum, and installs it to $BIN_DIR. If no prebuilt
+# binary is available, falls back to `cargo install --git`.
+#
+# Environment overrides:
+#   OPENSHIELD_VERSION  release tag to install (default: latest), e.g. v1.1.0
+#   BIN_DIR             install directory (default: ~/.local/bin)
+#   OPENSHIELD_FROM_SOURCE=1  skip the binary download, build with cargo
+#   DRY_RUN=1           print what would happen without downloading/installing
 set -euo pipefail
 
-# OpenShield Installer
-# Usage: curl -sSL https://raw.githubusercontent.com/synthalorian/openshield/main/install.sh | bash
-
-REPO="https://github.com/synthalorian/openshield.git"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/openshield}"
+OWNER_REPO="Blackshield-Company/openshield"
+REPO_URL="https://github.com/${OWNER_REPO}"
+VERSION="${OPENSHIELD_VERSION:-latest}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+DRY_RUN="${DRY_RUN:-0}"
 
-echo "🛡 OpenShield Installer"
-echo "======================"
-
-# Check for Rust
-check_rust() {
-    if ! command -v rustc &> /dev/null; then
-        echo "❌ Rust not found. Installing via rustup..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env"
+say() { printf '%s\n' "$*"; }
+err() { printf 'error: %s\n' "$*" >&2; }
+run() {
+    if [ "$DRY_RUN" = "1" ]; then
+        say "[dry-run] $*"
+    else
+        "$@"
     fi
-    echo "✅ Rust $(rustc --version)"
 }
 
-# Clone or update repo
-setup_repo() {
-    if [ -d "$INSTALL_DIR/.git" ]; then
-        echo "🔄 Updating existing OpenShield..."
-        cd "$INSTALL_DIR"
-        git pull
-    elif [ -d "$INSTALL_DIR" ]; then
-        echo "🔄 Found existing directory, updating..."
-        cd "$INSTALL_DIR"
-        if [ -d .git ]; then
-            git pull
+# Map uname output to a Rust target triple (matches release asset names).
+detect_target() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64 | amd64) arch="x86_64" ;;
+        aarch64 | arm64) arch="aarch64" ;;
+        *) err "unsupported architecture: $arch"; return 1 ;;
+    esac
+    case "$os" in
+        Linux) echo "${arch}-unknown-linux-gnu" ;;
+        Darwin) echo "${arch}-apple-darwin" ;;
+        MINGW* | MSYS* | CYGWIN*)
+            if [ "$arch" = "x86_64" ]; then
+                echo "x86_64-pc-windows-msvc"
+            else
+                err "unsupported Windows architecture: $arch"; return 1
+            fi
+            ;;
+        *) err "unsupported OS: $os"; return 1 ;;
+    esac
+}
+
+download() { # url dest
+    if command -v curl > /dev/null 2>&1; then
+        curl -fsSL --proto '=https' --tlsv1.2 -o "$2" "$1"
+    elif command -v wget > /dev/null 2>&1; then
+        wget -qO "$2" "$1"
+    else
+        err "need curl or wget"; return 1
+    fi
+}
+
+sha256_of() {
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum > /dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        echo ""
+    fi
+}
+
+release_base_url() {
+    if [ "$VERSION" = "latest" ]; then
+        echo "${REPO_URL}/releases/latest/download"
+    else
+        echo "${REPO_URL}/releases/download/${VERSION}"
+    fi
+}
+
+install_binary() {
+    local target="$1" ext archive base tmp exe
+    case "$target" in
+        *windows*) ext="zip"; exe="openshield.exe" ;;
+        *) ext="tar.gz"; exe="openshield" ;;
+    esac
+    archive="openshield-${target}.${ext}"
+    base="$(release_base_url)"
+    say "Downloading ${base}/${archive}"
+    if [ "$DRY_RUN" = "1" ]; then
+        say "[dry-run] verify ${archive}.sha256, extract ${exe} -> ${BIN_DIR}/${exe}"
+        return 0
+    fi
+
+    tmp="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" EXIT
+    if ! download "${base}/${archive}" "${tmp}/${archive}"; then
+        err "no prebuilt binary at ${base}/${archive}"
+        return 1
+    fi
+    if download "${base}/${archive}.sha256" "${tmp}/${archive}.sha256"; then
+        local expected actual
+        expected="$(awk '{print $1}' "${tmp}/${archive}.sha256")"
+        actual="$(sha256_of "${tmp}/${archive}")"
+        if [ -z "$actual" ]; then
+            say "warning: no sha256 tool found, skipping checksum verification"
+        elif [ "$expected" != "$actual" ]; then
+            err "checksum mismatch for ${archive}: expected ${expected}, got ${actual}"
+            exit 1
         else
-            cd ..
-            rm -rf "$INSTALL_DIR"
-            git clone "$REPO" "$INSTALL_DIR"
-            cd "$INSTALL_DIR"
+            say "Checksum OK (${actual})"
         fi
     else
-        echo "📥 Cloning OpenShield..."
-        mkdir -p "$(dirname "$INSTALL_DIR")"
-        git clone "$REPO" "$INSTALL_DIR"
-        cd "$INSTALL_DIR"
+        say "warning: checksum file not found, skipping verification"
     fi
-}
 
-# Build release binary
-build() {
-    echo "🔨 Building OpenShield (release)..."
-    cargo build --release
-}
-
-# Install binary
-install_binary() {
-    mkdir -p "$BIN_DIR"
-    cp "$INSTALL_DIR/target/release/openshield" "$BIN_DIR/"
-    chmod +x "$BIN_DIR/openshield"
-    echo "✅ Installed openshield to $BIN_DIR"
-}
-
-# Setup shell integration
-setup_shell() {
-    local shell_rc=""
-    case "${SHELL##*/}" in
-        bash) shell_rc="$HOME/.bashrc" ;;
-        zsh)  shell_rc="$HOME/.zshrc" ;;
-        fish) shell_rc="$HOME/.config/fish/config.fish" ;;
-        *)    shell_rc="" ;;
+    case "$ext" in
+        zip) unzip -q "${tmp}/${archive}" -d "${tmp}/x" ;;
+        *) mkdir -p "${tmp}/x" && tar -xzf "${tmp}/${archive}" -C "${tmp}/x" ;;
     esac
-
-    if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
-        if ! grep -q "$BIN_DIR" "$shell_rc" 2>/dev/null; then
-            echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$shell_rc"
-            echo "✅ Added $BIN_DIR to PATH in $shell_rc"
-            echo "   Run: source $shell_rc"
-        fi
+    local found
+    found="$(find "${tmp}/x" -type f -name "$exe" | head -n 1)"
+    if [ -z "$found" ]; then
+        err "${exe} not found in ${archive}"
+        exit 1
     fi
+    mkdir -p "$BIN_DIR"
+    install -m 0755 "$found" "${BIN_DIR}/${exe}" 2> /dev/null \
+        || { cp "$found" "${BIN_DIR}/${exe}" && chmod 0755 "${BIN_DIR}/${exe}"; }
+    say "Installed ${BIN_DIR}/${exe}"
+}
 
-    # Also check if PATH already includes it
-    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-        export PATH="$BIN_DIR:$PATH"
+install_from_source() {
+    say "Building from source with cargo (this can take a while)..."
+    if ! command -v cargo > /dev/null 2>&1; then
+        err "cargo not found. Install Rust from https://rustup.rs and re-run this script."
+        exit 1
+    fi
+    local args=(install --git "${REPO_URL}.git" --locked --root "$(dirname "$BIN_DIR")" openshield)
+    if [ "$VERSION" != "latest" ]; then
+        args+=(--tag "$VERSION")
+    fi
+    run cargo "${args[@]}"
+    if [ "$(dirname "$BIN_DIR")/bin" != "$BIN_DIR" ] && [ "$DRY_RUN" != "1" ]; then
+        mkdir -p "$BIN_DIR"
+        mv "$(dirname "$BIN_DIR")/bin/openshield" "$BIN_DIR/"
     fi
 }
 
-# Create config directory
-setup_config() {
-    local config_dir="$HOME/.config/openshield"
-    mkdir -p "$config_dir"
-    echo "✅ Config directory: $config_dir"
-    echo "   Set your provider API key environment variable before running"
-    echo "   Examples: OPENAI_API_KEY, ANTHROPIC_API_KEY, KIMI_API_KEY, XAI_API_KEY"
-}
-
-# Main
 main() {
-    check_rust
-    setup_repo
-    build
-    install_binary
-    setup_shell
-    setup_config
+    say "OpenShield installer (${OWNER_REPO}, version: ${VERSION})"
+    local target=""
+    if [ "${OPENSHIELD_FROM_SOURCE:-0}" != "1" ]; then
+        target="$(detect_target)" || target=""
+    fi
+    if [ -n "$target" ]; then
+        say "Detected target: ${target}"
+        if ! install_binary "$target"; then
+            say "Falling back to building from source."
+            install_from_source
+        fi
+    else
+        install_from_source
+    fi
 
-    echo ""
-    echo "🎉 OpenShield installed successfully!"
-    echo ""
-    echo "Usage:"
-    echo "  openshield           Launch TUI (default)"
-    echo "  openshield tui       Launch TUI explicitly"
-    echo "  openshield chat      One-shot chat"
-    echo "  openshield agent     Run agent on a task"
-    echo "  openshield models    List available models"
-    echo "  openshield stats     View usage statistics"
-    echo "  openshield config    Show configuration"
-    echo "  openshield setup     Interactive setup"
-    echo ""
-    echo "Environment variables:"
-    echo "  OPENAI_API_KEY      Your OpenAI API key"
-    echo "  ANTHROPIC_API_KEY   Your Anthropic API key"
-    echo "  KIMI_API_KEY        Your Kimi API key"
-    echo "  XAI_API_KEY         Your xAI API key"
-    echo "  SOUL_NAME           Set to 'blank' for blank slate, or 'blackclaw' (default)"
-    echo ""
-    echo "Run 'openshield' to start!"
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) ;;
+        *) say "Note: ${BIN_DIR} is not on your PATH. Add it with:"
+           say "  export PATH=\"${BIN_DIR}:\$PATH\"" ;;
+    esac
+    say "Done. Run 'openshield setup' to configure a provider, then 'openshield'."
 }
 
 main "$@"

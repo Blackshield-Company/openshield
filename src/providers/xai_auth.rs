@@ -92,7 +92,10 @@ async fn discover_token_endpoint(client: &reqwest::Client) -> Result<String> {
     if !resp.status().is_success() {
         anyhow::bail!("xAI OIDC discovery HTTP {}", resp.status());
     }
-    let body: serde_json::Value = resp.json().await.context("xAI OIDC discovery was not JSON")?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .context("xAI OIDC discovery was not JSON")?;
     let endpoint = body
         .get("token_endpoint")
         .and_then(|v| v.as_str())
@@ -139,7 +142,10 @@ fn tokens_from_payload(payload: &serde_json::Value, fallback_refresh: &str) -> R
     if refresh.is_empty() {
         anyhow::bail!("xAI token response missing refresh_token");
     }
-    let expires_in = payload.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(21600);
+    let expires_in = payload
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(21600);
     let endpoint = payload
         .get("token_endpoint")
         .and_then(|v| v.as_str())
@@ -176,9 +182,7 @@ async fn refresh(client: &reqwest::Client, auth: &XaiAuthFile) -> Result<XaiAuth
             .or_else(|| body.get("error"))
             .and_then(|v| v.as_str())
             .unwrap_or("refresh failed");
-        anyhow::bail!(
-            "xAI token refresh HTTP {status}: {err}. Run `openshield auth xai`."
-        );
+        anyhow::bail!("xAI token refresh HTTP {status}: {err}. Run `openshield auth xai`.");
     }
     let mut fresh = tokens_from_payload(&body, &auth.refresh_token)?;
     fresh.token_endpoint = endpoint;
@@ -232,8 +236,15 @@ pub async fn login() -> Result<()> {
         .or_else(|| start.get("verification_uri"))
         .and_then(|v| v.as_str())
         .unwrap_or("https://accounts.x.ai/oauth2/device");
-    let expires_in = start.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(900);
-    let interval = start.get("interval").and_then(|v| v.as_u64()).unwrap_or(5).max(1);
+    let expires_in = start
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(900);
+    let interval = start
+        .get("interval")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5)
+        .max(1);
 
     println!("OpenShield xAI login");
     println!("URL: {verification}");
