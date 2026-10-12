@@ -127,6 +127,9 @@ enum Commands {
     Agent {
         #[arg(default_value = "")]
         task: String,
+        /// Model to use (defaults to `default_model` from config.toml)
+        #[arg(short, long)]
+        model: Option<String>,
     },
     Test {
         #[arg(default_value = "run")]
@@ -777,14 +780,21 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Learn) => {
             self_improve::trigger_analysis(&config).await?;
         }
-        Some(Commands::Agent { task }) => {
+        Some(Commands::Agent { task, model }) => {
             if task.is_empty() {
                 println!("🛡 Agent Mode");
                 println!("Usage: openshield agent <task>");
                 println!("       openshield agent 'fix the bug in src/main.rs'");
+                println!("       openshield agent 'add tests' --model qwen-local");
             } else {
-                let agent_config = agent::AgentConfig::default();
-                let agent = agent::Agent::new(agent_config, &config)?;
+                let agent_config = agent::AgentConfig::from_app_config(&config, model.as_deref());
+                let agent = match agent::Agent::new(agent_config, &config) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        eprintln!("❌ Agent error: {}", e);
+                        std::process::exit(1);
+                    }
+                };
                 match agent.run_task(&task).await {
                     Ok(result) => {
                         println!(
@@ -808,7 +818,10 @@ async fn main() -> anyhow::Result<()> {
                             );
                         }
                     }
-                    Err(e) => println!("❌ Agent error: {}", e),
+                    Err(e) => {
+                        eprintln!("❌ Agent error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -1022,7 +1035,10 @@ async fn main() -> anyhow::Result<()> {
                             metrics.tokens_generated
                         );
                     }
-                    Err(e) => println!("❌ Error: {}", e),
+                    Err(e) => {
+                        eprintln!("❌ Error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }

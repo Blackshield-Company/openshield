@@ -130,7 +130,7 @@ pub async fn run_headless(
     let config_blocking = config.clone();
     let model_for_blocking = model.clone();
 
-    let handle = tokio::task::spawn_blocking(move || -> Result<(String, usize)> {
+    let handle = tokio::task::spawn_blocking(move || -> Result<(String, usize, Option<String>)> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -158,6 +158,8 @@ pub async fn run_headless(
             let mut consecutive_errors = 0usize;
             let max_consecutive_errors = 3;
             let mut user_message = config_blocking.task.clone();
+            // Set when the run is aborted because the model/provider kept failing.
+            let mut fatal_error: Option<String> = None;
             let now = || chrono::Utc::now().to_rfc3339();
 
             while turn < config_blocking.max_turns {
@@ -258,9 +260,10 @@ pub async fn run_headless(
                             },
                         );
                         consecutive_errors += 1;
-                        if consecutive_errors >= max_consecutive_errors {
+                        if consecutive_errors >= max_consecutive_errors || is_fatal_turn_error(&e) {
                             summary.push_str(&msg);
                             summary.push('\n');
+                            fatal_error = Some(e.to_string());
                             break;
                         }
                         user_message = format!(
@@ -293,12 +296,23 @@ pub async fn run_headless(
                 user_message = "Continue working on the task. If finished, respond with TASK_COMPLETE. If you need to use a tool, use the native tool_calls format.".to_string();
             }
 
-            Ok((summary, turn))
+            Ok((summary, turn, fatal_error))
         })
     });
 
     let (mut summary, turn) = match handle.await {
-        Ok(Ok(result)) => result,
+        Ok(Ok((summary, turn, None))) => (summary, turn),
+        Ok(Ok((_, turn, Some(err)))) => {
+            emit(
+                &event_tx,
+                HeadlessEvent::Error {
+                    message: format!("Aborting after {} turn(s): {}", turn, err),
+                    turn,
+                    timestamp: now(),
+                },
+            );
+            return Err(anyhow::anyhow!("model request failed: {}", err));
+        }
         Ok(Err(e)) => return Err(e),
         Err(e) => return Err(anyhow::anyhow!("Headless blocking task panicked: {}", e)),
     };
@@ -403,6 +417,17 @@ pub async fn run_headless(
     Ok(summary)
 }
 
+/// Errors that retrying cannot fix (bad config, missing key, context overflow,
+/// 4xx client errors) abort the run immediately.
+fn is_fatal_turn_error(e: &anyhow::Error) -> bool {
+    let msg = format!("{:#}", e);
+    crate::providers::is_context_overflow_error(&msg)
+        || msg.contains("API key for provider")
+        || msg.contains("No providers configured")
+        || msg.contains("not configured in any provider")
+        || (msg.contains("API error 4") && !msg.contains("API error 429"))
+}
+
 /// Helper: emit an event if a channel is available.
 fn emit(tx: &Option<mpsc::UnboundedSender<HeadlessEvent>>, event: HeadlessEvent) {
     if let Some(sender) = tx {
@@ -453,6 +478,24 @@ pub fn format_ndjson(event: &HeadlessEvent) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fatal_turn_errors_are_detected() {
+        use super::is_fatal_turn_error;
+        assert!(is_fatal_turn_error(&anyhow::anyhow!(
+            "API error 400 Bad Request: {{\"error\":{{\"type\":\"exceed_context_size_error\"}}}}"
+        )));
+        assert!(is_fatal_turn_error(&anyhow::anyhow!(
+            "API key for provider 'openai' is not set"
+        )));
+        assert!(is_fatal_turn_error(&anyhow::anyhow!(
+            "API error 401 Unauthorized: bad key"
+        )));
+        assert!(!is_fatal_turn_error(&anyhow::anyhow!(
+            "API error 429 Too Many Requests"
+        )));
+        assert!(!is_fatal_turn_error(&anyhow::anyhow!("connection reset")));
+    }
+
     use super::*;
 
     #[test]

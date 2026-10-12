@@ -37,6 +37,21 @@ impl Default for AgentConfig {
     }
 }
 
+impl AgentConfig {
+    /// Build an agent config that targets `model`, or the configured
+    /// `default_model` when no override is given.
+    pub fn from_app_config(app_config: &Config, model_override: Option<&str>) -> Self {
+        let model = model_override
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(&app_config.default_model);
+        Self {
+            default_model: model.to_string(),
+            ..Self::default()
+        }
+    }
+}
+
 /// A single step in an execution plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
@@ -104,12 +119,17 @@ impl Agent {
         let model_name = &config.default_model;
         let (provider_name, provider_config) = app_config
             .find_provider_for_model(model_name)
-            .unwrap_or_else(|| {
-                let (n, p) = app_config.providers.iter().next().unwrap_or_else(|| {
-                    panic!("No providers configured in config");
-                });
-                (n.clone(), p.clone())
-            });
+            .ok_or_else(|| {
+                if app_config.providers.is_empty() {
+                    anyhow::anyhow!("No providers configured. Run `openshield setup` first.")
+                } else {
+                    anyhow::anyhow!(
+                        "Model '{}' is not configured in any provider. Set `default_model` in \
+                         config.toml or pass --model with a configured model (see `openshield models`).",
+                        model_name
+                    )
+                }
+            })?;
 
         let provider = Provider::new(
             provider_name.clone(),
@@ -684,6 +704,49 @@ More text"#;
         };
         assert!(result.success);
         assert_eq!(result.message, "Done");
+    }
+
+    #[test]
+    fn test_agent_config_uses_configured_default_model() {
+        let app = Config {
+            default_model: "qwen-local".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            AgentConfig::from_app_config(&app, None).default_model,
+            "qwen-local"
+        );
+        assert_eq!(
+            AgentConfig::from_app_config(&app, Some("other")).default_model,
+            "other"
+        );
+        assert_eq!(
+            AgentConfig::from_app_config(&app, Some("  ")).default_model,
+            "qwen-local"
+        );
+    }
+
+    #[test]
+    fn test_agent_new_errors_for_unknown_model() {
+        let dir = std::env::temp_dir().join(format!("os-agent-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = Config {
+            memory_db_path: dir.join("m.db"),
+            ..Default::default()
+        };
+        let cfg = AgentConfig {
+            default_model: "definitely-not-configured".to_string(),
+            ..AgentConfig::default()
+        };
+        let err = Agent::new(cfg, &app).err().expect("should fail");
+        assert!(err.to_string().contains("definitely-not-configured"));
+
+        app.providers.clear();
+        let err = Agent::new(AgentConfig::default(), &app)
+            .err()
+            .expect("should fail");
+        assert!(err.to_string().contains("No providers configured"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
