@@ -49,11 +49,26 @@ pub struct Diagnostic {
 
 /// True if `command` resolves to an executable file on PATH.
 pub fn command_on_path(command: &str) -> bool {
-    if command.contains('/') {
-        return std::path::Path::new(command).is_file();
+    // On Windows executables carry an extension (sh.exe, npm.cmd, ...).
+    let candidates: Vec<String> = if cfg!(windows) {
+        std::iter::once(command.to_string())
+            .chain(
+                [".exe", ".cmd", ".bat", ".com"]
+                    .iter()
+                    .map(|ext| format!("{command}{ext}")),
+            )
+            .collect()
+    } else {
+        vec![command.to_string()]
+    };
+    if command.contains('/') || command.contains('\\') {
+        return candidates.iter().any(|c| std::path::Path::new(c).is_file());
     }
     std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(command).is_file()))
+        .map(|paths| {
+            std::env::split_paths(&paths)
+                .any(|dir| candidates.iter().any(|c| dir.join(c).is_file()))
+        })
         .unwrap_or(false)
 }
 
