@@ -74,6 +74,30 @@ pub struct Sandbox {
     session_approved: Arc<Mutex<Vec<String>>>,
 }
 
+/// Canonicalize a path that may not exist yet: resolve the longest existing
+/// ancestor (following symlinks such as macOS `/var` -> `/private/var` or
+/// `/tmp` -> `/private/tmp`) and re-append the missing tail.
+fn canonicalize_lenient(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    let mut tail = Vec::new();
+    let mut cur = path;
+    while let Some(parent) = cur.parent() {
+        if let Some(name) = cur.file_name() {
+            tail.push(name.to_os_string());
+        }
+        if let Ok(mut c) = parent.canonicalize() {
+            for part in tail.iter().rev() {
+                c.push(part);
+            }
+            return c;
+        }
+        cur = parent;
+    }
+    path.to_path_buf()
+}
+
 impl Sandbox {
     pub fn new(working_dir: Option<PathBuf>) -> Result<Self> {
         let wd = working_dir.map(|p| {
@@ -145,9 +169,9 @@ impl Sandbox {
             return true; // No restriction
         }
 
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = canonicalize_lenient(path);
         for allowed in &self.allowed_paths {
-            let allowed_canonical = allowed.canonicalize().unwrap_or_else(|_| allowed.clone());
+            let allowed_canonical = canonicalize_lenient(allowed);
             if canonical.starts_with(&allowed_canonical) {
                 return true;
             }
@@ -158,9 +182,8 @@ impl Sandbox {
     /// The system temp dir is always writable scratch space (OpenCode
     /// whitelists its tmp dir the same way).
     fn is_under_tmp(&self, path: &Path) -> bool {
-        let tmp = std::env::temp_dir();
-        let tmp_canonical = tmp.canonicalize().unwrap_or(tmp);
-        path.starts_with(&tmp_canonical)
+        let tmp_canonical = canonicalize_lenient(&std::env::temp_dir());
+        canonicalize_lenient(path).starts_with(&tmp_canonical)
     }
 
     /// Glob-style check against session-approved directory patterns.
@@ -199,7 +222,7 @@ impl Sandbox {
         }
         for path_str in extract_paths_from_args(args) {
             let path = PathBuf::from(&path_str);
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let canonical = canonicalize_lenient(&path);
             if self.is_allowed_internal(&canonical) {
                 continue;
             }
@@ -222,7 +245,7 @@ impl Sandbox {
                 || self.is_session_approved(canonical);
         }
         if let Some(ref wd) = self.working_dir {
-            let wd_canonical = wd.canonicalize().unwrap_or_else(|_| wd.clone());
+            let wd_canonical = canonicalize_lenient(wd);
             if canonical.starts_with(&wd_canonical) {
                 return true;
             }
@@ -263,7 +286,7 @@ impl Sandbox {
 
         for path_str in extract_paths_from_args(args) {
             let path = PathBuf::from(&path_str);
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let canonical = canonicalize_lenient(&path);
             if self.is_allowed_internal(&canonical) {
                 continue;
             }
