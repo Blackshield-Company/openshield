@@ -55,7 +55,8 @@ impl Tool for AndroidTool {
         let rest = parts.get(2).copied().unwrap_or("").trim();
 
         // Try HTTP API first, fall back to shell
-        let result = match category {
+
+        match category {
             "files" => handle_files(operation, rest),
             "sms" => handle_sms(operation, rest),
             "contacts" => handle_contacts(operation, rest),
@@ -70,17 +71,15 @@ impl Tool for AndroidTool {
             "device" => handle_device(operation),
             // UI automation goes to the accessibility service
             "ui" => handle_ui(operation, rest),
-            "tap" => handle_ui("tap", &format!("{} {}", operation, rest).trim()),
-            "swipe" => handle_ui("swipe", &format!("{} {}", operation, rest).trim()),
-            "click" => handle_ui("click", &format!("{} {}", operation, rest).trim()),
-            "input" => handle_ui("input", &format!("{} {}", operation, rest).trim()),
+            "tap" => handle_ui("tap", format!("{} {}", operation, rest).trim()),
+            "swipe" => handle_ui("swipe", format!("{} {}", operation, rest).trim()),
+            "click" => handle_ui("click", format!("{} {}", operation, rest).trim()),
+            "input" => handle_ui("input", format!("{} {}", operation, rest).trim()),
             "key" => handle_ui("key", operation),
             "tree" => handle_ui("tree", ""),
             "screenshot" => handle_ui("screenshot", ""),
             _ => Ok(format!("Unknown category: {}. {}", category, SELF_HELP)),
-        };
-
-        result
+        }
     }
 }
 
@@ -95,7 +94,7 @@ fn bridge_get(path: &str) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
-    let resp = client.get(&format!("{}{}", BRIDGE_URL, path)).send()?;
+    let resp = client.get(format!("{}{}", BRIDGE_URL, path)).send()?;
     if !resp.status().is_success() {
         anyhow::bail!("Bridge error: {}", resp.text().unwrap_or_default());
     }
@@ -107,7 +106,7 @@ fn bridge_post(path: &str, body: serde_json::Value) -> Result<String> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
     let resp = client
-        .post(&format!("{}{}", BRIDGE_URL, path))
+        .post(format!("{}{}", BRIDGE_URL, path))
         .json(&body)
         .send()?;
     if !resp.status().is_success() {
@@ -120,7 +119,7 @@ fn a11y_get(path: &str) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
-    let resp = client.get(&format!("{}{}", A11Y_URL, path)).send()?;
+    let resp = client.get(format!("{}{}", A11Y_URL, path)).send()?;
     if !resp.status().is_success() {
         anyhow::bail!(
             "Accessibility service error: {}",
@@ -135,7 +134,7 @@ fn a11y_post(path: &str, body: serde_json::Value) -> Result<String> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
     let resp = client
-        .post(&format!("{}{}", A11Y_URL, path))
+        .post(format!("{}{}", A11Y_URL, path))
         .json(&body)
         .send()?;
     if !resp.status().is_success() {

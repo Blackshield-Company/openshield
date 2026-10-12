@@ -62,7 +62,8 @@ fn messages_persist_across_reopen_in_order() {
     let (s, db) = store();
     s.create_session("s", "m", "chat").unwrap();
     s.save_message(&msg("s", "user", "first", 30)).unwrap();
-    s.save_message(&msg("s", "assistant", "second", 20)).unwrap();
+    s.save_message(&msg("s", "assistant", "second", 20))
+        .unwrap();
     s.save_message(&msg("s", "user", "third", 10)).unwrap();
     drop(s);
 
@@ -91,7 +92,11 @@ fn keyword_search_matches_substrings_newest_first_with_limit() {
     assert_eq!(hits[0].content, "SQLite WAL mode tuning", "newest first");
 
     assert_eq!(s.search_messages("sqlite", 1).unwrap().len(), 1);
-    assert!(s.search_messages("nonexistent-term", 10).unwrap().is_empty());
+    assert!(
+        s.search_messages("nonexistent-term", 10)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -139,7 +144,11 @@ fn tool_calls_are_scoped_to_session() {
     let (s, _) = store();
     s.create_session("a", "m", "coding").unwrap();
     s.create_session("b", "m", "coding").unwrap();
-    for (sid, tool, ok) in [("a", "fs", true), ("a", "git", false), ("b", "terminal", true)] {
+    for (sid, tool, ok) in [
+        ("a", "fs", true),
+        ("a", "git", false),
+        ("b", "terminal", true),
+    ] {
         s.save_tool_call(&ToolCall {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: sid.into(),

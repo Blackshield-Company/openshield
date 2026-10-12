@@ -99,6 +99,7 @@ impl StdioTransport {
 }
 
 #[async_trait]
+#[allow(clippy::double_must_use)]
 pub trait Transport: Send + Sync {
     async fn send_request(&mut self, request: &JsonRpcRequest) -> Result<String>;
     async fn send_notification(&mut self, notification: &JsonRpcRequest) -> Result<()>;

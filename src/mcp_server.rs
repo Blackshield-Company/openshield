@@ -266,6 +266,12 @@ impl McpServer {
     }
 }
 
+impl Default for McpServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,

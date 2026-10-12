@@ -379,10 +379,7 @@ pub(crate) fn build_inline_tool_render(tool_name: &str, args: &str) -> Option<In
 /// Extract (operation, path, old_content, new_content) from edit-tool args.
 /// Accepts both raw JSON arguments and the normalized mini-language
 /// ("write <path> <content>", "replace <path> <old> ||| <new>").
-fn parse_edit_args<'a>(
-    tool_name: &str,
-    args: &'a str,
-) -> Option<(&'static str, String, String, String)> {
+fn parse_edit_args(tool_name: &str, args: &str) -> Option<(&'static str, String, String, String)> {
     let trimmed = args.trim();
     if trimmed.starts_with('{') {
         parse_edit_args_json(tool_name, trimmed)
@@ -432,9 +429,9 @@ fn parse_edit_args_json(
     Some((op, path, old, new))
 }
 
-fn parse_edit_args_mini<'a>(
+fn parse_edit_args_mini(
     tool_name: &str,
-    args: &'a str,
+    args: &str,
 ) -> Option<(&'static str, String, String, String)> {
     let parts: Vec<&str> = args.splitn(2, ' ').collect();
     if parts.len() < 2 {
