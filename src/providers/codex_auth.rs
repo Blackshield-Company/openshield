@@ -132,6 +132,7 @@ async fn refresh_tokens(refresh_token: &str) -> Result<RefreshResponse> {
 /// Atomically write the auth file (temp file + rename), preserving mode 600.
 fn write_auth_file_atomic(auth: &CodexAuthFile) -> Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     let path = auth_path()?;
@@ -144,6 +145,7 @@ fn write_auth_file_atomic(auth: &CodexAuthFile) -> Result<()> {
             .with_context(|| format!("Failed to create {}", tmp_path.display()))?;
         f.write_all(serialized.as_bytes())?;
         f.sync_all().ok();
+        #[cfg(unix)]
         std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
     }
     std::fs::rename(&tmp_path, &path).with_context(|| {
