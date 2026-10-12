@@ -35,7 +35,48 @@ openshield setup    # Configure providers and models
 openshield          # Start TUI session
 ```
 
-Set one API key environment variable before starting: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, or `XAI_API_KEY`.
+For cloud models, set one API key environment variable before starting: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, or `XAI_API_KEY`. To run fully local with no API key, see [Local models (Ollama, llama.cpp)](#local-models-ollama-llamacpp).
+
+## Local models (Ollama, llama.cpp)
+
+OpenShield talks to any OpenAI-compatible server, so it can run fully local with no cloud API key. Ollama, llama.cpp `llama-server` and llama-swap all work.
+
+**Context size matters.** The system prompt alone is about 5k tokens, and Ollama defaults to a 4096-token context. Give the model at least 16k:
+
+```bash
+printf 'FROM qwen2.5:7b\nPARAMETER num_ctx 16384\n' > Modelfile   # or FROM /path/to/model.gguf
+ollama create qwen-local -f Modelfile
+```
+
+If the context is too small, OpenShield reports `Context window exceeded` and exits non-zero.
+
+In `~/.config/openshield/config.toml`, keep the generated non-provider sections, replace the `[providers.*]` tables, and set `default_model`:
+
+```toml
+default_model = "qwen-local"
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434/v1"
+api_key = "ollama"            # any non-empty dummy value; no env var needed
+
+[[providers.ollama.models]]
+name = "qwen-local"
+context_length = 32768
+cost_per_1k_input = 0.0
+cost_per_1k_output = 0.0
+capabilities = ["code", "chat"]
+```
+
+Then:
+
+```bash
+openshield models                   # qwen-local [default]
+openshield chat "What is 2+2?"
+openshield agent "summarize src/"   # uses default_model; override with --model
+openshield headless -m qwen-local "..."
+```
+
+For llama.cpp `llama-server` or llama-swap, use the same layout with `base_url = "http://127.0.0.1:8080/v1"`. The model names must match what the server serves. The built-in `local` provider written by `openshield setup` uses example model names (`local-35b-128k`, ...), so edit them to match your server. Very small models (under ~3B parameters) work for chat but often choose bad tools in agent mode.
 
 ## Commands
 
@@ -105,6 +146,12 @@ git clone https://github.com/Blackshield-Company/openshield
 cd openshield
 cargo build --release
 cargo test
+```
+
+The release profile uses fat LTO, and its link step can need more than 15 GB of RAM. On smaller machines, turn LTO off for a local build (the binary is slightly larger and slower; the shipped profile is unchanged):
+
+```bash
+CARGO_PROFILE_RELEASE_LTO=false cargo build --release -j4
 ```
 
 ## More
