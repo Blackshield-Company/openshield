@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2026-06-02
+## [1.1.0] - 2026-10-11
+
+### Release engineering
+
+- **Prebuilt binaries** — Release workflow builds Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64 archives on every `v*` tag, with per-asset `.sha256` files and an aggregate `SHA256SUMS`.
+- **Installer** — `install.sh` now installs from `Blackshield-Company/openshield`: downloads the release binary for your OS/arch, verifies the checksum, and falls back to `cargo install --git`. Supports `OPENSHIELD_VERSION`, `BIN_DIR`, `OPENSHIELD_FROM_SOURCE` and `DRY_RUN`.
+- **CI** — rustfmt, clippy (`-D warnings`), shellcheck and tests on Ubuntu, macOS and Windows.
+- **Tests** — Integration tests for the agent plan/execute/verify loop against a mocked OpenAI-compatible provider, the tool approval gate, and the SQLite memory store and search.
+- **SECURITY.md** — Vulnerability reporting policy.
+
+### Fixed
+
+- **License metadata** — README badge and `Cargo.toml` now say Apache-2.0, matching `LICENSE` (previously mislabelled MIT).
+- **Repository links** — README, `Cargo.toml` and the installer point at `Blackshield-Company/openshield`.
+
 
 ### Added
 
