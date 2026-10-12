@@ -56,6 +56,7 @@ fn allowed_oauth_url(url: &str) -> bool {
 
 fn write_auth_atomic(auth: &XaiAuthFile) -> Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     let path = auth_path()?;
@@ -65,6 +66,7 @@ fn write_auth_atomic(auth: &XaiAuthFile) -> Result<()> {
         let mut f = std::fs::File::create(&tmp_path)?;
         f.write_all(serialized.as_bytes())?;
         f.sync_all().ok();
+        #[cfg(unix)]
         std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
     }
     std::fs::rename(&tmp_path, &path).context("failed to write xai-auth.json")?;
