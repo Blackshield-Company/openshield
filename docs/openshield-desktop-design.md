@@ -2,7 +2,7 @@
 
 > The shield gets a face. ⚫🦞
 > Working title: **OpenShield Desktop** (GUI for the OpenShield CLI harness) + **OpenShield Pocket** (mobile companion).
-> Made by synth with Blackclaw.
+> Made by synth.
 
 Status: DESIGN — 2026-09-15
 Target: v0.1.0 "Pincer" release
