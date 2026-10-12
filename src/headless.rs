@@ -374,20 +374,20 @@ pub async fn run_headless(
 
     let duration = start.elapsed().as_secs();
 
-    if let Some(ref path) = config.output_file {
-        if let Err(e) = tokio::fs::write(path, &summary).await {
-            let msg = format!("⚠️ Failed to write output to {}: {}", path, e);
-            emit(
-                &event_tx,
-                HeadlessEvent::Error {
-                    message: msg.clone(),
-                    turn: turn + 1,
-                    timestamp: now(),
-                },
-            );
-            summary.push('\n');
-            summary.push_str(&msg);
-        }
+    if let Some(ref path) = config.output_file
+        && let Err(e) = tokio::fs::write(path, &summary).await
+    {
+        let msg = format!("⚠️ Failed to write output to {}: {}", path, e);
+        emit(
+            &event_tx,
+            HeadlessEvent::Error {
+                message: msg.clone(),
+                turn: turn + 1,
+                timestamp: now(),
+            },
+        );
+        summary.push('\n');
+        summary.push_str(&msg);
     }
 
     emit(

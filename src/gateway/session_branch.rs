@@ -103,6 +103,12 @@ impl BranchRegistry {
     }
 }
 
+impl Default for BranchRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Lightweight branch metadata for listing.
 #[derive(Debug, Clone)]
 pub struct BranchInfo {

@@ -125,15 +125,15 @@ fn validate_test_path(path: &str) -> Result<()> {
     }
 
     // Warn if the path is the home directory itself — almost never intentional
-    if let Some(home) = dirs::home_dir() {
-        if canonical == home {
-            anyhow::bail!(
-                "Refusing to run tests from home directory ({}). \
+    if let Some(home) = dirs::home_dir()
+        && canonical == home
+    {
+        anyhow::bail!(
+            "Refusing to run tests from home directory ({}). \
                  This would recursively execute every test file on your system. \
                  cd into a project directory or set working_directory in config.",
-                home.display()
-            );
-        }
+            home.display()
+        );
     }
 
     Ok(())
@@ -334,7 +334,7 @@ pub struct TestFailure {
 
 /// Parse test output into a structured result set.
 /// Supports cargo test, pytest, jest, and go test output formats.
-pub fn parse_test_output(raw: &str, framework: &TestFramework) -> TestResultSet {
+pub(crate) fn parse_test_output(raw: &str, framework: &TestFramework) -> TestResultSet {
     let framework_name = match framework {
         TestFramework::Cargo => "cargo",
         TestFramework::Jest => "jest",
@@ -664,8 +664,12 @@ mod tests {
 
     #[test]
     fn test_validate_allows_project_dir() {
-        // Use a path under /home/synth so it doesn't hit the /tmp block
-        let dir = format!("/home/synth/.tmp_testrunner_{}", std::process::id());
+        // Use a path under the real home dir so it doesn't hit the /tmp block
+        let dir = dirs::home_dir()
+            .expect("home dir")
+            .join(format!(".tmp_testrunner_{}", std::process::id()))
+            .to_string_lossy()
+            .to_string();
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(format!("{}/Cargo.toml", dir), "[package]\nname = \"test\"").unwrap();

@@ -278,7 +278,7 @@ impl ReviewReport {
     pub fn format(&self) -> String {
         let mut lines = vec![
             format!("🛡️  Guardian Review: {}", self.target),
-            format!("{}", "═".repeat(50)),
+            "═".repeat(50).to_string(),
             self.summary.clone(),
             String::new(),
         ];

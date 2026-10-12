@@ -826,9 +826,9 @@ mod tests {
 
     #[test]
     fn ansi_escapes_are_stripped_before_slicing() {
-        let lines = vec![format!(
-            "\x1b[38;2;193;18;31m中 OpenShield\x1b[0m \x1b[38;2;138;143;152m\x1b[0m"
-        )];
+        let lines = vec![
+            "\x1b[38;2;193;18;31m中 OpenShield\x1b[0m \x1b[38;2;138;143;152m\x1b[0m".to_string(),
+        ];
         // Full-width drag: entire visible text, no escape bytes.
         let text = extract_rectangular_text(&lines, 1, 0, 120, 0, 1);
         assert_eq!(text, "中 OpenShield ");

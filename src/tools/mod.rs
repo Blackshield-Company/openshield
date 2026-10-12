@@ -39,6 +39,7 @@ pub trait Tool: Send + Sync {
 
 /// Async tool trait for tools that need async I/O (LSP, network, etc.)
 #[async_trait::async_trait]
+#[allow(clippy::double_must_use)]
 pub trait AsyncTool: Send + Sync {
     fn name(&self) -> &str;
     #[allow(dead_code)]
@@ -1253,7 +1254,7 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
             }
         }
         // Agentic capabilities
-        "moa" => get_str("task").map(|task| task),
+        "moa" => get_str("task"),
         "delegation" => {
             if let (Some(agent), Some(task)) = (get_str("agent"), get_str("task")) {
                 Some(format!("{} {}", agent, task))
@@ -1261,7 +1262,7 @@ pub fn normalize_tool_args(tool_name: &str, args: &str) -> String {
                 None
             }
         }
-        "clarify" => get_str("question").map(|question| question),
+        "clarify" => get_str("question"),
         // Execution capabilities
         "code_execution" => (|| {
             // Emit bare code only — the tool is python3-only and treats the whole
@@ -1387,7 +1388,9 @@ mod normalize_tests {
         assert!(tool_output_indicates_failure(
             "String not found in /tmp/x. Use 'edit read' to see exact content."
         ));
-        assert!(tool_output_indicates_failure("Tool 'terminal' timed out after 120s") == false); // doesn't start with a known prefix — acceptable
+        assert!(!tool_output_indicates_failure(
+            "Tool 'terminal' timed out after 120s"
+        )); // doesn't start with a known prefix — acceptable
     }
 
     #[test]

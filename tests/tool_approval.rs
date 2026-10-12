@@ -5,10 +5,21 @@ use openshield::security::{
 };
 
 fn engine_with(f: impl FnOnce(&mut SecurityConfig)) -> SecurityEngine {
-    let mut cfg = SecurityConfig::default();
-    cfg.working_directory = Some(std::env::current_dir().unwrap());
+    let mut cfg = SecurityConfig {
+        working_directory: Some(std::env::current_dir().unwrap()),
+        ..SecurityConfig::default()
+    };
     f(&mut cfg);
     SecurityEngine::new(cfg).unwrap()
+}
+
+/// An absolute path inside the working directory (the sandbox allows it).
+fn inside(rel: &str) -> String {
+    std::env::current_dir()
+        .unwrap()
+        .join(rel)
+        .to_string_lossy()
+        .to_string()
 }
 
 fn engine() -> SecurityEngine {
@@ -65,10 +76,14 @@ fn sudo_is_never_auto_approved() {
 #[test]
 fn destructive_command_needs_approval_unless_yolo() {
     let e = engine();
-    let d = e.check_tool_call_with_mode("terminal", "rm -rf ./build", false, false);
+    let cmd = format!("rm -rf {}", inside("target/scratch-build"));
+    let d = e.check_tool_call_with_mode("terminal", &cmd, false, false);
     assert!(!is_allow(&d), "{d:?}");
-    let d = e.check_tool_call_with_mode("terminal", "rm -rf ./build", false, true);
-    assert!(is_allow(&d), "yolo auto-approves non-sudo, non-sensitive: {d:?}");
+    let d = e.check_tool_call_with_mode("terminal", &cmd, false, true);
+    assert!(
+        is_allow(&d),
+        "yolo auto-approves non-sudo, non-sensitive: {d:?}"
+    );
 }
 
 #[test]
@@ -83,7 +98,7 @@ fn risk_threshold_controls_auto_approval() {
     // With the threshold at None, any risky-ish call must ask.
     let strict = engine_with(|c| c.auto_approve_risk_level = RiskLevel::None);
     let lenient = engine_with(|c| c.auto_approve_risk_level = RiskLevel::Critical);
-    let call = ("git", "push origin main");
+    let call = ("terminal", "git push origin main");
     let s = strict.check_tool_call_with_mode(call.0, call.1, false, false);
     let l = lenient.check_tool_call_with_mode(call.0, call.1, false, false);
     assert!(is_ask(&s), "{s:?}");
@@ -96,12 +111,12 @@ fn risk_threshold_controls_auto_approval() {
 #[test]
 fn engine_mode_flags_feed_check_tool_call() {
     let e = engine();
-    let cmd = "rm -rf ./build";
-    assert!(!is_allow(&e.check_tool_call("terminal", cmd)));
+    let cmd = format!("rm -rf {}", inside("target/scratch-build"));
+    assert!(!is_allow(&e.check_tool_call("terminal", &cmd)));
     e.set_yolo_mode(true);
-    assert!(is_allow(&e.check_tool_call("terminal", cmd)));
+    assert!(is_allow(&e.check_tool_call("terminal", &cmd)));
     e.set_yolo_mode(false);
-    assert!(!is_allow(&e.check_tool_call("terminal", cmd)));
+    assert!(!is_allow(&e.check_tool_call("terminal", &cmd)));
 }
 
 #[test]
@@ -116,6 +131,12 @@ fn audit_log_records_decisions() {
 #[test]
 fn output_secrets_are_redacted() {
     let e = engine();
-    let out = e.sanitize_output("terminal", "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789");
-    assert!(!out.contains("sk-abcdefghijklmnopqrstuvwxyz0123456789"), "{out}");
+    let out = e.sanitize_output(
+        "terminal",
+        "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789",
+    );
+    assert!(
+        !out.contains("sk-abcdefghijklmnopqrstuvwxyz0123456789"),
+        "{out}"
+    );
 }

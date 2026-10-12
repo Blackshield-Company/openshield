@@ -1085,8 +1085,6 @@ impl App {
         let _ = self.memory.save_message(&memory_msg);
     }
 
-    /// Prevent unbounded RAM growth by truncating old chat messages.
-
     /// (message_count, approx_tokens) for the current session, from memory.
     fn session_usage(&self) -> (usize, usize) {
         let msgs = self
@@ -2350,23 +2348,23 @@ async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.add_system_message("📋 Copy mode cancelled".to_string());
             }
             KeyCode::Enter => {
-                if let Some(idx) = app.copy_selected_idx {
-                    if let Some(msg) = app.messages.get(idx) {
-                        let text = if msg.content.starts_with("<think>") {
-                            strip_think_tags(&msg.content)
-                        } else {
-                            msg.content.clone()
-                        };
-                        let text_len = text.len();
-                        use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-                        let b64 = BASE64.encode(text.as_bytes());
-                        print!("\x1b]52;c;{}\x07", b64);
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
-                        app.add_system_message(format!(
-                            "📋 Copied {} message ({} chars)",
-                            msg.role, text_len
-                        ));
-                    }
+                if let Some(idx) = app.copy_selected_idx
+                    && let Some(msg) = app.messages.get(idx)
+                {
+                    let text = if msg.content.starts_with("<think>") {
+                        strip_think_tags(&msg.content)
+                    } else {
+                        msg.content.clone()
+                    };
+                    let text_len = text.len();
+                    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+                    let b64 = BASE64.encode(text.as_bytes());
+                    print!("\x1b]52;c;{}\x07", b64);
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    app.add_system_message(format!(
+                        "📋 Copied {} message ({} chars)",
+                        msg.role, text_len
+                    ));
                 }
                 app.mode = AppMode::Normal;
                 app.copy_selected_idx = None;
@@ -4402,6 +4400,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
 /// Extract thinking content from a streaming chunk.
 /// Returns (Option<reasoning_text>, remaining_content).
 /// Handles partial <think> tags across chunk boundaries.
+#[allow(clippy::too_many_arguments)]
 async fn execute_tool_chain(
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
     provider: &Provider,
@@ -5037,7 +5036,8 @@ async fn stream_model_response_task(
             let tx2 = tx_for_blocking.clone();
 
             let local = tokio::task::LocalSet::new();
-            let result = local
+
+            local
                 .run_until(async {
                     let forwarder = tokio::task::spawn_local(async move {
                         let mut final_content = String::new();
@@ -5111,8 +5111,7 @@ async fn stream_model_response_task(
                     let (run_result, _forwarder_result) = tokio::join!(run, forwarder);
                     run_result.map(|_| ())
                 })
-                .await;
-            result
+                .await
         })
     });
 
@@ -6044,7 +6043,7 @@ async fn handle_slash_result(
         }
         SlashResult::ShowSoul => {
             let persona = app.persona_registry.active();
-            let lines = vec![
+            let lines = [
                 format!("{} **{}**", persona.emoji, persona.display_name),
                 format!("_{}_", persona.tagline),
                 String::new(),

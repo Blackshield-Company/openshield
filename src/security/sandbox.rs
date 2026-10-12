@@ -204,11 +204,11 @@ impl Sandbox {
                 continue;
             }
             let glob = Self::dir_glob(&canonical);
-            if let Ok(mut approved) = self.session_approved.lock() {
-                if !approved.contains(&glob) {
-                    info!("Session-approved external path: {}", glob);
-                    approved.push(glob);
-                }
+            if let Ok(mut approved) = self.session_approved.lock()
+                && !approved.contains(&glob)
+            {
+                info!("Session-approved external path: {}", glob);
+                approved.push(glob);
             }
         }
     }
@@ -300,6 +300,7 @@ impl Sandbox {
     /// Validate that a tool's arguments stay within the sandbox.
     /// Legacy hard-gate wrapper around evaluate(): Ask and Deny both
     /// surface as Err; prefer evaluate() for the OpenCode-parity flow.
+    #[allow(dead_code)]
     pub fn validate_path(&self, tool_name: &str, args: &str) -> Result<(), String> {
         match self.evaluate(tool_name, args) {
             SandboxVerdict::Allow => Ok(()),

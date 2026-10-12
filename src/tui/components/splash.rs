@@ -107,7 +107,7 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
 
         let side_fits = sprite.is_some()
             && sprite_height <= banner_height
-            && band_min_start >= sprite_width + SPRITE_GAP as usize + 1;
+            && band_min_start > sprite_width + SPRITE_GAP as usize;
 
         // Pass 2: stacked fallback on tall, narrow terminals — the banner
         // group shifts down to make room for the sprite above it.
@@ -333,8 +333,8 @@ mod tests {
              sprite_height={sprite_height} sprite_width={sprite_width}"
         );
 
-        let side_fits = sprite_height <= banner_height
-            && band_min_start >= sprite_width + SPRITE_GAP as usize + 1;
+        let side_fits =
+            sprite_height <= banner_height && band_min_start > sprite_width + SPRITE_GAP as usize;
         assert!(
             side_fits,
             "sprite must fit beside the banner at 200 cols \

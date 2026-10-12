@@ -577,7 +577,7 @@ impl SwarmEngine {
         *self.running.write().await = false;
 
         // Set all agents to idle
-        for (_, agent) in self.agents.write().await.iter_mut() {
+        for agent in self.agents.write().await.values_mut() {
             agent.status = AgentStatus::Idle;
         }
 

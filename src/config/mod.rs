@@ -437,7 +437,7 @@ impl Config {
 
     /// Resolve env vars and env files for provider API keys and gateway tokens.
     fn resolve_env_keys(&mut self) -> Result<()> {
-        for (_name, provider) in self.providers.iter_mut() {
+        for provider in self.providers.values_mut() {
             // If api_key looks like ${VAR}, resolve from env
             if provider.api_key.starts_with("${") && provider.api_key.ends_with("}") {
                 let var_name = &provider.api_key[2..provider.api_key.len() - 1];
@@ -470,7 +470,7 @@ impl Config {
                                 provider.api_key = val.to_string();
                             }
                             // Also insert into headers if they reference env vars
-                            for (_hkey, hval) in provider.headers.iter_mut() {
+                            for hval in provider.headers.values_mut() {
                                 if hval == &format!("${{{}}}", key) {
                                     *hval = val.to_string();
                                 }
@@ -928,8 +928,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openshield-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut cfg = Config::default();
-        cfg.memory_db_path = std::path::PathBuf::from("./openshield/memory.db");
+        let cfg = Config {
+            memory_db_path: std::path::PathBuf::from("./openshield/memory.db"),
+            ..Config::default()
+        };
         let content = toml::to_string_pretty(&cfg).unwrap();
         std::fs::write(dir.join("config.toml"), content).unwrap();
         let config = Config::load_from_dir(&dir).unwrap();
@@ -946,8 +948,10 @@ mod tests {
             std::env::temp_dir().join(format!("openshield-test-tilde-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut cfg = Config::default();
-        cfg.memory_db_path = std::path::PathBuf::from("~/openshield-test-memory.db");
+        let cfg = Config {
+            memory_db_path: std::path::PathBuf::from("~/openshield-test-memory.db"),
+            ..Config::default()
+        };
         let content = toml::to_string_pretty(&cfg).unwrap();
         std::fs::write(dir.join("config.toml"), content).unwrap();
         let config = Config::load_from_dir(&dir).unwrap();

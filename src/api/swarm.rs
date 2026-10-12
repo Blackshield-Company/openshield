@@ -3,15 +3,13 @@
 //! Gives the desktop/pocket GUI a read view of the swarm engine plus
 //! start/stop control, without touching the TUI or headless paths:
 //!
-//! - `GET  /api/v1/swarm`        — engine state, agents, consensus doc,
-//!                                 last event. Always 200: with no swarm
-//!                                 active it returns a valid offline state
-//!                                 (`running: false`, empty arrays) instead
-//!                                 of 404/500, so the GUI can render a
-//!                                 disabled panel without special-casing.
-//! - `POST /api/v1/swarm/start`  — idempotent start; creates an engine from
-//!                                 `[swarm]` config on first use (optional
-//!                                 JSON body: `{seed, roles, max_agents}`).
+//! - `GET  /api/v1/swarm` — engine state, agents, consensus doc, last
+//!   event. Always 200: with no swarm active it returns a valid offline
+//!   state (`running: false`, empty arrays) instead of 404/500, so the GUI
+//!   can render a disabled panel without special-casing.
+//! - `POST /api/v1/swarm/start` — idempotent start; creates an engine from
+//!   `[swarm]` config on first use (optional JSON body:
+//!   `{seed, roles, max_agents}`).
 //! - `POST /api/v1/swarm/stop`   — idempotent stop.
 //!
 //! Both POSTs return `{success, state, message}`; failures are structured
