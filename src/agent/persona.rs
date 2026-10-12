@@ -14,6 +14,7 @@ pub struct Persona {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentVoice {
+    #[allow(dead_code)]
     Warm,
     Direct,
     Measured,
@@ -193,10 +194,12 @@ mod tests {
 
     #[test]
     fn test_custom_identity_becomes_default() {
-        let mut identity = crate::config::AgentIdentity::default();
-        identity.name = "testclaw".to_string();
-        identity.display_name = "TestClaw".to_string();
-        identity.emoji = "🧪".to_string();
+        let identity = crate::config::AgentIdentity {
+            name: "testclaw".to_string(),
+            display_name: "TestClaw".to_string(),
+            emoji: "🧪".to_string(),
+            ..Default::default()
+        };
         let mut registry = PersonaRegistry::new(&identity);
         assert_eq!(registry.active().name, "testclaw");
         // Stock openshield remains available as an alternate

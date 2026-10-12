@@ -135,7 +135,10 @@ async fn failed_verification_retries_then_escalates() {
     assert!(!result.success);
     assert_eq!(result.step_results.len(), 1);
     assert!(!result.step_results[0].verified);
-    assert_eq!(result.step_results[0].iterations, 3, "retries up to 3 times");
+    assert_eq!(
+        result.step_results[0].iterations, 3,
+        "retries up to 3 times"
+    );
     assert_eq!(result.total_iterations, 3);
     // Plan request + escalation request.
     assert_eq!(mock.request_count(), 2);
@@ -170,8 +173,7 @@ async fn max_iterations_stops_the_loop() {
 async fn unknown_tool_in_plan_is_an_error() {
     isolate_home();
     let dir = scratch_dir("agent-unknown");
-    let mock =
-        MockProvider::start(vec![plan_json(&[("definitely_not_a_tool", "x", "y")])]).await;
+    let mock = MockProvider::start(vec![plan_json(&[("definitely_not_a_tool", "x", "y")])]).await;
     let agent = Agent::new(agent_config(), &config_for(&mock, dir.join("mem.db"))).unwrap();
     let err = agent.run_task("do something").await.unwrap_err();
     let msg = format!("{err:#}");
@@ -203,7 +205,12 @@ async fn verify_step_rejects_negative_output() {
         expected_result: "file contents".into(),
         verification_criteria: String::new(),
     };
-    assert!(agent.verify_step(&step, "file contents here").await.unwrap());
+    assert!(
+        agent
+            .verify_step(&step, "file contents here")
+            .await
+            .unwrap()
+    );
     assert!(!agent.verify_step(&step, "Permission denied").await.unwrap());
     assert!(!agent.verify_step(&step, "Error: not found").await.unwrap());
     let empty = PlanStep {

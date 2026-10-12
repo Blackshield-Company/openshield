@@ -9,12 +9,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 static ISOLATE: Once = Once::new();
+// Plain counter, not a UUID: the PII scanner flags UUIDs in tool args.
+static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Point HOME / XDG dirs at a throwaway directory so tests never read or
 /// write the developer's real OpenShield config, cache or memory DB.
 pub fn isolate_home() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("openshield-test-home");
     ISOLATE.call_once(|| {
+        // Start clean: the provider response cache lives here, and stale
+        // cached replies from a previous run would bypass the mock server.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // SAFETY: called once, before any test spawns threads that read env.
         unsafe {
@@ -31,8 +36,10 @@ pub fn isolate_home() -> PathBuf {
 /// A unique scratch directory inside the cargo target dir (which lives under
 /// the crate root, so it is inside the sandbox's working directory).
 pub fn scratch_dir(name: &str) -> PathBuf {
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("{name}-{}", uuid::Uuid::new_v4()));
+        .join(format!("{name}-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

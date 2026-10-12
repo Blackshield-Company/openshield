@@ -872,13 +872,13 @@ impl HarnessEngine {
         prompt.push_str("You can then use that result to formulate your final response.\n");
 
         // Add triggered skills
-        if self.config.skills_enabled {
-            if let Some(ref registry) = self.skill_registry {
-                let triggered = registry.find_triggered(user_message);
-                if !triggered.is_empty() {
-                    let skills_prompt = format_skills_prompt(&triggered);
-                    prompt.push_str(&skills_prompt);
-                }
+        if self.config.skills_enabled
+            && let Some(ref registry) = self.skill_registry
+        {
+            let triggered = registry.find_triggered(user_message);
+            if !triggered.is_empty() {
+                let skills_prompt = format_skills_prompt(&triggered);
+                prompt.push_str(&skills_prompt);
             }
         }
 

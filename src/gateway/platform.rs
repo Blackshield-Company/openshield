@@ -69,6 +69,7 @@ impl std::fmt::Display for Platform {
 
 /// Trait for platform gateways.
 #[async_trait::async_trait]
+#[allow(clippy::double_must_use)]
 #[allow(dead_code)]
 pub trait Gateway: Send + Sync {
     /// Platform identifier.
