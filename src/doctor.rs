@@ -142,6 +142,12 @@ impl DoctorReport {
     }
 }
 
+impl Default for DoctorReport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Run all health checks and return a report.
 pub async fn run_checks(auto_fix: bool) -> Result<DoctorReport> {
     let mut report = DoctorReport::new();

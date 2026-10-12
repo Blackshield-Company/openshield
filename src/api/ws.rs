@@ -372,11 +372,10 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                                     }
                                 }
                                 ev = approval_events.recv() => {
-                                    if let Ok(ev) = ev {
-                                        if send_json(&mut socket, &ev).await.is_err() {
+                                    if let Ok(ev) = ev
+                                        && send_json(&mut socket, &ev).await.is_err() {
                                             break 'turn;
                                         }
-                                    }
                                 }
                             }
                         }
@@ -397,11 +396,10 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
             ev = approval_events.recv() => {
                 // Approval events broadcast while this client is idle
                 // (between turns). Mid-turn forwarding happens above.
-                if let Ok(ev) = ev {
-                    if send_json(&mut socket, &ev).await.is_err() {
+                if let Ok(ev) = ev
+                    && send_json(&mut socket, &ev).await.is_err() {
                         break 'conn;
                     }
-                }
             }
         }
     }

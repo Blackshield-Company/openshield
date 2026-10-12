@@ -77,7 +77,7 @@ impl LspManager {
     }
 
     /// Get an existing server for `language_id` or spawn + initialize a new one.
-    pub async fn get_or_create_server(
+    pub(crate) async fn get_or_create_server(
         &self,
         language_id: &str,
         lsp_cmd: &str,
