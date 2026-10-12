@@ -1,6 +1,6 @@
 use super::Tool;
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Maximum output size in bytes before truncation (128KB).
@@ -10,18 +10,23 @@ const MAX_OUTPUT_LINES: usize = 2000;
 /// Paths that should never be treated as project roots for test discovery.
 /// System dirs are static; the home-relative entries are derived from the
 /// ACTUAL home directory (not hardcoded) so the guard works for any user.
-fn blocked_path_prefixes() -> Vec<String> {
-    let mut prefixes: Vec<String> = ["/usr", "/var", "/tmp", "/etc", "/opt"]
+fn blocked_path_prefixes() -> Vec<PathBuf> {
+    let mut prefixes: Vec<PathBuf> = ["/usr", "/var", "/tmp", "/etc", "/opt"]
         .iter()
-        .map(|s| s.to_string())
+        .map(PathBuf::from)
         .collect();
     if let Some(home) = dirs::home_dir() {
-        let home = home.to_string_lossy().to_string();
         for sub in [".cargo", ".cache", ".local/share", ".rustup"] {
-            prefixes.push(format!("{}/{}", home, sub));
+            prefixes.push(home.join(sub));
         }
     }
     prefixes
+}
+
+/// Canonicalize when possible so prefixes compare in the same form as the
+/// canonicalized test path (`\\?\C:\...` on Windows, `/private/var` on macOS).
+fn canonical_or_self(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 pub struct TestTool;
@@ -110,23 +115,21 @@ fn validate_test_path(path: &str) -> Result<()> {
     let canonical = std::fs::canonicalize(path)
         .with_context(|| format!("Cannot resolve test path: {}", path))?;
 
-    let canonical_str = canonical.to_string_lossy();
-
     for blocked in blocked_path_prefixes() {
-        if canonical_str.starts_with(blocked.as_str()) {
+        if canonical.starts_with(&blocked) || canonical.starts_with(canonical_or_self(&blocked)) {
             anyhow::bail!(
                 "Path '{}' is in a blocked directory ({}). \
                  These directories contain system/package files, not project tests. \
                  Run OpenShield from your project directory or set working_directory in config.",
                 path,
-                blocked
+                blocked.display()
             );
         }
     }
 
     // Warn if the path is the home directory itself — almost never intentional
     if let Some(home) = dirs::home_dir()
-        && canonical == home
+        && (canonical == home || canonical == canonical_or_self(&home))
     {
         anyhow::bail!(
             "Refusing to run tests from home directory ({}). \
