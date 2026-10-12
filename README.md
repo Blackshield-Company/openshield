@@ -4,8 +4,9 @@ AI coding agent in your terminal. Rust. Open source. Blackshield by default.
 
 ![OpenShield](openshield.png)
 
-[![Version](https://img.shields.io/badge/version-1.1.0-C1121F)](https://github.com/synthalorian/openshield)
-[![License](https://img.shields.io/badge/license-MIT-8A8F98)](LICENSE)
+[![Version](https://img.shields.io/github/v/release/Blackshield-Company/openshield?color=C1121F&label=version)](https://github.com/Blackshield-Company/openshield/releases)
+[![CI](https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml/badge.svg)](https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-8A8F98)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.91%2B-C9A227)](https://rust-lang.org)
 
 ## What It Does
@@ -18,10 +19,14 @@ AI coding agent in your terminal. Rust. Open source. Blackshield by default.
 ## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/synthalorian/openshield/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Blackshield-Company/openshield/main/install.sh | bash
 ```
 
-Requires Rust (installs via rustup if missing). Binary goes to `~/.local/bin/openshield`.
+Downloads the prebuilt binary for your platform (Linux x86_64/aarch64, macOS x86_64/arm64) from [GitHub Releases](https://github.com/Blackshield-Company/openshield/releases), verifies its SHA-256 checksum, and installs it to `~/.local/bin/openshield`. If no prebuilt binary matches, it falls back to `cargo install --git`.
+
+Options: `OPENSHIELD_VERSION=v1.1.0` pins a release, `BIN_DIR=/path` changes the install directory, `OPENSHIELD_FROM_SOURCE=1` forces a source build, `DRY_RUN=1` prints the plan without installing.
+
+Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source anywhere: `cargo install --git https://github.com/Blackshield-Company/openshield --locked`.
 
 ## First Run
 
@@ -96,7 +101,7 @@ capabilities = ["code", "chat", "analysis"]
 ## Development
 
 ```bash
-git clone https://github.com/synthalorian/openshield
+git clone https://github.com/Blackshield-Company/openshield
 cd openshield
 cargo build --release
 cargo test
@@ -110,7 +115,9 @@ cargo test
 
 ## License
 
-MIT
+Apache License 2.0. See [LICENSE](LICENSE).
+
+Security issues: see [SECURITY.md](SECURITY.md).
 
 ---
 

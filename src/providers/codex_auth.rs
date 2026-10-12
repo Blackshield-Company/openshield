@@ -70,10 +70,13 @@ fn auth_path() -> Result<PathBuf> {
 
 fn load_auth_file() -> Result<CodexAuthFile> {
     let path = auth_path()?;
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read {} (is the Codex CLI logged in?)", path.display()))?;
-    serde_json::from_str(&raw)
-        .with_context(|| format!("Failed to parse {}", path.display()))
+    let raw = std::fs::read_to_string(&path).with_context(|| {
+        format!(
+            "Failed to read {} (is the Codex CLI logged in?)",
+            path.display()
+        )
+    })?;
+    serde_json::from_str(&raw).with_context(|| format!("Failed to parse {}", path.display()))
 }
 
 /// Decode the JWT payload (middle segment, base64url, no signature check)
@@ -143,8 +146,13 @@ fn write_auth_file_atomic(auth: &CodexAuthFile) -> Result<()> {
         f.sync_all().ok();
         std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
     }
-    std::fs::rename(&tmp_path, &path)
-        .with_context(|| format!("Failed to rename {} -> {}", tmp_path.display(), path.display()))?;
+    std::fs::rename(&tmp_path, &path).with_context(|| {
+        format!(
+            "Failed to rename {} -> {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
     Ok(())
 }
 

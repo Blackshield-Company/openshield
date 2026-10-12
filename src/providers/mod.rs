@@ -579,8 +579,7 @@ impl Provider {
                 for m in request.messages.iter().filter(|m| m.role != "system") {
                     match m.role.as_str() {
                         "user" => {
-                            let mut parts =
-                                vec![json!({"type": "input_text", "text": m.content})];
+                            let mut parts = vec![json!({"type": "input_text", "text": m.content})];
                             if let Some(ref images) = m.images {
                                 for img in images {
                                     parts.push(json!({
@@ -804,8 +803,7 @@ impl Provider {
                     for item in items {
                         match item.get("type").and_then(|t| t.as_str()) {
                             Some("message") => {
-                                if let Some(parts) =
-                                    item.get("content").and_then(|c| c.as_array())
+                                if let Some(parts) = item.get("content").and_then(|c| c.as_array())
                                 {
                                     for part in parts {
                                         if part.get("type").and_then(|t| t.as_str())
@@ -1240,44 +1238,31 @@ impl Provider {
                     request_builder = request_builder.header("x-api-key", &api_key);
                     request_builder = request_builder.header("anthropic-version", "2023-06-01");
                 }
-                ProviderKind::OpenAiCodex => {
-                    match codex_auth::ensure_fresh(false).await {
-                        Ok(creds) => {
-                            request_builder = request_builder
-                                .header(
-                                    "Authorization",
-                                    format!("Bearer {}", creds.access_token),
-                                )
-                                .header("chatgpt-account-id", &creds.account_id)
-                                .header("OpenAI-Beta", "responses=experimental")
-                                .header("originator", "codex_cli_rs")
-                                .header("Accept", "text/event-stream")
-                                .header("session_id", codex_auth::session_id());
-                        }
-                        Err(e) => {
-                            let _ = tx.send(StreamChunk::Content(format!(
-                                "[codex auth error: {}]",
-                                e
-                            )));
-                            return;
-                        }
+                ProviderKind::OpenAiCodex => match codex_auth::ensure_fresh(false).await {
+                    Ok(creds) => {
+                        request_builder = request_builder
+                            .header("Authorization", format!("Bearer {}", creds.access_token))
+                            .header("chatgpt-account-id", &creds.account_id)
+                            .header("OpenAI-Beta", "responses=experimental")
+                            .header("originator", "codex_cli_rs")
+                            .header("Accept", "text/event-stream")
+                            .header("session_id", codex_auth::session_id());
                     }
-                }
-                ProviderKind::XaiOauth => {
-                    match xai_auth::ensure_fresh(false).await {
-                        Ok(token) => {
-                            request_builder = request_builder
-                                .header("Authorization", format!("Bearer {token}"));
-                        }
-                        Err(e) => {
-                            let _ = tx.send(StreamChunk::Content(format!(
-                                "[xai auth error: {}]",
-                                e
-                            )));
-                            return;
-                        }
+                    Err(e) => {
+                        let _ = tx.send(StreamChunk::Content(format!("[codex auth error: {}]", e)));
+                        return;
                     }
-                }
+                },
+                ProviderKind::XaiOauth => match xai_auth::ensure_fresh(false).await {
+                    Ok(token) => {
+                        request_builder =
+                            request_builder.header("Authorization", format!("Bearer {token}"));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(StreamChunk::Content(format!("[xai auth error: {}]", e)));
+                        return;
+                    }
+                },
             }
             for (key, val) in &headers {
                 request_builder = request_builder.header(key, val);
@@ -1524,10 +1509,8 @@ impl Provider {
                                 ProviderKind::OpenAiCodex => {
                                     // Responses API SSE: event kind is in the
                                     // JSON "type" field of each data payload.
-                                    let event_type = event
-                                        .get("type")
-                                        .and_then(|t| t.as_str())
-                                        .unwrap_or("");
+                                    let event_type =
+                                        event.get("type").and_then(|t| t.as_str()).unwrap_or("");
                                     match event_type {
                                         "response.output_text.delta" => {
                                             if let Some(d) =
@@ -1537,9 +1520,8 @@ impl Provider {
                                                 if first_token_time.is_none() {
                                                     first_token_time = Some(Instant::now());
                                                 }
-                                                let _ = tx.send(StreamChunk::Content(
-                                                    d.to_string(),
-                                                ));
+                                                let _ =
+                                                    tx.send(StreamChunk::Content(d.to_string()));
                                             }
                                         }
                                         "response.reasoning_summary_text.delta" => {
@@ -1547,9 +1529,8 @@ impl Provider {
                                                 event.get("delta").and_then(|d| d.as_str())
                                                 && !d.is_empty()
                                             {
-                                                let _ = tx.send(StreamChunk::Reasoning(
-                                                    d.to_string(),
-                                                ));
+                                                let _ =
+                                                    tx.send(StreamChunk::Reasoning(d.to_string()));
                                             }
                                         }
                                         "response.output_item.done" => {
@@ -1583,9 +1564,8 @@ impl Provider {
                                             }
                                         }
                                         "response.completed" => {
-                                            let _ = tx.send(StreamChunk::Finish(
-                                                "stop".to_string(),
-                                            ));
+                                            let _ =
+                                                tx.send(StreamChunk::Finish("stop".to_string()));
                                         }
                                         "response.failed" | "error" => {
                                             let msg = event
@@ -1600,18 +1580,15 @@ impl Provider {
                                                         .and_then(|m| m.as_str())
                                                 })
                                                 .or_else(|| {
-                                                    event
-                                                        .get("message")
-                                                        .and_then(|m| m.as_str())
+                                                    event.get("message").and_then(|m| m.as_str())
                                                 })
                                                 .unwrap_or("unknown codex stream error");
                                             let _ = tx.send(StreamChunk::Content(format!(
                                                 "[API error: {}]",
                                                 msg
                                             )));
-                                            let _ = tx.send(StreamChunk::Finish(
-                                                "error".to_string(),
-                                            ));
+                                            let _ =
+                                                tx.send(StreamChunk::Finish("error".to_string()));
                                         }
                                         _ => {}
                                     }
@@ -1674,19 +1651,20 @@ impl Provider {
 
         let models = match self.kind {
             ProviderKind::OpenAiCodex => Vec::new(),
-            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic | ProviderKind::XaiOauth => body
-                .get("data")
-                .and_then(|d| d.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|m| {
-                            m.get("id")
-                                .and_then(|id| id.as_str())
-                                .map(|s| s.to_string())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic | ProviderKind::XaiOauth => {
+                body.get("data")
+                    .and_then(|d| d.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| {
+                                m.get("id")
+                                    .and_then(|id| id.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
             ProviderKind::Gemini => body
                 .get("models")
                 .and_then(|d| d.as_array())
