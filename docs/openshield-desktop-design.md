@@ -281,7 +281,7 @@ is the reference), flagship themes:
 
 More presets port from the TUI's 24-theme system later. Icon/wordmark:
 OpenShield fin + pincer motif, generated at 2560x1440-safe assets per the
-branding workflow. Credit line: "Made by synth with Blackclaw."
+branding workflow. No bot or AI credit lines.
 
 ## 6. Security Model
 
