@@ -87,6 +87,55 @@ pub enum StreamChunk {
     Finish(String),
 }
 
+/// If `value` is an unresolved `${VAR}` placeholder, return the variable name.
+pub fn unresolved_env_placeholder(value: &str) -> Option<&str> {
+    let v = value.trim();
+    if v.len() > 3 && v.starts_with("${") && v.ends_with('}') {
+        let name = &v[2..v.len() - 1];
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// Returns true when an API error body indicates the prompt exceeded the
+/// model's context window (OpenAI, Anthropic, llama.cpp, Ollama, vLLM, ...).
+pub fn is_context_overflow_error(body: &str) -> bool {
+    let b = body.to_ascii_lowercase();
+    [
+        "context_length_exceeded",
+        "exceed_context_size",
+        "exceeds the available context size",
+        "maximum context length",
+        "context window",
+        "prompt is too long",
+        "too many tokens",
+        "exceeds the context",
+        "context size exceeded",
+        "input is too long",
+    ]
+    .iter()
+    .any(|needle| b.contains(needle))
+}
+
+/// Format an HTTP error from a provider into a user-facing message, adding
+/// an actionable hint for context-overflow errors.
+pub fn format_api_error(status: reqwest::StatusCode, body: &str) -> String {
+    if is_context_overflow_error(body) {
+        format!(
+            "Context window exceeded (API error {}): the prompt is larger than the model's \
+             context size. OpenShield's system prompt alone is ~5k tokens. Raise the server's \
+             context length (e.g. Ollama `PARAMETER num_ctx 16384`, llama.cpp `-c 16384`) or \
+             use a model with a larger context. Server said: {}",
+            status,
+            body.trim()
+        )
+    } else {
+        format!("API error {}: {}", status, body.trim())
+    }
+}
+
 /// Accumulated tool call state for streaming fragments.
 #[derive(Debug, Clone, Default)]
 pub struct AccumulatedToolCall {
@@ -311,6 +360,26 @@ impl Provider {
             client,
             cache: None,
         }
+    }
+
+    /// Fail fast when the API key is still an unresolved `${VAR}` placeholder,
+    /// instead of sending the literal placeholder to the provider.
+    pub fn ensure_api_key_resolved(&self) -> Result<()> {
+        if matches!(
+            self.kind,
+            ProviderKind::OpenAiCompatible | ProviderKind::Gemini | ProviderKind::Anthropic
+        ) && let Some(var) = unresolved_env_placeholder(&self.api_key)
+        {
+            anyhow::bail!(
+                "API key for provider '{}' is not set: environment variable {} is undefined. \
+                 Export {} (or set `env_file`), or for local servers such as Ollama set \
+                 `api_key` to any non-empty dummy value.",
+                self.name,
+                var,
+                var
+            );
+        }
+        Ok(())
     }
 
     /// Build the request builder with appropriate auth and headers for this provider kind.
@@ -933,6 +1002,7 @@ impl Provider {
         request: &ChatRequest,
         max_retries: u32,
     ) -> Result<reqwest::Response> {
+        self.ensure_api_key_resolved()?;
         let body = self.build_chat_body(request);
         let mut last_error = String::new();
         // For Codex: after a 401, force one token refresh and retry.
@@ -972,7 +1042,7 @@ impl Provider {
             }
 
             let body_text = response.text().await.unwrap_or_default();
-            last_error = format!("{}: {}", status, body_text);
+            last_error = format_api_error(status, &body_text);
 
             // Codex: on 401, force a token refresh once and retry.
             if status.as_u16() == 401
@@ -992,10 +1062,14 @@ impl Provider {
             }
 
             // Client errors (4xx except 429) are not retryable
-            anyhow::bail!("API error {}: {}", status, body_text);
+            anyhow::bail!("{}", last_error);
         }
 
-        anyhow::bail!("API error after {} retries: {}", max_retries, last_error)
+        anyhow::bail!(
+            "Request failed after {} retries: {}",
+            max_retries,
+            last_error
+        )
     }
 
     pub async fn chat_stream(&self, request: ChatRequest) -> Result<(Vec<String>, StreamMetrics)> {
@@ -1215,77 +1289,68 @@ impl Provider {
         let kind = self.kind.clone();
         let headers = self.headers.clone();
 
+        self.ensure_api_key_resolved()?;
+        // Send the request and check the HTTP status before spawning the stream
+        // reader, so auth/HTTP failures surface as errors instead of being
+        // injected into the stream as assistant content.
+        let path = match kind {
+            ProviderKind::OpenAiCodex => "/responses",
+            _ => "/chat/completions",
+        };
+        let mut request_builder = client
+            .request(
+                reqwest::Method::POST,
+                format!("{}{}", base_url.trim_end_matches('/'), path),
+            )
+            .header("Content-Type", "application/json")
+            .json(&body);
+
+        match kind {
+            ProviderKind::OpenAiCompatible | ProviderKind::Gemini => {
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", api_key));
+            }
+            ProviderKind::Anthropic => {
+                request_builder = request_builder.header("x-api-key", &api_key);
+                request_builder = request_builder.header("anthropic-version", "2023-06-01");
+            }
+            ProviderKind::OpenAiCodex => match codex_auth::ensure_fresh(false).await {
+                Ok(creds) => {
+                    request_builder = request_builder
+                        .header("Authorization", format!("Bearer {}", creds.access_token))
+                        .header("chatgpt-account-id", &creds.account_id)
+                        .header("OpenAI-Beta", "responses=experimental")
+                        .header("originator", "codex_cli_rs")
+                        .header("Accept", "text/event-stream")
+                        .header("session_id", codex_auth::session_id());
+                }
+                Err(e) => anyhow::bail!("codex auth error: {}", e),
+            },
+            ProviderKind::XaiOauth => match xai_auth::ensure_fresh(false).await {
+                Ok(token) => {
+                    request_builder =
+                        request_builder.header("Authorization", format!("Bearer {token}"));
+                }
+                Err(e) => anyhow::bail!("xai auth error: {}", e),
+            },
+        }
+        for (key, val) in &headers {
+            request_builder = request_builder.header(key, val);
+        }
+
+        let response = request_builder
+            .send()
+            .await
+            .with_context(|| format!("Request to provider '{}' failed", self.name))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("{}", format_api_error(status, &body_text));
+        }
+
         // Spawn the streaming work in a background task so the caller can start receiving immediately
         tokio::spawn(async move {
-            let path = match kind {
-                ProviderKind::OpenAiCodex => "/responses",
-                _ => "/chat/completions",
-            };
-            let mut request_builder = client
-                .request(
-                    reqwest::Method::POST,
-                    format!("{}{}", base_url.trim_end_matches('/'), path),
-                )
-                .header("Content-Type", "application/json")
-                .json(&body);
-
-            match kind {
-                ProviderKind::OpenAiCompatible | ProviderKind::Gemini => {
-                    request_builder =
-                        request_builder.header("Authorization", format!("Bearer {}", api_key));
-                }
-                ProviderKind::Anthropic => {
-                    request_builder = request_builder.header("x-api-key", &api_key);
-                    request_builder = request_builder.header("anthropic-version", "2023-06-01");
-                }
-                ProviderKind::OpenAiCodex => match codex_auth::ensure_fresh(false).await {
-                    Ok(creds) => {
-                        request_builder = request_builder
-                            .header("Authorization", format!("Bearer {}", creds.access_token))
-                            .header("chatgpt-account-id", &creds.account_id)
-                            .header("OpenAI-Beta", "responses=experimental")
-                            .header("originator", "codex_cli_rs")
-                            .header("Accept", "text/event-stream")
-                            .header("session_id", codex_auth::session_id());
-                    }
-                    Err(e) => {
-                        let _ = tx.send(StreamChunk::Content(format!("[codex auth error: {}]", e)));
-                        return;
-                    }
-                },
-                ProviderKind::XaiOauth => match xai_auth::ensure_fresh(false).await {
-                    Ok(token) => {
-                        request_builder =
-                            request_builder.header("Authorization", format!("Bearer {token}"));
-                    }
-                    Err(e) => {
-                        let _ = tx.send(StreamChunk::Content(format!("[xai auth error: {}]", e)));
-                        return;
-                    }
-                },
-            }
-            for (key, val) in &headers {
-                request_builder = request_builder.header(key, val);
-            }
-
-            let response = match request_builder.send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = tx.send(StreamChunk::Content(format!("[stream error: {}]", e)));
-                    return;
-                }
-            };
-
-            let status = response.status();
-            if !status.is_success() {
-                let body_text = response.text().await.unwrap_or_default();
-                let _ = tx.send(StreamChunk::Content(format!(
-                    "[API error {}: {}]",
-                    status, body_text
-                )));
-                return;
-            }
-
             let mut stream = response.bytes_stream();
             let mut first_token_time: Option<Instant> = None;
             let mut buffer = String::new();
@@ -1686,6 +1751,101 @@ impl Provider {
 
 #[cfg(test)]
 mod tests {
+    fn spawn_mock_server(status_line: &'static str, body: &'static str) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 65536];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status_line,
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        format!("http://{}/v1", addr)
+    }
+
+    fn test_request() -> ChatRequest {
+        ChatRequest::new(
+            "qwen-local".to_string(),
+            vec![Message {
+                role: "user".to_string(),
+                content: format!("hi {}", uuid::Uuid::new_v4()),
+                images: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            }],
+            true,
+        )
+    }
+
+    #[test]
+    fn detects_unresolved_env_placeholders() {
+        assert_eq!(
+            unresolved_env_placeholder("${OPENAI_API_KEY}"),
+            Some("OPENAI_API_KEY")
+        );
+        assert_eq!(unresolved_env_placeholder("ollama"), None);
+        assert_eq!(unresolved_env_placeholder("${}"), None);
+        assert_eq!(unresolved_env_placeholder("sk-${abc}"), None);
+    }
+
+    #[tokio::test]
+    async fn unresolved_api_key_fails_before_sending() {
+        let p = Provider::new_without_cache(
+            "openai".to_string(),
+            "http://127.0.0.1:9/v1".to_string(),
+            "${OPENSHIELD_TEST_UNSET_KEY}".to_string(),
+            ProviderKind::OpenAiCompatible,
+            HashMap::new(),
+        );
+        let err = p.chat_stream(test_request()).await.err().unwrap();
+        let msg = err.to_string();
+        assert!(msg.contains("OPENSHIELD_TEST_UNSET_KEY"), "{msg}");
+        assert!(msg.contains("openai"), "{msg}");
+        let err = p.chat_stream_realtime(test_request()).await.err().unwrap();
+        assert!(err.to_string().contains("OPENSHIELD_TEST_UNSET_KEY"));
+    }
+
+    #[test]
+    fn context_overflow_errors_get_a_hint() {
+        let body = r#"{"error":{"code":400,"message":"the request exceeds the available context size","type":"exceed_context_size_error"}}"#;
+        assert!(is_context_overflow_error(body));
+        assert!(is_context_overflow_error(
+            r#"{"error":{"code":"context_length_exceeded"}}"#
+        ));
+        assert!(!is_context_overflow_error(r#"{"error":"invalid_api_key"}"#));
+        let msg = format_api_error(reqwest::StatusCode::BAD_REQUEST, body);
+        assert!(msg.contains("Context window exceeded"));
+        assert!(msg.contains("num_ctx"));
+    }
+
+    #[tokio::test]
+    async fn realtime_stream_returns_err_on_http_error() {
+        let base = spawn_mock_server(
+            "400 Bad Request",
+            r#"{"error":{"message":"the request exceeds the available context size","type":"exceed_context_size_error"}}"#,
+        );
+        let p = Provider::new_without_cache(
+            "ollama".to_string(),
+            base,
+            "ollama".to_string(),
+            ProviderKind::OpenAiCompatible,
+            HashMap::new(),
+        );
+        let err = p.chat_stream_realtime(test_request()).await.err().unwrap();
+        assert!(err.to_string().contains("Context window exceeded"), "{err}");
+        let err = p.chat_stream(test_request()).await.err().unwrap();
+        assert!(err.to_string().contains("Context window exceeded"), "{err}");
+    }
+
     use super::*;
 
     #[test]
