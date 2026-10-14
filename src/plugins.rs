@@ -85,7 +85,7 @@ impl PluginRegistry {
         let mut count = 0;
 
         let dirs = [
-            dirs::config_dir().map(|d| d.join("openshield").join("hooks")),
+            crate::paths::config_dir().map(|d| d.join("hooks")),
             Some(PathBuf::from(".openshield/hooks")),
         ];
 

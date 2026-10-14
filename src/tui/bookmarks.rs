@@ -179,11 +179,8 @@ impl BookmarkManager {
 
     /// Load bookmarks from the session file.
     pub fn load_from_file(&mut self, session_id: &str) {
-        let path = match dirs::config_dir() {
-            Some(dir) => dir
-                .join("openshield")
-                .join("bookmarks")
-                .join(format!("{}.json", session_id)),
+        let path = match crate::paths::config_dir() {
+            Some(dir) => dir.join("bookmarks").join(format!("{}.json", session_id)),
             None => return, // Silently skip if config dir unavailable
         };
         if let Ok(data) = std::fs::read_to_string(&path)
@@ -195,8 +192,8 @@ impl BookmarkManager {
 
     /// Save bookmarks to the session file.
     pub fn save_to_file(&self, session_id: &str) {
-        let dir = match dirs::config_dir() {
-            Some(dir) => dir.join("openshield").join("bookmarks"),
+        let dir = match crate::paths::config_dir() {
+            Some(dir) => dir.join("bookmarks"),
             None => return, // Silently skip if config dir unavailable
         };
         let _ = std::fs::create_dir_all(&dir);

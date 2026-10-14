@@ -24,9 +24,8 @@ impl MessageRouter {
     pub fn new(config: Config) -> Result<Self> {
         let memory = MemoryStore::new(&config.memory_db_path)?;
         let channel_states = ChannelStateStore::new(config.clone());
-        let skills_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshield")
+        let skills_dir = crate::paths::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
             .join("skills");
         let skill_registry = SkillRegistry::new(skills_dir).ok();
 
