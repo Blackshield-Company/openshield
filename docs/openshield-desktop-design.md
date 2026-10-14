@@ -92,9 +92,11 @@ New CLI subcommand + hardened API surface. Existing endpoints stay; additions:
 | POST   | /api/v1/pair | Issue a short-lived pairing token + payload for QR |
 | GET    | /api/v1/perf | Per-session perf (tokens/sec, cost) — TUI already tracks this |
 
-**Auth:** bearer token. Local mode (127.0.0.1) accepts the token from
-`~/.config/openshield/desktop.token` (chmod 600, auto-generated). LAN mode
-(0.0.0.0) REQUIRES the token on every request, WS included.
+**Auth:** bearer token, required on every request including loopback.
+`openshield serve` reads `~/.config/openshield/desktop.token` (chmod 600,
+auto-generated). HTTP clients send `Authorization: Bearer <token>`.
+WebSocket upgrades may also pass `?token=` (browsers cannot set headers on
+the handshake). LAN binds still require `lan_mode = true`.
 
 **Config additions (config.toml):**
 
@@ -106,6 +108,8 @@ port = 9310
 token_path = "~/.config/openshield/desktop.token"
 pair_ttl_secs = 120        # QR pairing token lifetime
 lan_mode = false           # explicit opt-in for mobile access
+allowed_hosts = []         # extra Host names (DNS-rebinding allowlist)
+allowed_origins = []       # extra CORS origins
 ```
 
 **Pairing flow:** `openshield serve --pair` (or desktop app button) calls
@@ -287,7 +291,7 @@ branding workflow. Credit line: "Made by synth with Blackclaw."
 
 - All remote surfaces inherit OpenShield's L1–L4 engine: sandbox paths,
   guardrail risk assessment, PII redaction — nothing bypasses it.
-- Token auth mandatory in LAN mode; token never leaves the pairing payload
+- Token auth mandatory on every `serve` request, including loopback; token never leaves the pairing payload
   unencrypted (stored via Tauri stronghold/keyring on desktop and Android
   keystore-backed storage on Pocket).
 - `lan_mode` defaults to **false**; binding 0.0.0.0 without it refuses to

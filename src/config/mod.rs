@@ -168,6 +168,14 @@ pub struct DesktopConfig {
     /// Explicit opt-in required before binding non-loopback addresses
     /// (mobile/LAN access). Never enabled by default — see §6.
     pub lan_mode: bool,
+    /// Extra `Host` names allowed besides loopback, the specific bind address,
+    /// and (on wildcard binds) the machine LAN address. Defeats DNS rebinding
+    /// when serving under a custom name.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+    /// Extra CORS origins allowed besides Tauri and loopback HTTP origins.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for DesktopConfig {
@@ -179,6 +187,8 @@ impl Default for DesktopConfig {
             token_path: "~/.config/openshield/desktop.token".to_string(),
             pair_ttl_secs: 120,
             lan_mode: false,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
         }
     }
 }
