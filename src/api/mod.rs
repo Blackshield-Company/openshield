@@ -37,9 +37,12 @@
 //!
 //! ## Auth
 //!
-//! `openshield serve` attaches bearer-token auth (see `auth`) and enforces it
-//! on every request, including loopback. Embedded hosts that leave `auth` as
-//! `None` stay open. CORS is an origin allowlist; `Host` is validated.
+//! `openshield serve` and [`crate::serve_in_process`] attach bearer-token auth
+//! (see `auth`) and enforce it on every request, including loopback. Embedded
+//! hosts obtain the token via [`crate::embedded_token`] and pass it to the
+//! WebView (`Authorization: Bearer`, or `?token=` on WebSocket upgrades).
+//! CORS is an origin allowlist (including `http://tauri.localhost` and
+//! `https://tauri.localhost`); `Host` must be loopback or the bind address.
 
 pub mod approvals;
 pub mod auth;
@@ -62,9 +65,10 @@ pub struct AppState {
     /// `dirs::config_dir()` is None. When set, per-request config reloads
     /// use `Config::load_from_dir` instead of `load_or_default`.
     pub config_dir: Option<std::path::PathBuf>,
-    /// Bearer-token auth state. `None` = no enforcement (embedded hosts).
-    /// `openshield serve` always sets this and requires the token on every
-    /// request, including loopback.
+    /// Bearer-token auth state. `None` disables enforcement.
+    /// `openshield serve` and the embedded Pocket host always set this and
+    /// require the token on every request, including loopback. WebSocket
+    /// upgrades may pass `?token=`.
     pub auth: Option<Arc<auth::AuthState>>,
     /// Human-in-the-loop approval bridge (M3): pending High/Critical tool
     /// calls, the `/ws/v1/chat` approval event broadcast, and the WS client

@@ -1,8 +1,10 @@
-//! Bearer-token auth for `openshield serve`.
+//! Bearer-token auth for `openshield serve` and the embedded Pocket host.
 //!
 //! Whenever `AppState::auth` is `Some`, every request must present the master
 //! token or an unexpired pairing token. Loopback binds are not exempt.
-//! Embedded hosts that leave `auth` as `None` (Android) stay open.
+//! `openshield serve` and [`crate::serve_in_process`] both set auth. The
+//! embedded host obtains the token via [`crate::embedded_token`] and passes
+//! it to its WebView.
 //!
 //! Tokens come from `Authorization: Bearer <token>`. WebSocket upgrade paths
 //! (`/ws/…`) may also pass `?token=` because browsers cannot set headers on
@@ -151,7 +153,7 @@ fn unauthorized() -> Response {
 }
 
 /// Axum middleware: require a bearer token whenever `state.auth` is `Some`,
-/// including loopback binds. No-op only when `auth` is `None` (embedded hosts).
+/// including loopback binds. No-op only when `auth` is `None`.
 pub async fn require_bearer(
     State(state): State<crate::api::AppState>,
     req: Request,
