@@ -1698,8 +1698,8 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let bind_addr = addr.unwrap_or_else(|| format!("{}:{}", desktop.bind, desktop.port));
-            let bind_ip: std::net::IpAddr = match bind_addr.parse::<std::net::SocketAddr>() {
-                Ok(sa) => sa.ip(),
+            let bind_sock = match bind_addr.parse::<std::net::SocketAddr>() {
+                Ok(sa) => sa,
                 Err(_) => {
                     eprintln!(
                         "❌ Invalid bind address '{}': expected host:port (e.g. 127.0.0.1:{})",
@@ -1708,6 +1708,7 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
+            let bind_ip = bind_sock.ip();
 
             // Design doc §6: lan_mode defaults to false and binding a
             // non-loopback address without it refuses to start.
@@ -1723,8 +1724,8 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
 
-            // Auto-generate (or load) the desktop token in both modes; it is
-            // only ENFORCED in LAN mode (design doc §3.1).
+            // Always enforce the bearer token, including loopback. Desktop
+            // reads the token file; WebSocket upgrades may pass ?token=.
             let token = match crate::api::auth::ensure_token_file(&desktop.token_path) {
                 Ok(t) => t,
                 Err(e) => {
@@ -1732,16 +1733,23 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             };
-            let auth = crate::api::auth::AuthState::new(token, lan_mode);
+            let auth = crate::api::auth::AuthState::new(token, true);
 
             let mode = if lan_mode {
-                "LAN mode — Bearer token REQUIRED on every request (HTTP + WS)"
+                "LAN mode — Bearer token required on every request (HTTP + WS)"
             } else {
-                "local mode — loopback only, token accepted but not required"
+                "local mode — loopback only, Bearer token required"
             };
             println!("🛡 OpenShield serve — http://{} ({})", bind_addr, mode);
+            println!(
+                "   token: {}  (Authorization: Bearer, WebSocket may use ?token=)",
+                desktop.token_path
+            );
             info!("Starting OpenShield API server on {}", bind_addr);
 
+            let mut config = config;
+            config.desktop.bind = bind_ip.to_string();
+            config.desktop.port = bind_sock.port();
             let state = crate::api::AppState {
                 config: Arc::new(config),
                 running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),

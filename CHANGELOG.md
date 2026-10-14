@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-10-14
+
+### Security
+
+- **Serve auth** — Bearer token is now required on every `openshield serve` request, including loopback binds. CORS is an allowlist (Tauri and localhost origins, plus `[desktop] allowed_origins`). `Host` is validated against loopback names, the bind address, the LAN address on wildcard binds, and `[desktop] allowed_hosts` (DNS rebinding). Token comparison is constant-time. `POST /api/v1/pair` requires the master token, is limited to 5 requests per 60s, and stores at most 32 pairing tokens.
+
+### Changed
+
+- **Clients must send the token** — Desktop reads `~/.config/openshield/desktop.token`. HTTP requests use `Authorization: Bearer`. WebSocket upgrades may pass `?token=` because browsers cannot set headers on the handshake.
+
 ## [1.1.0] - 2026-10-11
 
 ### Release engineering

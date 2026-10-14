@@ -37,8 +37,9 @@
 //!
 //! ## Auth
 //!
-//! `openshield serve` attaches bearer-token auth (see `auth`). Enforcement
-//! engages only in LAN mode; loopback and embedded hosts run open.
+//! `openshield serve` attaches bearer-token auth (see `auth`) and enforces it
+//! on every request, including loopback. Embedded hosts that leave `auth` as
+//! `None` stay open. CORS is an origin allowlist; `Host` is validated.
 
 pub mod approvals;
 pub mod auth;
@@ -61,9 +62,9 @@ pub struct AppState {
     /// `dirs::config_dir()` is None. When set, per-request config reloads
     /// use `Config::load_from_dir` instead of `load_or_default`.
     pub config_dir: Option<std::path::PathBuf>,
-    /// Bearer-token auth state. `None` = no enforcement (embedded loopback
-    /// hosts). Set by `openshield serve` from the `[desktop]` config —
-    /// enforcement engages only in LAN mode (design doc §3.1/§6).
+    /// Bearer-token auth state. `None` = no enforcement (embedded hosts).
+    /// `openshield serve` always sets this and requires the token on every
+    /// request, including loopback.
     pub auth: Option<Arc<auth::AuthState>>,
     /// Human-in-the-loop approval bridge (M3): pending High/Critical tool
     /// calls, the `/ws/v1/chat` approval event broadcast, and the WS client
@@ -170,7 +171,9 @@ pub struct ApiError {
 
 /// Build the complete API router.
 pub fn build_router(state: AppState) -> Router {
-    let middleware_state = state.clone();
+    let origins = state.config.desktop.allowed_origins.clone();
+    let auth_state = state.clone();
+    let host_state = state.clone();
     Router::new()
         // Health
         .route("/api/v1/health", get(handlers::health))
@@ -222,18 +225,19 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws/v1/chat", get(ws::ws_chat))
         .route("/ws/v1/agent", get(ws::ws_agent))
         .with_state(state)
-        // Bearer-token auth: enforced only in LAN mode (see auth::require_bearer).
+        // Bearer token whenever `auth` is Some, including loopback.
         .layer(middleware::from_fn_with_state(
-            middleware_state,
+            auth_state,
             auth::require_bearer,
         ))
-        // CORS: allow any origin. Loopback mode serves local GUI webviews
-        // (Tauri dev server, browser dev) whose origins vary by port; LAN
-        // mode also allows any origin by design — the bearer token is the
-        // gate (design doc §3.1/§6), not the Origin header. Registered last
-        // so it sits outermost and answers preflight OPTIONS itself before
-        // the auth middleware ever sees them.
-        .layer(tower_http::cors::CorsLayer::permissive())
+        // DNS-rebinding: Host must be loopback, the bind address, or an
+        // explicit allowlist entry. Inside CORS so preflight is answered first.
+        .layer(middleware::from_fn_with_state(
+            host_state,
+            auth::require_allowed_host,
+        ))
+        // Outermost: answers preflight before auth or Host checks.
+        .layer(auth::cors_layer(origins))
 }
 
 /// Start the API server on the given address.
