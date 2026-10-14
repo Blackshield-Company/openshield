@@ -194,9 +194,8 @@ impl Tool for CronjobTool {
 }
 
 fn cronjob_dir() -> Result<PathBuf> {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("openshield")
+    let dir = crate::paths::data_dir()
+        .unwrap_or_else(|| PathBuf::from(".").join("openshield"))
         .join("cronjobs");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create cronjob dir: {:?}", dir))?;
@@ -322,9 +321,8 @@ impl Tool for SkillsTool {
 }
 
 fn skills_dir() -> Result<PathBuf> {
-    let dir = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("openshield")
+    let dir = crate::paths::config_dir()
+        .unwrap_or_else(|| PathBuf::from(".").join("openshield"))
         .join("skills");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create skills dir: {:?}", dir))?;

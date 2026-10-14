@@ -62,9 +62,8 @@ impl ChannelState {
         );
 
         let soul = crate::agent::soul::load_soul_from_config(config);
-        let skills_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshield")
+        let skills_dir = crate::paths::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
             .join("skills");
         let skill_registry = SkillRegistry::new(skills_dir).ok();
         let skills_prompt = skill_registry

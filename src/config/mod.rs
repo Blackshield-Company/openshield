@@ -385,7 +385,7 @@ fn expand_tilde_path(path: &std::path::Path) -> std::path::PathBuf {
 
 impl Config {
     /// Load config from an explicit directory (created if missing).
-    /// Used by embedded hosts (Android) where `dirs::config_dir()` is None.
+    /// Used by embedded hosts (Android) where `paths::config_dir()` is None.
     pub fn load_from_dir(config_dir: &std::path::Path) -> Result<Self> {
         std::fs::create_dir_all(config_dir)?;
         let config_path = config_dir.join("config.toml");
@@ -403,7 +403,7 @@ impl Config {
             }
             config
         };
-        // Embedded hosts (Android): dirs::data_dir() is None, so Config::default()
+        // Embedded hosts (Android): paths::data_dir() is None, so Config::default()
         // falls back to a relative memory_db_path ("./openshield/memory.db") that
         // resolves against a read-only cwd like "/". Rebase it under config_dir.
         // Expand any leading "~" FIRST — "~/..." is not detected as relative by
@@ -417,9 +417,7 @@ impl Config {
     }
 
     pub fn load_or_default() -> Result<Self> {
-        let config_dir = dirs::config_dir()
-            .context("No config directory found")?
-            .join("openshield");
+        let config_dir = crate::paths::config_dir().context("No config directory found")?;
 
         let config_path = config_dir.join("config.toml");
 
@@ -461,9 +459,8 @@ impl Config {
                 let env_path = if env_file.starts_with("/") || env_file.starts_with("~") {
                     shellexpand::tilde(env_file).to_string()
                 } else {
-                    let config_dir = dirs::config_dir()
-                        .unwrap_or_else(|| PathBuf::from("."))
-                        .join("openshield");
+                    let config_dir = crate::paths::config_dir()
+                        .unwrap_or_else(|| PathBuf::from(".").join("openshield"));
                     config_dir.join(env_file).to_string_lossy().to_string()
                 };
 
@@ -502,9 +499,7 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        let config_dir = dirs::config_dir()
-            .context("No config directory found")?
-            .join("openshield");
+        let config_dir = crate::paths::config_dir().context("No config directory found")?;
         std::fs::create_dir_all(&config_dir)?;
 
         let config_path = config_dir.join("config.toml");
@@ -829,9 +824,8 @@ impl Default for Config {
             version: crate::VERSION.to_string(),
             default_model,
             providers,
-            memory_db_path: dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("openshield")
+            memory_db_path: crate::paths::data_dir()
+                .unwrap_or_else(|| PathBuf::from(".").join("openshield"))
                 .join("memory.db"),
             tools_enabled: vec![
                 "fs".to_string(),
@@ -931,7 +925,7 @@ mod tests {
 
     #[test]
     fn test_load_from_dir_rebases_relative_memory_db_path() {
-        // Embedded hosts (Android): dirs::data_dir() is None and the default
+        // Embedded hosts (Android): paths::data_dir() is None and the default
         // memory_db_path is relative — load_from_dir must rebase it under the
         // host-provided config dir, or the memory store fails with
         // "Failed to create memory directory" against a read-only cwd.
