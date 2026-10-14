@@ -555,7 +555,31 @@ pub async fn doctor() -> impl IntoResponse {
 /// token, expires}` for OpenShield Pocket (design doc §3.1). The pairing
 /// token is accepted by the bearer-auth middleware until it expires, so a
 /// phone can validate it with GET /api/v1/health.
-pub async fn pair(State(state): State<AppState>) -> impl IntoResponse {
+///
+/// When auth is configured, only the master token may mint pairing tokens,
+/// and the endpoint allows at most 5 requests per 60 seconds.
+pub async fn pair(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    if let Some(auth) = &state.auth {
+        let presented = super::auth::bearer_from_headers(&headers).unwrap_or("");
+        if !auth.is_master(presented) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "unauthorized: master token required" })),
+            )
+                .into_response();
+        }
+        if !auth.allow_pair() {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "error": "rate limit exceeded" })),
+            )
+                .into_response();
+        }
+    }
+
     let desktop = &state.config.desktop;
     let ttl = desktop.pair_ttl_secs.max(1);
     let token = format!(
@@ -566,10 +590,7 @@ pub async fn pair(State(state): State<AppState>) -> impl IntoResponse {
     let expires = chrono::Utc::now() + chrono::Duration::seconds(ttl as i64);
 
     if let Some(auth) = &state.auth {
-        auth.pair_tokens
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(token.clone(), expires);
+        auth.store_pair_token(token.clone(), expires);
     }
 
     let host = pair_host(&desktop.bind);
@@ -579,12 +600,13 @@ pub async fn pair(State(state): State<AppState>) -> impl IntoResponse {
         "token": token,
         "expires": expires.to_rfc3339(),
     }))
+    .into_response()
 }
 
 /// Host to advertise in a pairing payload. A wildcard bind advertises the
 /// machine's LAN address (discovered via a routing-table lookup — no packets
 /// are sent); a loopback bind advertises localhost for tunnel setups.
-fn pair_host(bind: &str) -> String {
+pub(crate) fn pair_host(bind: &str) -> String {
     match bind.parse::<std::net::IpAddr>() {
         Ok(ip) if ip.is_loopback() => "127.0.0.1".to_string(),
         Ok(ip) if ip.is_unspecified() => lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
@@ -595,7 +617,7 @@ fn pair_host(bind: &str) -> String {
 
 /// Best-effort LAN IP: bind a UDP socket and read its local address after a
 /// notional connect. Falls back to None when offline/no route exists.
-fn lan_ip() -> Option<String> {
+pub(crate) fn lan_ip() -> Option<String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     match socket.local_addr().ok()?.ip() {
