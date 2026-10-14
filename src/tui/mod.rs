@@ -416,9 +416,8 @@ impl App {
         let project_path_for_engine = project_path.clone();
 
         // Load input history
-        let history_file = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshield")
+        let history_file = crate::paths::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
             .join("input_history.txt");
         let input_history = if history_file.exists() {
             std::fs::read_to_string(&history_file)
@@ -567,9 +566,8 @@ impl App {
             sidebar_scroll: 0,
             session_perf: SessionPerformance::default(),
             skill_registry: {
-                let skills_dir = dirs::config_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("openshield")
+                let skills_dir = crate::paths::config_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
                     .join("skills");
                 SkillRegistry::new(skills_dir).ok()
             },
@@ -583,8 +581,7 @@ impl App {
                 if !config.code_index_enabled {
                     None
                 } else {
-                    let config_dir = dirs::config_dir()
-                        .map(|d| d.join("openshield"))
+                    let config_dir = crate::paths::config_dir()
                         .unwrap_or_else(|| std::path::PathBuf::from(".openshield"));
                     let db_path = config_dir.join("code_index.db");
                     let cwd =

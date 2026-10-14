@@ -32,9 +32,7 @@ struct XaiAuthFile {
 }
 
 fn auth_path() -> Result<PathBuf> {
-    let dir = dirs::config_dir()
-        .context("no config dir")?
-        .join("openshield");
+    let dir = crate::paths::config_dir().context("no config dir")?;
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join("xai-auth.json"))
 }

@@ -202,9 +202,7 @@ impl Default for SudoConfig {
 
 impl SecurityConfig {
     pub fn load() -> Result<Self> {
-        let config_dir = dirs::config_dir()
-            .context("No config directory found")?
-            .join("openshield");
+        let config_dir = crate::paths::config_dir().context("No config directory found")?;
         let path = config_dir.join("security.toml");
 
         let mut config = if path.exists() {
@@ -233,9 +231,7 @@ impl SecurityConfig {
     }
 
     pub fn save(&self) -> Result<()> {
-        let config_dir = dirs::config_dir()
-            .context("No config directory found")?
-            .join("openshield");
+        let config_dir = crate::paths::config_dir().context("No config directory found")?;
         std::fs::create_dir_all(&config_dir)?;
 
         let path = config_dir.join("security.toml");

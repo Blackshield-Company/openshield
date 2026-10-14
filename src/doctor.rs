@@ -189,9 +189,8 @@ pub async fn run_checks(auto_fix: bool) -> Result<DoctorReport> {
 }
 
 async fn check_config() -> CheckResult {
-    let config_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield");
+    let config_dir = crate::paths::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
     let config_path = config_dir.join("config.toml");
 
     if !config_path.exists() {
@@ -220,9 +219,8 @@ async fn check_config() -> CheckResult {
 }
 
 async fn check_providers() -> CheckResult {
-    let config_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield");
+    let config_dir = crate::paths::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
 
     let env_files = ["kimi.env", "openai.env", "zai.env", "fal.env"];
     let mut found = 0;
@@ -251,9 +249,8 @@ async fn check_providers() -> CheckResult {
 }
 
 async fn check_memory_db() -> CheckResult {
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield");
+    let data_dir = crate::paths::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
     let db_path = data_dir.join("memory.db");
 
     if !db_path.exists() {
@@ -288,9 +285,8 @@ async fn check_memory_db() -> CheckResult {
 }
 
 async fn check_cache() -> CheckResult {
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield");
+    let cache_dir = crate::paths::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
 
     if !cache_dir.exists() {
         return CheckResult::warning(
@@ -313,9 +309,8 @@ async fn check_cache() -> CheckResult {
 }
 
 async fn check_skills() -> CheckResult {
-    let skills_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield")
+    let skills_dir = crate::paths::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
         .join("skills");
 
     if !skills_dir.exists() {
@@ -352,9 +347,8 @@ async fn check_binary() -> CheckResult {
 }
 
 async fn check_sessions_dir() -> CheckResult {
-    let sessions_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield")
+    let sessions_dir = crate::paths::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
         .join("sessions");
 
     if !sessions_dir.exists() {
@@ -388,9 +382,8 @@ async fn check_sessions_dir() -> CheckResult {
 async fn try_fix(component: &str) -> Result<String> {
     match component {
         "Config" => {
-            let config_dir = dirs::config_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshield");
+            let config_dir = crate::paths::config_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
             std::fs::create_dir_all(&config_dir)?;
             let default_config = crate::config::Config::default();
             let toml = toml::to_string_pretty(&default_config)
@@ -403,9 +396,8 @@ async fn try_fix(component: &str) -> Result<String> {
             ))
         }
         "Memory DB" => {
-            let data_dir = dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshield");
+            let data_dir = crate::paths::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("memory.db");
             crate::memory::MemoryStore::new(&db_path)
@@ -416,9 +408,8 @@ async fn try_fix(component: &str) -> Result<String> {
             ))
         }
         "Cache" => {
-            let cache_dir = dirs::cache_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshield");
+            let cache_dir = crate::paths::cache_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
             std::fs::create_dir_all(&cache_dir)?;
             Ok(format!(
                 "Created cache directory at {}",
@@ -426,9 +417,8 @@ async fn try_fix(component: &str) -> Result<String> {
             ))
         }
         "Skills" => {
-            let skills_dir = dirs::config_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshield")
+            let skills_dir = crate::paths::config_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
                 .join("skills");
             std::fs::create_dir_all(&skills_dir)?;
             Ok(format!(
@@ -437,9 +427,8 @@ async fn try_fix(component: &str) -> Result<String> {
             ))
         }
         "Sessions" => {
-            let sessions_dir = dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshield")
+            let sessions_dir = crate::paths::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
                 .join("sessions");
             std::fs::create_dir_all(&sessions_dir)?;
             Ok(format!(

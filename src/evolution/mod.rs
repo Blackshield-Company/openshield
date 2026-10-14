@@ -96,9 +96,8 @@ impl EvolutionEngine {
             MemoryStore::new(&config.memory_db_path).context("Failed to open memory store")?,
         ));
 
-        let skills_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("openshield")
+        let skills_dir = crate::paths::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
             .join("skills")
             .join("user");
 

@@ -59,7 +59,7 @@ pub struct AppState {
     pub config: Arc<crate::config::Config>,
     pub running_tasks: Arc<RwLock<Vec<AgentTask>>>,
     /// Explicit config directory for embedded hosts (Android), where
-    /// `dirs::config_dir()` is None. When set, per-request config reloads
+    /// `paths::config_dir()` is None. When set, per-request config reloads
     /// use `Config::load_from_dir` instead of `load_or_default`.
     pub config_dir: Option<std::path::PathBuf>,
     /// Bearer-token auth state. `None` = no enforcement (embedded hosts).

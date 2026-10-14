@@ -140,9 +140,8 @@ impl SmartContext {
     }
 
     fn storage_path(session_id: &str) -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("openshield")
+        crate::paths::config_dir()
+            .unwrap_or_else(|| PathBuf::from(".").join("openshield"))
             .join("context")
             .join(format!("{}.json", session_id))
     }

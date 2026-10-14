@@ -107,7 +107,7 @@ fn parse_sprite(name: &str, content: &str) -> Option<Sprite> {
 
 /// User sprite directory: `~/.config/openshield/sprites`.
 fn user_sprites_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("openshield").join("sprites"))
+    crate::paths::config_dir().map(|d| d.join("sprites"))
 }
 
 /// Read a sprite file from a directory if it exists (`<name>.ans` then `<name>.txt`).

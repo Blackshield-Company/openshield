@@ -43,9 +43,8 @@ impl Tool for MemoryTool {
 }
 
 fn memory_dir() -> Result<PathBuf> {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("openshield")
+    let dir = crate::paths::data_dir()
+        .unwrap_or_else(|| PathBuf::from(".").join("openshield"))
         .join("memories");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create memory dir: {:?}", dir))?;
@@ -162,9 +161,8 @@ impl Tool for SessionSearchTool {
         }
 
         // Search in OpenShield's memory DB if available
-        let db_path = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("openshield")
+        let db_path = crate::paths::data_dir()
+            .unwrap_or_else(|| PathBuf::from(".").join("openshield"))
             .join("memory.db");
 
         if !db_path.exists() {

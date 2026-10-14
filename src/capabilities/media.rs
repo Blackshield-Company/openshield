@@ -101,9 +101,9 @@ impl Tool for ImageGenTool {
             .or_else(|_| std::env::var("FAL_API_KEY"))
             .or_else(|_| {
                 // Try loading from fal.env in config dir
-                let env_path = dirs::config_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("openshield/fal.env");
+                let env_path = crate::paths::config_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
+                    .join("fal.env");
                 if let Ok(content) = std::fs::read_to_string(&env_path) {
                     for line in content.lines() {
                         let line = line.trim();

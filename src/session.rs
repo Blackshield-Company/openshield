@@ -102,9 +102,8 @@ impl SessionExport {
 
 /// Export a session to the default location (~/.local/share/openshield/sessions/).
 pub fn export_to_default(export: &SessionExport) -> Result<std::path::PathBuf> {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield")
+    let dir = crate::paths::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
         .join("sessions");
     std::fs::create_dir_all(&dir).context("Failed to create sessions directory")?;
 
@@ -120,9 +119,8 @@ pub fn export_to_default(export: &SessionExport) -> Result<std::path::PathBuf> {
 
 /// List all exported sessions in the default directory.
 pub fn list_exports() -> Result<Vec<(std::path::PathBuf, SessionExport)>> {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield")
+    let dir = crate::paths::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
         .join("sessions");
 
     if !dir.exists() {

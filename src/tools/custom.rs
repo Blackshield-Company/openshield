@@ -109,9 +109,8 @@ static CUSTOM_TOOLS: Mutex<Vec<Arc<dyn Tool>>> = Mutex::new(Vec::new());
 
 /// Load custom tools from the config file.
 pub fn load_custom_tools() -> Vec<Arc<dyn Tool>> {
-    let config_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield");
+    let config_dir = crate::paths::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"));
     let path = config_dir.join("custom_tools.toml");
 
     if !path.exists() {
