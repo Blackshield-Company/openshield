@@ -15,6 +15,7 @@ pub struct Session {
     pub task_type: String,
     pub project_path: Option<String>,
     #[serde(default)]
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub archived: bool,
 }
 
@@ -44,6 +45,7 @@ pub struct ToolCall {
 /// Lightweight session row for chat-session pickers: id, when, model,
 /// message count, and a title derived from the first user message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg(feature = "web-api")]
 pub struct SessionSummary {
     pub id: String,
     pub started_at: DateTime<Utc>,
@@ -184,6 +186,7 @@ impl MemoryStore {
 
     /// Create a session row unless it already exists (idempotent — chat
     /// clients may pass the same session id on every message).
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub fn ensure_session(&self, id: &str, model: &str, task_type: &str) -> Result<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO sessions (id, started_at, model, task_type, project_path, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -194,6 +197,7 @@ impl MemoryStore {
 
     /// Non-archived sessions with message counts and a title derived from
     /// the first user message — for chat session lists in API clients.
+    #[cfg(feature = "web-api")]
     pub fn list_session_summaries(&self, limit: usize) -> Result<Vec<SessionSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.id, s.started_at, s.model,
@@ -228,6 +232,7 @@ impl MemoryStore {
 
     /// Fetch one session row by id (archived or not). Returns Ok(None) for
     /// unknown ids — used by GET /api/v1/sessions/{id} to answer 404.
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, started_at, model, task_type, project_path, archived

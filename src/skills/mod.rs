@@ -131,6 +131,12 @@ impl SkillRegistry {
     }
 
     /// Get all loaded skills.
+    #[cfg(any(
+        feature = "discord",
+        feature = "telegram",
+        feature = "slack",
+        feature = "matrix"
+    ))]
     pub fn all_skills(&self) -> &[Skill] {
         &self.skills
     }

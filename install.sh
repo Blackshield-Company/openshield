@@ -5,7 +5,8 @@
 #
 # Downloads the prebuilt release binary for your OS/arch from GitHub Releases,
 # verifies its SHA-256 checksum, and installs it to $BIN_DIR. If no prebuilt
-# binary is available, falls back to `cargo install --git`.
+# binary is available, falls back to `cargo install --git` (`--features gateways`
+# only for latest and tags newer than v1.1.1).
 #
 # Environment overrides:
 #   OPENSHIELD_VERSION  release tag to install (default: latest), e.g. v1.1.0
@@ -135,13 +136,25 @@ install_binary() {
     say "Installed ${BIN_DIR}/${exe}"
 }
 
+version_gt() {
+    local a b oldest
+    a="${1#v}"
+    b="${2#v}"
+    oldest="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)"
+    [ "$oldest" != "$a" ]
+}
+
 install_from_source() {
     say "Building from source with cargo (this can take a while)..."
     if ! command -v cargo > /dev/null 2>&1; then
         err "cargo not found. Install Rust from https://rustup.rs and re-run this script."
         exit 1
     fi
-    local args=(install --git "${REPO_URL}.git" --locked --root "$(dirname "$BIN_DIR")" openshield)
+    local args=(install --git "${REPO_URL}.git" --locked)
+    if [ "$VERSION" = "latest" ] || version_gt "$VERSION" "v1.1.1"; then
+        args+=(--features gateways)
+    fi
+    args+=(--root "$(dirname "$BIN_DIR")" openshield)
     if [ "$VERSION" != "latest" ]; then
         args+=(--tag "$VERSION")
     fi

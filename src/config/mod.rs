@@ -153,6 +153,7 @@ impl Default for FilesystemConfig {
 /// docs/openshield-desktop-design.md §3.1.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[cfg_attr(not(feature = "web-api"), allow(dead_code))]
 pub struct DesktopConfig {
     /// Master switch for the desktop API surface (doctor warns when off).
     pub enabled: bool,
@@ -203,6 +204,7 @@ fn default_max_list_entries() -> usize {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub version: String,
     pub default_model: String,
     pub providers: HashMap<String, ProviderConfig>,
@@ -230,6 +232,7 @@ pub struct Config {
     pub keybindings: KeybindingsConfig,
     /// Desktop / mobile companion API server (`openshield serve`).
     #[serde(default)]
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub desktop: DesktopConfig,
     /// Auto-commit changes after file edits.
     #[serde(default)]
@@ -240,6 +243,7 @@ pub struct Config {
     /// Weak/cheap model for simple tasks (routing, summarization, classification).
     /// Uses default_model if None.
     #[serde(default)]
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub weak_model: Option<String>,
     /// Architect model for planning and high-level design.
     /// Uses default_model if None.
@@ -386,6 +390,7 @@ fn expand_tilde_path(path: &std::path::Path) -> std::path::PathBuf {
 impl Config {
     /// Load config from an explicit directory (created if missing).
     /// Used by embedded hosts (Android) where `dirs::config_dir()` is None.
+    #[cfg_attr(not(feature = "web-api"), allow(dead_code))]
     pub fn load_from_dir(config_dir: &std::path::Path) -> Result<Self> {
         std::fs::create_dir_all(config_dir)?;
         let config_path = config_dir.join("config.toml");

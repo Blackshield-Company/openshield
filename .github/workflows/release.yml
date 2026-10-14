@@ -53,7 +53,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }} --features gateways
       # Archive names must match install.sh: openshield-<target>.tar.gz / .zip
       - name: Package (unix)
         if: runner.os != 'Windows'
