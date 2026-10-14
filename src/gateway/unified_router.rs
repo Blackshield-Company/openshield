@@ -5,7 +5,14 @@
 //! routing logic (memory, skills, tool execution, multi-model). Rather than
 //! duplicating that for each platform, we normalize all events to the same shape.
 
+#[cfg(any(feature = "telegram", feature = "slack", feature = "matrix"))]
 use tokio::sync::mpsc;
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 use tracing::{info, warn};
 
 use crate::config::Config;
@@ -158,6 +165,7 @@ impl UnifiedRouter {
     }
 
     /// Handle a Matrix event by converting to GatewayEvent format.
+    #[cfg(feature = "matrix")]
     pub async fn handle_matrix_event(
         &mut self,
         event: crate::gateway::matrix::MatrixEvent,
@@ -204,6 +212,7 @@ impl UnifiedRouter {
 }
 
 /// Simple hash function to convert a string to a u64 for channel/user IDs.
+#[cfg(any(feature = "slack", feature = "matrix"))]
 fn hash_string_to_u64(s: &str) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};

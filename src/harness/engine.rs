@@ -36,6 +36,7 @@ use super::response::{HarnessResponse, HarnessState, ModelResponse, ToolExecutio
 /// Human-in-the-loop approval request raised by the L4 security gate when a
 /// tool call is held for a human decision (design doc §4 `approval_req`).
 #[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "web-api"), allow(dead_code))]
 pub struct ApprovalRequest {
     pub tool_name: String,
     pub args: String,
@@ -110,6 +111,7 @@ impl HarnessEngine {
     }
 }
 
+#[cfg_attr(not(feature = "web-api"), allow(dead_code))]
 pub struct HarnessEngine {
     config: HarnessConfig,
     app_config: Config,
