@@ -22,11 +22,11 @@ AI coding agent in your terminal. Rust. Open source. Blackshield by default.
 curl -fsSL https://raw.githubusercontent.com/Blackshield-Company/openshield/main/install.sh | bash
 ```
 
-Downloads the prebuilt binary for your platform (Linux x86_64/aarch64, macOS x86_64/arm64) from [GitHub Releases](https://github.com/Blackshield-Company/openshield/releases), verifies its SHA-256 checksum, and installs it to `~/.local/bin/openshield`. If no prebuilt binary matches, it falls back to `cargo install --git`.
+Downloads the prebuilt binary for your platform (Linux x86_64/aarch64, macOS x86_64/arm64) from [GitHub Releases](https://github.com/Blackshield-Company/openshield/releases), verifies its SHA-256 checksum, and installs it to `~/.local/bin/openshield`. If no prebuilt binary matches, it falls back to `cargo install --git` with `--features gateways`.
 
 Options: `OPENSHIELD_VERSION=v1.1.0` pins a release, `BIN_DIR=/path` changes the install directory, `OPENSHIELD_FROM_SOURCE=1` forces a source build, `DRY_RUN=1` prints the plan without installing.
 
-Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source anywhere: `cargo install --git https://github.com/Blackshield-Company/openshield --locked`.
+Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source: `cargo install --git https://github.com/Blackshield-Company/openshield --locked --features gateways` (drop `--features gateways` for a smaller build without Discord, Telegram, Slack, and Matrix).
 
 ## First Run
 
@@ -147,6 +147,22 @@ git clone https://github.com/Blackshield-Company/openshield
 cd openshield
 cargo build --release
 cargo test
+```
+
+Default features are `web-api` only. Chat gateways are opt-in cargo features and stay off unless `enabled = true` in config (default `false`):
+
+```bash
+cargo build --release --features gateways          # discord, telegram, slack, matrix
+cargo build --release --features discord           # or telegram, slack, matrix
+cargo build --release --no-default-features        # no web-api, no gateways
+```
+
+`cargo install` does not include gateways unless you pass `--features gateways` (or one gateway feature). Release binaries are built with `--features gateways`. If config enables a gateway this binary was not built with, startup prints a warning to rebuild with `--features <name>`.
+
+```toml
+[gateway.discord]
+enabled = true
+bot_token = "${DISCORD_BOT_TOKEN}"
 ```
 
 The release profile uses fat LTO, and its link step can need more than 15 GB of RAM. On smaller machines, turn LTO off for a local build (the binary is slightly larger and slower; the shipped profile is unchanged):

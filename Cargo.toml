@@ -23,16 +23,12 @@ name = "openshield"
 path = "src/lib.rs"
 
 [features]
-default = ["discord", "telegram", "slack", "matrix", "web-api"]
+default = ["web-api"]
 discord = ["serenity"]
 telegram = ["teloxide"]
 slack = ["slack-morphism"]
 matrix = ["matrix-sdk"]
-hermes-bridge = []
-claw-delegation = []
-opencode-delegation = []
-claude-delegation = []
-github-native = []
+gateways = ["discord", "telegram", "slack", "matrix"]
 web-api = ["axum", "tokio-util", "tower-http"]
 
 [dependencies]

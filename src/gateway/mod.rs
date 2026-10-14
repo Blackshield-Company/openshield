@@ -1,19 +1,56 @@
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 pub mod channel_state;
 #[cfg(feature = "discord")]
 pub mod commands;
 #[cfg(feature = "discord")]
 pub mod discord;
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 pub mod events;
 #[cfg(feature = "web-api")]
 pub mod http;
+#[cfg(feature = "matrix")]
 pub mod matrix;
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 pub mod message_router;
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 pub mod platform;
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 pub mod session_branch;
 #[cfg(feature = "slack")]
 pub mod slack;
 #[cfg(feature = "telegram")]
 pub mod telegram;
+#[cfg(any(
+    feature = "discord",
+    feature = "telegram",
+    feature = "slack",
+    feature = "matrix"
+))]
 pub mod unified_router;
 
 use serde::{Deserialize, Serialize};
@@ -173,4 +210,54 @@ fn default_prefix() -> String {
 }
 fn default_max_length() -> usize {
     2000
+}
+
+pub fn missing_feature_warning(
+    platform: &str,
+    enabled: bool,
+    feature_compiled: bool,
+) -> Option<String> {
+    if enabled && !feature_compiled {
+        Some(format!(
+            "{platform} gateway enabled in config but this build lacks the {platform} feature; rebuild with --features {platform}"
+        ))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_configs_default_disabled_when_parsing_empty_config() {
+        let gateway: GatewayConfig = toml::from_str("").expect("empty config");
+        assert!(!gateway.discord.enabled);
+        assert!(!gateway.telegram.enabled);
+        assert!(!gateway.slack.enabled);
+        assert!(!gateway.matrix.enabled);
+
+        let config: crate::config::Config = toml::from_str(
+            "version = \"0\"\ndefault_model = \"m\"\nmemory_db_path = \"memory.db\"\ntools_enabled = []\nauto_route = false\ncost_limit_usd = 0.0\n\n[providers]\n",
+        )
+        .expect("config without gateway section");
+        assert!(!config.gateway.discord.enabled);
+        assert!(!config.gateway.telegram.enabled);
+        assert!(!config.gateway.slack.enabled);
+        assert!(!config.gateway.matrix.enabled);
+    }
+
+    #[test]
+    fn missing_feature_warning_when_enabled_but_feature_missing() {
+        assert_eq!(
+            missing_feature_warning("discord", true, false).as_deref(),
+            Some(
+                "discord gateway enabled in config but this build lacks the discord feature; rebuild with --features discord"
+            )
+        );
+        assert!(missing_feature_warning("discord", false, false).is_none());
+        assert!(missing_feature_warning("discord", true, true).is_none());
+        assert!(missing_feature_warning("telegram", false, true).is_none());
+    }
 }
