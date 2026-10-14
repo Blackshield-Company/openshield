@@ -11,6 +11,12 @@ readme = "README.md"
 keywords = ["ai", "harness", "coding", "agent", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.91"
+exclude = [
+    "*.whl",
+    "docs/",
+    "packaging/",
+    ".github/",
+]
 
 [[bin]]
 name = "openshield"
