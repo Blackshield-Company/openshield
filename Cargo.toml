@@ -1,6 +1,6 @@
 [package]
 name = "openshield"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 authors = ["synth <synthalorian@gmail.com>"]
 description = "The harness that learns. The agent that decides."
@@ -72,6 +72,7 @@ base64 = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shellexpand = "3.1.2"
+subtle = "2"
 async-stream = "0.3"
 tower = "0.5"
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"], optional = true }
