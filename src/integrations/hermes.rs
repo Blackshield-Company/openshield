@@ -1,6 +1,6 @@
 //! Hermes Bridge — Optional two-way sync with Hermes Agent.
 //!
-//! Features: `hermes-bridge` (compile-time) + config gate (runtime)
+//! Gated at runtime by config (`enabled`). There is no compile-time feature flag.
 
 use serde::{Deserialize, Serialize};
 

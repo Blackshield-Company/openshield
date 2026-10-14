@@ -297,8 +297,12 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Tui) | None => {
             info!("Starting OpenShield TUI");
 
+            report_missing_gateway_feature(
+                "discord",
+                config.gateway.discord.enabled,
+                cfg!(feature = "discord"),
+            );
             #[cfg(feature = "discord")]
-            // Spawn Discord gateway if enabled
             if config.gateway.discord.enabled {
                 info!("Discord gateway enabled — spawning bot");
                 let discord_config = config.clone();
@@ -360,8 +364,12 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            report_missing_gateway_feature(
+                "telegram",
+                config.gateway.telegram.enabled,
+                cfg!(feature = "telegram"),
+            );
             #[cfg(feature = "telegram")]
-            // Spawn Telegram gateway if enabled
             if config.gateway.telegram.enabled {
                 info!("Telegram gateway enabled — spawning bot");
                 let telegram_config = config.clone();
@@ -403,8 +411,12 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            report_missing_gateway_feature(
+                "slack",
+                config.gateway.slack.enabled,
+                cfg!(feature = "slack"),
+            );
             #[cfg(feature = "slack")]
-            // Spawn Slack gateway if enabled
             if config.gateway.slack.enabled {
                 info!("Slack gateway enabled — spawning bot");
                 let slack_config = config.clone();
@@ -446,8 +458,12 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            report_missing_gateway_feature(
+                "matrix",
+                config.gateway.matrix.enabled,
+                cfg!(feature = "matrix"),
+            );
             #[cfg(feature = "matrix")]
-            // Spawn Matrix gateway if enabled
             if config.gateway.matrix.enabled {
                 info!("Matrix gateway enabled — spawning bot");
                 let matrix_config = config.clone();
@@ -1775,6 +1791,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn report_missing_gateway_feature(platform: &str, enabled: bool, compiled: bool) {
+    if let Some(msg) = crate::gateway::missing_feature_warning(platform, enabled, compiled) {
+        tracing::warn!("{msg}");
+        eprintln!("{msg}");
+        debug_log(&msg);
+    }
 }
 
 /// Append a line to the persistent debug log at

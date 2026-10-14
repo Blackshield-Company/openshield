@@ -37,7 +37,23 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  features:
+    name: features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy --no-default-features
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: clippy default features
+        run: cargo clippy --all-targets -- -D warnings
+      - name: check --all-features
+        run: cargo check --all-features
 
   shellcheck:
     name: shellcheck
