@@ -92,7 +92,9 @@ pub async fn serve_in_process(config_dir: &std::path::Path, addr: &str) -> anyho
         config: std::sync::Arc::new(config),
         running_tasks: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
         config_dir: Some(config_dir.to_path_buf()),
-        // Embedded hosts bind loopback inside the device; no token enforcement.
+        // TODO: embedded Android host still serves with auth: None. Require a
+        // bearer token once the WebView can send Authorization (or ?token= on
+        // /ws/ upgrades).
         auth: None,
         approvals: std::sync::Arc::new(api::approvals::ApprovalsState::new()),
         swarm: std::sync::Arc::new(api::swarm::SwarmState::new()),

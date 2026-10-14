@@ -91,6 +91,7 @@ For llama.cpp `llama-server` or llama-swap, use the same layout with `base_url =
 | `openshield stats` | Token usage and model performance |
 | `openshield models` | List available models |
 | `openshield config` | Show configuration |
+| `openshield serve` | Desktop/Pocket API. Bearer token required on every request, including loopback (`~/.config/openshield/desktop.token`; WebSocket may use `?token=`) |
 
 ## TUI Keybindings
 
