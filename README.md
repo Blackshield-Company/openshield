@@ -1,3 +1,5 @@
+![openshield](.github/preview.png)
+
 # OpenShield
 
 AI coding agent in your terminal. Rust. Open source. Blackshield by default.
