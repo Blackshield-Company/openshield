@@ -176,3 +176,25 @@ Security issues: see [SECURITY.md](SECURITY.md).
 If this project saved you time, solved a problem, or kept your terminal a little more steel-forged, you can fuel the next one:
 
 [![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://buymeacoffee.com/synthalorian)
+
+## Demo: web terminal + mock provider (no API keys)
+
+```bash
+cargo run --release -- demo                 # open http://127.0.0.1:7681
+cargo run --release -- demo --bind 0.0.0.0 --port 8080
+cargo run --release -- mock-provider        # mock OpenAI-compatible API only, http://127.0.0.1:7682/v1
+```
+
+`openshield demo` starts a built-in mock model (canned replies, no network), writes an
+isolated config whose only provider is that mock, and serves a browser terminal
+(xterm.js over WebSocket) running the full TUI. Your own `~/.config/openshield` is not used.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `OPENSHIELD_DEMO_PORT` | `7681` | Web terminal port (`--port` overrides) |
+| `OPENSHIELD_DEMO_BIND` | `127.0.0.1` | Bind address (`--bind` overrides) |
+| `OPENSHIELD_DEMO_DIR` | `$TMPDIR/openshield-demo` | Isolated config/data/workspace dir |
+| `OPENSHIELD_MOCK_PORT` | `7682` | Port for `mock-provider` |
+
+The web terminal has no authentication and gives a shell-capable agent session, so only
+expose it beyond loopback on a sandboxed host.

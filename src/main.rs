@@ -55,6 +55,8 @@ mod watch;
 
 #[cfg(feature = "web-api")]
 mod api;
+#[cfg(feature = "web-api")]
+mod demo;
 
 use crate::tools::Tool;
 use config::Config;
@@ -259,6 +261,24 @@ enum Commands {
         /// "0.0.0.0:9310" (the latter requires lan_mode = true)
         #[arg(short, long)]
         addr: Option<String>,
+    },
+    /// Browser web terminal running the TUI against the built-in mock
+    /// provider. No API keys needed.
+    #[cfg(feature = "web-api")]
+    Demo {
+        /// Port for the web terminal (env: OPENSHIELD_DEMO_PORT, default 7681)
+        #[arg(short, long)]
+        port: Option<u16>,
+        /// Bind address (env: OPENSHIELD_DEMO_BIND, default 127.0.0.1)
+        #[arg(short, long)]
+        bind: Option<String>,
+    },
+    /// Run only the mock OpenAI-compatible provider (canned replies, no keys)
+    #[cfg(feature = "web-api")]
+    MockProvider {
+        /// Port (env: OPENSHIELD_MOCK_PORT, default 7682)
+        #[arg(short, long)]
+        port: Option<u16>,
     },
     /// Start HTTP server for mobile app connectivity
     #[cfg(feature = "web-api")]
@@ -1761,6 +1781,25 @@ async fn main() -> anyhow::Result<()> {
             };
             if let Err(e) = crate::api::serve(state, &bind_addr).await {
                 eprintln!("❌ API server error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        #[cfg(feature = "web-api")]
+        Some(Commands::Demo { port, bind }) => {
+            if let Err(e) = crate::demo::run(bind, port).await {
+                eprintln!("❌ Demo error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        #[cfg(feature = "web-api")]
+        Some(Commands::MockProvider { port }) => {
+            let port = port
+                .or_else(|| crate::demo::env_port("OPENSHIELD_MOCK_PORT"))
+                .unwrap_or(7682);
+            let addr = format!("127.0.0.1:{}", port);
+            println!("🛡 Mock provider: http://{}/v1 (any API key)", addr);
+            if let Err(e) = crate::demo::mock::serve(&addr).await {
+                eprintln!("❌ Mock provider error: {}", e);
                 std::process::exit(1);
             }
         }

@@ -55,6 +55,9 @@ pub mod tui;
 #[cfg(feature = "web-api")]
 pub mod api;
 
+#[cfg(feature = "web-api")]
+pub mod demo;
+
 /// Append a line to the persistent debug log (mirrors the bin's helper).
 pub fn debug_log(msg: &str) {
     let path = dirs::data_dir()
