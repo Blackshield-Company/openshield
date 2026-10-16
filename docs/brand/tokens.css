@@ -1,0 +1,22 @@
+:root {
+  /* OpenShield brand tokens — direction A, Black Steel */
+  --os-void: #0E0E12;
+  --os-iron: #17171D;
+  --os-plate: #22222A;
+  --os-edge: #34343F;
+  --os-steel: #9AA0A8;
+  --os-bone: #E4DED2;
+  --os-blood: #C1121F;
+  --os-blood-hi: #E0303C;
+  --os-ember: #D4A72C;
+  --os-moss: #5E9E5A;
+  --os-text-muted: #C3C7CC;
+  --os-accent: var(--os-blood);
+  --os-bg: var(--os-void);
+  --os-text: var(--os-bone);
+  --os-font-display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --os-font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --os-font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+  --os-radius: 6px;
+  --os-border-width: 1px;
+}

@@ -1,15 +1,25 @@
-![openshield](.github/preview.png)
+<p align="center">
+  <img src=".github/preview.png" alt="OpenShield: AI coding agent in your terminal" width="100%">
+</p>
 
-# OpenShield
+<h1 align="center">OpenShield</h1>
 
-AI coding agent in your terminal. Rust. Open source. Blackshield by default.
+<p align="center">AI coding agent in your terminal. Rust. Open source. Any provider.</p>
 
-![OpenShield](openshield.png)
+<p align="center">
+  <a href="https://github.com/Blackshield-Company/openshield/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Blackshield-Company/openshield?sort=semver&display_name=tag&label=release&color=C1121F&labelColor=17171D&cacheSeconds=3600"></a>
+  <a href="https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-9AA0A8?labelColor=17171D"></a>
+  <a href="https://rust-lang.org"><img alt="Rust 1.91+" src="https://img.shields.io/badge/rust-1.91%2B-D4A72C?labelColor=17171D"></a>
+</p>
 
-[![Version](https://img.shields.io/github/v/release/Blackshield-Company/openshield?color=C1121F&label=version)](https://github.com/Blackshield-Company/openshield/releases)
-[![CI](https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml/badge.svg)](https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-8A8F98)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.91%2B-C9A227)](https://rust-lang.org)
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#first-run">First run</a> ·
+  <a href="#local-models-ollama-llamacpp">Local models</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="docs/brand/README.md">Brand</a>
+</p>
 
 ## What It Does
 
@@ -160,8 +170,10 @@ CARGO_PROFILE_RELEASE_LTO=false cargo build --release -j4
 ## More
 
 - [CHANGELOG.md](CHANGELOG.md) — Version history
-- [ROADMAP.md](ROADMAP.md) — Future plans
-- [STATUS.md](STATUS.md) — Current development status
+- [docs/planning/ROADMAP.md](docs/planning/ROADMAP.md) — Future plans
+- [docs/planning/STATUS.md](docs/planning/STATUS.md) — Current development status
+- [docs/planning/](docs/planning/) — Audits, plans and release notes
+- [docs/brand/](docs/brand/README.md) — Logo, wordmark, colors and type
 
 ## License
 
