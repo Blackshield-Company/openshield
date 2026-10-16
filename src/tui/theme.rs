@@ -54,74 +54,75 @@ impl Theme {
         self.border
     }
 
+    /// Black Steel palette (docs/brand/tokens.css).
     pub const fn blackshield() -> Self {
         Self {
             name: "blackshield",
             bg: Color::Rgb {
-                r: 13,
-                g: 13,
-                b: 17,
-            }, // void #0D0D11
+                r: 14,
+                g: 14,
+                b: 18,
+            }, // void #0E0E12
             fg: Color::Rgb {
-                r: 216,
-                g: 211,
-                b: 200,
-            }, // bone #D8D3C8
+                r: 228,
+                g: 222,
+                b: 210,
+            }, // bone #E4DED2
             accent: Color::Rgb {
                 r: 193,
                 g: 18,
                 b: 31,
             }, // blood #C1121F
             accent_secondary: Color::Rgb {
-                r: 201,
-                g: 162,
-                b: 39,
-            }, // war-gold #C9A227
+                r: 212,
+                g: 167,
+                b: 44,
+            }, // ember #D4A72C
             accent_tertiary: Color::Rgb {
-                r: 91,
-                g: 127,
-                b: 166,
-            }, // steel-blue #5B7FA6
+                r: 154,
+                g: 160,
+                b: 168,
+            }, // steel #9AA0A8
             muted: Color::Rgb {
-                r: 138,
-                g: 143,
-                b: 152,
-            }, // ash #8A8F98
+                r: 154,
+                g: 160,
+                b: 168,
+            }, // steel #9AA0A8
             border: Color::Rgb {
-                r: 26,
-                g: 26,
-                b: 32,
-            }, // steel-light #1A1A20
+                r: 52,
+                g: 52,
+                b: 63,
+            }, // edge #34343F
             border_focused: Color::Rgb {
                 r: 193,
                 g: 18,
                 b: 31,
             }, // blood
             error: Color::Rgb {
-                r: 193,
-                g: 18,
-                b: 31,
-            }, // blood
+                r: 224,
+                g: 48,
+                b: 60,
+            }, // blood-hi #E0303C
             success: Color::Rgb {
-                r: 106,
-                g: 153,
-                b: 78,
-            }, // field-green #6A994E
+                r: 94,
+                g: 158,
+                b: 90,
+            }, // moss #5E9E5A
             warning: Color::Rgb {
-                r: 201,
-                g: 162,
-                b: 39,
-            }, // war-gold
+                r: 212,
+                g: 167,
+                b: 44,
+            }, // ember
             selection: Color::Rgb {
                 r: 193,
                 g: 18,
                 b: 31,
             }, // blood
             highlight: Color::Rgb {
-                r: 255,
-                g: 107,
-                b: 114,
-            }, // blood-bright #FF6B72
+                r: 224,
+                g: 48,
+                b: 60,
+            }, // blood-hi #E0303C
             shield: Color::Rgb {
                 r: 193,
                 g: 18,

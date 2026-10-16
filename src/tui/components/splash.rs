@@ -1,6 +1,6 @@
 /// Direct ANSI rendering for the splash screen.
-/// Displays the OpenShield banner with Blackshield sigil art, version info, and session details.
-/// Styled after the Hermes Agent TUI launch screen.
+/// Displays the OpenShield banner with the Black Steel shield, version info,
+/// session details and a live prompt.
 ///
 /// ANTI-FLICKER: Uses a static flag to only clear+draw once. Subsequent calls
 /// just re-flush the existing buffer. This eliminates the seizure-inducing
@@ -18,7 +18,6 @@ use crossterm::{
 use crate::tui::App;
 use crate::tui::ascii_art;
 use crate::tui::sprites::Sprite;
-use crate::tui::theme::{ansi_fg, ansi_reset, current_theme};
 
 static SPLASH_DRAWN: AtomicBool = AtomicBool::new(false);
 
@@ -37,7 +36,7 @@ static SPRITE_FRAME: AtomicUsize = AtomicUsize::new(0);
 const TICKS_PER_FRAME: usize = 10;
 
 /// Draw the full-screen splash screen using direct ANSI output.
-/// Dismissed by any keypress.
+/// Dismissed by the first keypress, which also reaches the input line.
 ///
 /// Anti-flicker: only clears and redraws on the first call. After that,
 /// the screen stays static until the user dismisses it — except the mascot
@@ -67,6 +66,7 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
             branch: detect_git_branch(&directory),
             session: app.session_id.clone(),
             directory,
+            show_shield: app.sprite.is_none(),
         };
 
         // Get banner text
@@ -152,12 +152,9 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
             SPRITE_FRAME.store(0, Ordering::Relaxed);
         }
 
-        // "Press any key" prompt
-        let prompt = format!(
-            "{}Press any key to start{}",
-            ansi_fg(current_theme().accent),
-            ansi_reset()
-        );
+        // Live prompt: the first keystroke dismisses the splash and lands in
+        // the input line (see handle_input), so there is no key gate.
+        let prompt = ascii_art::splash_prompt();
         let prompt_x = (term_width.saturating_sub(visible_width(&prompt) as u16)) / 2;
         queue!(
             out,
@@ -299,6 +296,7 @@ mod tests {
             branch: "main".to_string(),
             session: "test-session".to_string(),
             directory: "/tmp/test".to_string(),
+            show_shield: false,
         };
         let term_width = 200u16;
         let term_height = 60u16;

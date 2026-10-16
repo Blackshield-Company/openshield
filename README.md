@@ -26,7 +26,7 @@
 - **Persistent memory** — SQLite-backed sessions with keyword and semantic search. Close the terminal, come back next week, it still knows what you were doing.
 - **Any model provider** — Works with any OpenAI-compatible API. OpenRouter, llama-swap, xAI, local servers. Not locked to anyone.
 - **Autonomous agent mode** — Plans, executes, verifies, retries. You approve the plan, it does the work.
-- **Blackshield TUI** — Blood, steel, bone, and void palette with the Blackshield Mercenary shield on launch.
+- **Black Steel TUI** — Void, steel, bone and blood palette, a flat shield with a plain Greek cross, and a launch screen you can start typing into.
 
 ## Install
 
