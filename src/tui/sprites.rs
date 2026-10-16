@@ -98,11 +98,6 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    /// Number of animation frames (always >= 1 for a successfully parsed sprite).
-    pub fn frame_count(&self) -> usize {
-        self.frames.len()
-    }
-
     /// Frames for a state, falling back to the idle frames when the sprite
     /// does not define that state.
     pub fn frames_for(&self, state: SpriteState) -> &[String] {
@@ -312,7 +307,7 @@ line two
     fn multi_frame_parse() {
         let sprite = parse_sprite("test", MULTI_FRAME).expect("should parse");
         assert_eq!(sprite.name, "test");
-        assert_eq!(sprite.frame_count(), 3);
+        assert_eq!(sprite.frames.len(), 3);
         assert!(sprite.frames[0].contains("frame one"));
         assert!(sprite.frames[0].contains("line two"));
         assert!(sprite.frames[1].contains("frame two"));
@@ -361,7 +356,7 @@ line two
     fn stock_sprite_loads_and_has_animation_frames() {
         let sprite = load_stock_sprite();
         assert_eq!(sprite.name, STOCK_SPRITE);
-        assert!(sprite.frame_count() >= 2, "stock sprite must animate");
+        assert!(sprite.frames.len() >= 2, "stock sprite must animate");
     }
 
     #[test]
