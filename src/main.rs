@@ -36,6 +36,7 @@ mod lsp;
 mod mcp;
 mod mcp_server;
 mod memory;
+mod paths;
 mod plugins;
 mod providers;
 mod repo_map;
@@ -295,6 +296,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+    paths::migrate_legacy();
 
     // Panics in background tasks are invisible inside the TUI's alternate
     // screen — route them to a persistent log so silent deaths are debuggable.
@@ -541,9 +543,8 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(Commands::Config) => {
             println!("🛡 OpenShield Config");
-            let config_path = dirs::config_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("openshield")
+            let config_path = crate::paths::config_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
                 .join("config.toml");
             println!("Config file: {}", config_path.display());
             if config_path.exists() {
@@ -1645,8 +1646,8 @@ async fn main() -> anyhow::Result<()> {
                     "Each profile is a separate config.json with its own model, provider, and settings."
                 );
             } else {
-                let profile_dir = dirs::config_dir()
-                    .map(|d| d.join("openshield").join("profiles"))
+                let profile_dir = crate::paths::config_dir()
+                    .map(|d| d.join("profiles"))
                     .unwrap_or_else(|| PathBuf::from(".openshield/profiles"));
                 let profile_path = profile_dir.join(format!("{}.json", name));
                 if profile_path.exists() {
@@ -1821,9 +1822,8 @@ async fn main() -> anyhow::Result<()> {
 /// screen, so stderr output (panics, background task errors) is invisible —
 /// this log is the only way to see what killed a background task.
 pub fn debug_log(msg: &str) {
-    let path = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield")
+    let path = crate::paths::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
         .join("openshield.log");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);

@@ -142,6 +142,20 @@ capabilities = ["code", "chat", "analysis"]
 
 </details>
 
+## File locations
+
+Linux and macOS follow the XDG Base Directory spec. A relative `XDG_*_HOME` is ignored. Windows keeps the standard per-user config, data, and cache folders.
+
+| | Unix default | Override |
+|---|---|---|
+| Config | `~/.config/openshield` | `$XDG_CONFIG_HOME/openshield` |
+| Data | `~/.local/share/openshield` | `$XDG_DATA_HOME/openshield` |
+| Cache | `~/.cache/openshield` | `$XDG_CACHE_HOME/openshield` |
+
+The desktop token defaults to `~/.config/openshield/desktop.token` (resolved against the config dir at runtime). `memory.db` and `sessions/` live in the data dir; the response cache lives in the cache dir.
+
+On macOS, files previously under `~/Library/Application Support/openshield` and `~/Library/Caches/openshield` are moved on first launch. The old path is left as a symlink (or a `MOVED_TO_XDG.txt` note if the symlink cannot be created).
+
 ## Development
 
 ```bash

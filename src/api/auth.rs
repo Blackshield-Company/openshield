@@ -331,10 +331,9 @@ pub fn cors_layer(extra: Vec<String>) -> tower_http::cors::CorsLayer {
 /// The token is 64 hex chars (two UUIDv4s, no hyphens). The file is created
 /// with mode 600 on unix so only the owner can read it.
 pub fn ensure_token_file(path: &str) -> anyhow::Result<String> {
-    let expanded = shellexpand::tilde(path).to_string();
-    let path = std::path::Path::new(&expanded);
+    let path = crate::paths::resolve_user_path(path);
 
-    if let Ok(existing) = std::fs::read_to_string(path) {
+    if let Ok(existing) = std::fs::read_to_string(&path) {
         let token = existing.trim().to_string();
         if !token.is_empty() {
             return Ok(token);
@@ -349,11 +348,11 @@ pub fn ensure_token_file(path: &str) -> anyhow::Result<String> {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    std::fs::write(path, format!("{token}\n"))?;
+    std::fs::write(&path, format!("{token}\n"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
     tracing::info!("Generated desktop auth token at {}", path.display());
     Ok(token)

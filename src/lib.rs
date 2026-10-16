@@ -32,6 +32,7 @@ pub mod lsp;
 pub mod mcp;
 pub mod mcp_server;
 pub mod memory;
+pub mod paths;
 pub mod plugins;
 pub mod providers;
 pub mod repo_map;
@@ -60,9 +61,8 @@ pub mod demo;
 
 /// Append a line to the persistent debug log (mirrors the bin's helper).
 pub fn debug_log(msg: &str) {
-    let path = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("openshield")
+    let path = crate::paths::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("openshield"))
         .join("openshield.log");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);

@@ -3218,6 +3218,7 @@ dependencies = [
  "slack-morphism",
  "subtle",
  "teloxide",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
