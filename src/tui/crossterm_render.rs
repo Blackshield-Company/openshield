@@ -36,19 +36,19 @@ impl Default for BlackshieldTheme {
 impl BlackshieldTheme {
     pub const fn blackshield() -> Self {
         Self {
-            bg: Color::Rgb { r: 13, g: 13, b: 17 },
-            fg: Color::Rgb { r: 216, g: 211, b: 200 },
+            bg: Color::Rgb { r: 14, g: 14, b: 18 },
+            fg: Color::Rgb { r: 228, g: 222, b: 210 },
             accent: Color::Rgb { r: 193, g: 18, b: 31 },
-            accent_secondary: Color::Rgb { r: 201, g: 162, b: 39 },
-            accent_tertiary: Color::Rgb { r: 91, g: 127, b: 166 },
-            muted: Color::Rgb { r: 138, g: 143, b: 152 },
-            border: Color::Rgb { r: 26, g: 26, b: 32 },
+            accent_secondary: Color::Rgb { r: 212, g: 167, b: 44 },
+            accent_tertiary: Color::Rgb { r: 154, g: 160, b: 168 },
+            muted: Color::Rgb { r: 154, g: 160, b: 168 },
+            border: Color::Rgb { r: 52, g: 52, b: 63 },
             border_focused: Color::Rgb { r: 193, g: 18, b: 31 },
-            error: Color::Rgb { r: 193, g: 18, b: 31 },
-            success: Color::Rgb { r: 106, g: 153, b: 78 },
-            warning: Color::Rgb { r: 201, g: 162, b: 39 },
+            error: Color::Rgb { r: 224, g: 48, b: 60 },
+            success: Color::Rgb { r: 94, g: 158, b: 90 },
+            warning: Color::Rgb { r: 212, g: 167, b: 44 },
             selection: Color::Rgb { r: 193, g: 18, b: 31 },
-            highlight: Color::Rgb { r: 255, g: 107, b: 114 },
+            highlight: Color::Rgb { r: 224, g: 48, b: 60 },
             shield: Color::Rgb { r: 193, g: 18, b: 31 },
         }
     }
