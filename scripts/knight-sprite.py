@@ -6,6 +6,11 @@ exported as truecolor ANSI with half-block characters: a 32x28 px canvas becomes
 32x14 terminal cells, two frames (cloak hem and plume sway) separated by
 `---frame---`, the format read by src/tui/sprites.rs.
 
+The stock sprite (variant a) carries five animation states, each a group of
+frames under a `---state:<name>---` marker: idle (breathing, plume and cloak
+sway), thinking, working (sword ready and strike), success (shield raised)
+and error (stagger with a red flash).
+
 Variants:
   a  plumed sellsword: great helm, blood plume, heater shield with a plain
      Greek cross, planted longsword, crimson cloak (the stock sprite)
@@ -36,7 +41,9 @@ C=dict(
  i=(23,23,29),      # iron #17171D shield field
 )
 def canvas(): return [[None]*W for _ in range(H)]
+OFF=[0,0]
 def put(g,x,y,col):
+    x+=OFF[0]; y+=OFF[1]
     if 0<=x<W and 0<=y<H: g[y][x]=col
 def rect(g,x0,y0,x1,y1,col):
     for y in range(y0,y1+1):
@@ -82,44 +89,100 @@ def heater(g,x0,y0,w,h,cross=True):
         rect(g,cx-t,cy-a,cx+t,cy+a,'R'); rect(g,cx-a,cy-t,cx+a,cy+t,'R')
     for x in range(x0+1,x1+1): put(g,x,y0,'h')
 
-def variant_a(frame):
-    g=canvas(); sway=frame
-    # cloak behind
+def knight_a(p):
+    """Draw knight A from a pose dict (see POSES)."""
+    g=canvas(); sway=p.get('hem',0)
+    OFF[:]=[0,0]
     hem=[(5,27),(8,26),(11,27),(15,26),(19,27),(23,26),(26,27)] if not sway else [(6,27),(9,27),(12,26),(16,27),(20,26),(24,27),(27,26)]
     poly(g,[(9,9),(23,9),(27,hem[-1][1])]+hem[::-1]+[(5,hem[0][1])],shade(5,27,['k','c','c','C']))
-    # legs
     rect(g,12,21,14,27,'m'); rect(g,12,21,12,27,'S'); rect(g,17,21,19,27,'m'); rect(g,17,21,17,27,'S')
     rect(g,11,26,14,27,'d'); rect(g,17,26,20,27,'d')
-    # tasset / skirt
+    OFF[:]=[0,p.get('breath',0)]
     poly(g,[(11,18),(21,18),(22,22),(10,22)],shade(10,22,['S','s','m','d']))
     rect(g,10,22,22,22,'d')
-    # torso
     poly(g,[(11,10),(21,10),(20,18),(12,18)],shade(11,21,['h','S','s','m','d']))
     rect(g,15,11,16,17,'S'); put(g,15,11,'h')
-    rect(g,11,18,21,18,'d'); rect(g,15,18,16,18,'b')  # belt + buckle
-    # right arm + sword (viewer's right)
-    rect(g,21,12,23,16,'m'); rect(g,21,12,21,16,'S')
-    rect(g,24,17,24,27,'h'); rect(g,25,17,25,26,'S')   # blade
-    rect(g,22,16,27,16,'b')                          # crossguard
-    rect(g,24,14,25,15,'d'); rect(g,24,13,25,13,'b')   # grip, pommel
-    rect(g,22,14,23,15,'s')                          # gauntlet
-    # pauldrons
+    rect(g,11,18,21,18,'d'); rect(g,15,18,16,18,'b')
+    sword=p.get('sword','planted')
+    if sword=='planted':
+        rect(g,21,12,23,16,'m'); rect(g,21,12,21,16,'S')
+        rect(g,24,17,24,27,'h'); rect(g,25,17,25,26,'S'); rect(g,22,16,27,16,'b')
+        rect(g,24,14,25,15,'d'); rect(g,24,13,25,13,'b'); rect(g,22,14,23,15,'s')
+    elif sword=='ready':   # raised beside the helm, point up
+        rect(g,21,11,23,15,'m'); rect(g,21,11,21,15,'S')
+        rect(g,24,0,24,11,'h'); rect(g,25,1,25,11,'S'); rect(g,22,12,27,12,'b')
+        rect(g,24,13,25,14,'d'); rect(g,24,15,25,15,'b'); rect(g,22,13,23,14,'s')
+    elif sword=='strike':  # swung forward, blade level
+        rect(g,21,12,24,15,'m'); rect(g,21,12,21,15,'S')
+        rect(g,27,13,31,13,'h'); rect(g,27,14,31,14,'S'); rect(g,26,11,26,16,'b')
+        rect(g,24,13,25,14,'d'); put(g,23,13,'b')
+        for x,y in ((29,11),(31,16),(28,16)): put(g,x,y,'b')  # motion glints
     ell(g,10.5,11,4,3,shade(6,15,['h','S','s','m']))
     ell(g,21.5,11,4,3,shade(18,26,['S','s','m','d']))
     for x in range(7,15): put(g,x,12,'m')
     for x in range(18,26): put(g,x,12,'d')
-    # helm
+    rect(g,13,10,19,10,'s'); rect(g,13,10,14,10,'S')
+    OFF[:]=[0,p.get('breath',0)+p.get('head',0)]
     poly(g,[(12,4),(20,4),(20,9),(16,10),(12,9)],shade(12,20,['h','S','S','s','m']))
     ell(g,16,4.5,4,2,shade(12,20,['h','S','s','m']))
-    rect(g,12,6,19,6,'o'); rect(g,13,6,14,6,'b')       # visor slit + glint
-    rect(g,16,7,16,9,'S'); put(g,14,8,'o'); put(g,18,8,'o')  # ridge + breaths
-    rect(g,13,10,19,10,'s'); rect(g,13,10,14,10,'S')   # gorget
-    # plume
-    px=0 if not sway else 1
+    rect(g,12,6,19,6,'o'); rect(g,13,6,14,6,'b')
+    rect(g,16,7,16,9,'S'); put(g,14,8,'o'); put(g,18,8,'o')
+    px=p.get('plume',0)
     for (x,y,col) in [(16,2,'R'),(17,2,'R'),(17,1,'R'),(18,1,'R'),(18+px,0,'R'),(19+px,0,'R'),(19+px,1,'R'),(20+px,1,'c'),(20+px,2,'c'),(18,2,'c'),(16,3,'R'),(17,3,'c')]: put(g,x,y,col)
-    # shield (viewer's left)
+    for i in range(p.get('dots',0)):   # thinking dots
+        put(g,8+i*2,2,'b')
+    OFF[:]=[0,p.get('breath',0)-p.get('shield_up',0)]
     heater(g,2,12,11,14)
-    return outline(g)
+    OFF[:]=[0,0]
+    if p.get('shield_up',0)>=4:
+        for x,y in ((1,4),(12,3),(7,2)): put(g,x,y,'b')   # glints
+    g=outline(g)
+    dx=p.get('dx',0)
+    if dx:
+        g=[([None]*dx+row[:-dx]) if dx>0 else (row[-dx:]+[None]*(-dx)) for row in g]
+    if p.get('flash'):
+        g=[[('R' if k=='o' else ('k' if k in ('S','h') else k)) for k in row] for row in g]
+    return g
+
+
+def variant_a(frame):
+    return knight_a({'hem': frame, 'plume': frame})
+
+
+# Animation states for knight A: state -> list of poses (one per frame).
+POSES = {
+    "idle": [
+        {"breath": 0, "plume": 0, "hem": 0},
+        {"breath": 0, "plume": 1, "hem": 0},
+        {"breath": 1, "plume": 1, "hem": 1},
+        {"breath": 1, "plume": 0, "hem": 1},
+    ],
+    "thinking": [
+        {"head": 1, "dots": 1},
+        {"head": 1, "dots": 2, "plume": 1},
+        {"head": 1, "dots": 3, "plume": 1},
+        {"head": 1, "dots": 0},
+    ],
+    "working": [
+        {"sword": "planted"},
+        {"sword": "ready", "plume": 1},
+        {"sword": "strike", "plume": 1, "hem": 1},
+        {"sword": "ready", "hem": 1},
+    ],
+    "success": [
+        {"shield_up": 2},
+        {"shield_up": 4, "plume": 1},
+        {"shield_up": 4, "plume": 0, "hem": 1},
+    ],
+    "error": [
+        {"dx": -1, "flash": True},
+        {"dx": 1},
+        {"dx": -1, "head": 1},
+        {"dx": 0, "head": 1},
+    ],
+}
+STATES = list(POSES)
+
 
 def variant_b(frame):
     g=canvas(); sway=frame
@@ -176,15 +239,22 @@ STOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets",
 
 def render(variant):
     fn, desc = VARIANTS[variant]
-    frames = [fn(0), fn(1)]
     header = (
         f"# blackshield-mercenary: Black Steel knight, {desc}.\n"
-        "# 32x14 cells, truecolor half-blocks, two frames (cloak and plume sway).\n"
+        "# 32x14 cells, truecolor half-blocks.\n"
         "# Palette: docs/brand/tokens.css.\n"
         f"# Generated by scripts/knight-sprite.py (variant {variant}); edit the script, not the art.\n"
     )
-    body = "\n---frame---\n".join("\n".join(to_ans(f)) for f in frames)
-    return header + body + "\n"
+    if variant == "a":
+        blocks = []
+        for state in STATES:
+            frames = [knight_a(p) for p in POSES[state]]
+            blocks.append(
+                f"---state:{state}---\n" + "\n---frame---\n".join("\n".join(to_ans(f)) for f in frames)
+            )
+        return header + "\n".join(blocks) + "\n"
+    frames = [fn(0), fn(1)]
+    return header + "\n---frame---\n".join("\n".join(to_ans(f)) for f in frames) + "\n"
 
 
 def main():

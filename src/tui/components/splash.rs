@@ -144,7 +144,14 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
                 let x = (term_width.saturating_sub(max_width as u16)) / 2;
                 (x, vertical_offset)
             };
-            draw_sprite_frame(&mut out, sprite, 0, top, x, max_width)?;
+            draw_sprite_frame(
+                &mut out,
+                sprite.frames_for(app.sprite_state()),
+                0,
+                top,
+                x,
+                max_width,
+            )?;
             SPRITE_TOP.store(top as usize, Ordering::Relaxed);
             SPRITE_X.store(x as usize, Ordering::Relaxed);
             SPRITE_HEIGHT.store(sprite_height as usize, Ordering::Relaxed);
@@ -167,7 +174,10 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
 
         // Mark as drawn so we never clear again
         SPLASH_DRAWN.store(true, Ordering::Relaxed);
-    } else if app.sprite.as_ref().is_some_and(|s| s.frame_count() > 1)
+    } else if app
+        .sprite
+        .as_ref()
+        .is_some_and(|s| s.frames_for(app.sprite_state()).len() > 1)
         && SPRITE_HEIGHT.load(Ordering::Relaxed) > 0
     {
         // Animated redraw: only the sprite region, in place, on frame change.
@@ -175,12 +185,13 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
         // max width), so no full-screen clear is needed.
         let tick = SPLASH_TICK.fetch_add(1, Ordering::Relaxed);
         let sprite = app.sprite.as_ref().expect("checked above");
-        let frame_idx = (tick / TICKS_PER_FRAME) % sprite.frame_count();
+        let frames = sprite.frames_for(app.sprite_state());
+        let frame_idx = (tick / TICKS_PER_FRAME) % frames.len();
         if frame_idx != SPRITE_FRAME.load(Ordering::Relaxed) {
             let top = SPRITE_TOP.load(Ordering::Relaxed) as u16;
             let x = SPRITE_X.load(Ordering::Relaxed) as u16;
             let max_width = SPRITE_MAX_WIDTH.load(Ordering::Relaxed);
-            draw_sprite_frame(&mut out, sprite, frame_idx, top, x, max_width)?;
+            draw_sprite_frame(&mut out, frames, frame_idx, top, x, max_width)?;
             SPRITE_FRAME.store(frame_idx, Ordering::Relaxed);
             out.flush()?;
         }
@@ -193,13 +204,15 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
 /// so a previous (longer) frame never leaves residue behind.
 fn draw_sprite_frame(
     out: &mut impl Write,
-    sprite: &Sprite,
+    frames: &[String],
     frame_idx: usize,
     top: u16,
     left: u16,
     max_width: usize,
 ) -> io::Result<()> {
-    let frame = &sprite.frames[frame_idx % sprite.frame_count()];
+    let Some(frame) = frames.get(frame_idx % frames.len().max(1)) else {
+        return Ok(());
+    };
     for (i, line) in frame.lines().enumerate() {
         let visible = visible_width(line);
         let padding = max_width.saturating_sub(visible);
@@ -214,11 +227,17 @@ fn draw_sprite_frame(
     Ok(())
 }
 
-/// Height of the tallest frame (all frames occupy the same row band).
-pub(crate) fn max_frame_height(sprite: &Sprite) -> usize {
+/// Every frame of every animation state.
+fn all_frames(sprite: &Sprite) -> impl Iterator<Item = &String> {
     sprite
         .frames
         .iter()
+        .chain(sprite.states.iter().flat_map(|(_, f)| f.iter()))
+}
+
+/// Height of the tallest frame (all frames occupy the same row band).
+pub(crate) fn max_frame_height(sprite: &Sprite) -> usize {
+    all_frames(sprite)
         .map(|f| f.lines().count())
         .max()
         .unwrap_or(0)
@@ -226,9 +245,7 @@ pub(crate) fn max_frame_height(sprite: &Sprite) -> usize {
 
 /// Widest visible line across all frames — the frame band's clear width.
 pub(crate) fn sprite_max_frame_width(sprite: &Sprite) -> usize {
-    sprite
-        .frames
-        .iter()
+    all_frames(sprite)
         .flat_map(|f| f.lines())
         .map(visible_width)
         .max()
