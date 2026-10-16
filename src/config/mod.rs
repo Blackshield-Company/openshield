@@ -265,8 +265,9 @@ pub struct Config {
     /// repo scan on huge/non-project directories.
     #[serde(default = "default_code_index_enabled")]
     pub code_index_enabled: bool,
-    /// Mascot sprite shown on the splash screen. "blackshield-mercenary" is
-    /// the stock sprite; "none" disables the sprite (banner-only splash).
+    /// Mascot sprite shown on the splash screen. Defaults to "none" (the
+    /// Black Steel shield layout); "blackshield-mercenary" is the stock
+    /// knight sprite.
     /// Custom sprites: drop `*.ans`/`*.txt` files in
     /// ~/.config/openshield/sprites/ (they override stock sprites of the
     /// same name). Switch at runtime with /sprite.
@@ -320,8 +321,12 @@ fn default_code_index_enabled() -> bool {
     true
 }
 
+/// Default: no mascot sprite, so the splash shows the Black Steel shield
+/// beside the wordmark. Opt into the knight with
+/// `sprite = "blackshield-mercenary"` or `/sprite blackshield-mercenary`.
+/// A sprite set explicitly in config.toml is always kept.
 fn default_sprite() -> String {
-    "blackshield-mercenary".to_string()
+    "none".to_string()
 }
 
 // Deprecated: kept for backward compatibility. Use gateway instead.
@@ -1164,5 +1169,28 @@ mod tests {
             "openai_compatible"
         );
         assert_eq!(ProviderKind::Anthropic.to_string(), "anthropic");
+    }
+
+    #[test]
+    fn sprite_defaults_to_none_when_unset() {
+        let full = toml::to_string(&Config::default()).expect("serialize default config");
+        let without_sprite: String = full
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("sprite ="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: Config = toml::from_str(&without_sprite).expect("parse config");
+        assert_eq!(parsed.sprite, "none");
+    }
+
+    #[test]
+    fn explicit_sprite_in_config_is_kept() {
+        let cfg = Config {
+            sprite: "blackshield-mercenary".to_string(),
+            ..Config::default()
+        };
+        let text = toml::to_string(&cfg).expect("serialize config");
+        let parsed: Config = toml::from_str(&text).expect("parse config");
+        assert_eq!(parsed.sprite, "blackshield-mercenary");
     }
 }
