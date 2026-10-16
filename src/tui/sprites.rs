@@ -24,6 +24,14 @@
 //! `{muted}` `{blood}` (alias for `{accent}`) `{bone}` (alias for `{fg}`)
 //! `{reset}`
 //!
+//! ## Animation states
+//!
+//! A file may group frames into named states with a line containing exactly
+//! `---state:<name>---` (names: `idle`, `thinking`, `working`, `success`,
+//! `error`). Frames after a marker belong to that state until the next one.
+//! Files without markers are a single `idle` state, so older sprites keep
+//! working unchanged. Unknown state names are ignored.
+//!
 //! The name of the sprite is the filename minus its extension.
 
 use std::path::{Path, PathBuf};
@@ -42,18 +50,62 @@ const BUILTIN_SPRITES: &[(&str, &str)] = &[(
     include_str!("../../assets/sprites/blackshield-mercenary.ans"),
 )];
 
+/// Animation state of the mascot, driven by what the agent is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpriteState {
+    Idle,
+    Thinking,
+    Working,
+    Success,
+    Error,
+}
+
+impl SpriteState {
+    /// Parse a state name from a `---state:<name>---` marker.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "idle" => Some(Self::Idle),
+            "thinking" => Some(Self::Thinking),
+            "working" => Some(Self::Working),
+            "success" => Some(Self::Success),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+
+/// Map agent activity to a sprite state: streaming with no output yet is
+/// thinking, streaming output or running tools is working, otherwise idle.
+pub fn agent_sprite_state(streaming: bool, has_output: bool, tools_active: bool) -> SpriteState {
+    if tools_active || (streaming && has_output) {
+        SpriteState::Working
+    } else if streaming {
+        SpriteState::Thinking
+    } else {
+        SpriteState::Idle
+    }
+}
+
 /// A loaded mascot sprite: named, with one or more animation frames.
 /// Each frame is a multi-line UTF-8 string; ANSI escapes are pre-baked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sprite {
     pub name: String,
+    /// Idle frames (the first state when the file has no `idle` state).
     pub frames: Vec<String>,
+    /// Frames per animation state, in file order.
+    pub states: Vec<(SpriteState, Vec<String>)>,
 }
 
 impl Sprite {
-    /// Number of animation frames (always >= 1 for a successfully parsed sprite).
-    pub fn frame_count(&self) -> usize {
-        self.frames.len()
+    /// Frames for a state, falling back to the idle frames when the sprite
+    /// does not define that state.
+    pub fn frames_for(&self, state: SpriteState) -> &[String] {
+        self.states
+            .iter()
+            .find(|(s, _)| *s == state)
+            .map(|(_, f)| f.as_slice())
+            .unwrap_or(&self.frames)
     }
 }
 
@@ -78,10 +130,10 @@ fn apply_theme_tokens(content: &str) -> String {
     out
 }
 
-/// Parse sprite file content into frames: split on the frame separator,
-/// drop comments and blank lines around frames, then bake theme tokens.
-/// Wholly-empty frames are discarded; if nothing survives, returns None.
-fn parse_sprite(name: &str, content: &str) -> Option<Sprite> {
+/// Parse one block of frames: split on the frame separator, drop comments
+/// and blank lines around frames, then bake theme tokens. Wholly-empty
+/// frames are discarded.
+fn parse_frames(content: &str) -> Vec<String> {
     let mut frames: Vec<String> = Vec::new();
     for raw_frame in content.split(FRAME_SEP) {
         let frame: String = raw_frame
@@ -96,12 +148,50 @@ fn parse_sprite(name: &str, content: &str) -> Option<Sprite> {
         }
         frames.push(apply_theme_tokens(&frame));
     }
-    if frames.is_empty() {
-        return None;
+    frames
+}
+
+/// Parse sprite file content into states and frames (see the module docs).
+/// If no frames survive, returns None.
+fn parse_sprite(name: &str, content: &str) -> Option<Sprite> {
+    // Split into (state, block) sections on `---state:<name>---` lines.
+    let mut sections: Vec<(Option<SpriteState>, String)> =
+        vec![(Some(SpriteState::Idle), String::new())];
+    for line in content.lines() {
+        let t = line.trim();
+        if let Some(rest) = t
+            .strip_prefix("---state:")
+            .and_then(|r| r.strip_suffix("---"))
+        {
+            sections.push((SpriteState::from_name(rest), String::new()));
+            continue;
+        }
+        if let Some((_, block)) = sections.last_mut() {
+            block.push_str(line);
+            block.push('\n');
+        }
     }
+    let mut states: Vec<(SpriteState, Vec<String>)> = Vec::new();
+    for (state, block) in sections {
+        let Some(state) = state else { continue };
+        let frames = parse_frames(&block);
+        if frames.is_empty() {
+            continue;
+        }
+        match states.iter_mut().find(|(s, _)| *s == state) {
+            Some((_, existing)) => existing.extend(frames),
+            None => states.push((state, frames)),
+        }
+    }
+    let frames = states
+        .iter()
+        .find(|(s, _)| *s == SpriteState::Idle)
+        .or_else(|| states.first())
+        .map(|(_, f)| f.clone())?;
     Some(Sprite {
         name: name.to_string(),
         frames,
+        states,
     })
 }
 
@@ -217,7 +307,7 @@ line two
     fn multi_frame_parse() {
         let sprite = parse_sprite("test", MULTI_FRAME).expect("should parse");
         assert_eq!(sprite.name, "test");
-        assert_eq!(sprite.frame_count(), 3);
+        assert_eq!(sprite.frames.len(), 3);
         assert!(sprite.frames[0].contains("frame one"));
         assert!(sprite.frames[0].contains("line two"));
         assert!(sprite.frames[1].contains("frame two"));
@@ -266,7 +356,58 @@ line two
     fn stock_sprite_loads_and_has_animation_frames() {
         let sprite = load_stock_sprite();
         assert_eq!(sprite.name, STOCK_SPRITE);
-        assert!(sprite.frame_count() >= 2, "stock sprite must animate");
+        assert!(sprite.frames.len() >= 2, "stock sprite must animate");
+    }
+
+    #[test]
+    fn parses_named_states() {
+        let content = "# c\n---state:idle---\nA1\n---frame---\nA2\n---state:thinking---\nT1\n---state:bogus---\nX\n---state:error---\nE1\n";
+        let sprite = parse_sprite("s", content).expect("parses");
+        assert_eq!(sprite.frames.len(), 2);
+        assert_eq!(sprite.frames_for(SpriteState::Thinking).len(), 1);
+        assert!(sprite.frames_for(SpriteState::Error)[0].contains("E1"));
+        // Missing state falls back to idle; unknown state is ignored.
+        assert_eq!(
+            sprite.frames_for(SpriteState::Success),
+            sprite.frames.as_slice()
+        );
+        assert!(!sprite.frames.iter().any(|f| f.contains('X')));
+    }
+
+    #[test]
+    fn files_without_states_are_idle() {
+        let sprite = parse_sprite("s", "one\n---frame---\ntwo\n").expect("parses");
+        assert_eq!(sprite.states.len(), 1);
+        assert_eq!(sprite.states[0].0, SpriteState::Idle);
+        assert_eq!(sprite.frames_for(SpriteState::Working).len(), 2);
+    }
+
+    #[test]
+    fn agent_activity_maps_to_states() {
+        assert_eq!(agent_sprite_state(false, false, false), SpriteState::Idle);
+        assert_eq!(
+            agent_sprite_state(true, false, false),
+            SpriteState::Thinking
+        );
+        assert_eq!(agent_sprite_state(true, true, false), SpriteState::Working);
+        assert_eq!(agent_sprite_state(false, false, true), SpriteState::Working);
+    }
+
+    #[test]
+    fn stock_sprite_defines_every_state() {
+        let sprite = load_stock_sprite();
+        for state in ["idle", "thinking", "working", "success", "error"] {
+            let st = SpriteState::from_name(state).expect("known state");
+            let frames = sprite.frames_for(st);
+            assert!(
+                sprite.states.iter().any(|(s, _)| *s == st),
+                "missing state {state}"
+            );
+            assert!((2..=6).contains(&frames.len()), "{state} frame count");
+            for f in frames {
+                assert_eq!(f.lines().count(), 14, "{state} frame height");
+            }
+        }
     }
 
     #[test]

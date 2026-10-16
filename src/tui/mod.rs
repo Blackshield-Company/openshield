@@ -2143,6 +2143,17 @@ fn approve_pending_tool(app: &mut App, label: &str) {
     }
 }
 
+impl App {
+    /// Mascot animation state for the current agent activity.
+    pub(crate) fn sprite_state(&self) -> crate::tui::sprites::SpriteState {
+        crate::tui::sprites::agent_sprite_state(
+            self.is_streaming,
+            !self.streaming_content.is_empty(),
+            matches!(self.mode, AppMode::ToolApproval | AppMode::Agent),
+        )
+    }
+}
+
 /// True for keys that should be typed into the input line when they dismiss
 /// the splash screen: printable characters without Ctrl/Alt.
 fn splash_key_types_text(key: &KeyEvent) -> bool {
