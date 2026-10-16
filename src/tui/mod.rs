@@ -2143,12 +2143,25 @@ fn approve_pending_tool(app: &mut App, label: &str) {
     }
 }
 
+/// True for keys that should be typed into the input line when they dismiss
+/// the splash screen: printable characters without Ctrl/Alt.
+fn splash_key_types_text(key: &KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char(_))
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
 async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
-    // Splash mode: any key dismisses the splash screen
+    // Splash mode: the first key dismisses the splash screen. Typed text
+    // (plain characters) also goes straight into the input line, so the
+    // splash prompt is live; any other key only dismisses.
     if app.mode == AppMode::Splash {
         app.mode = AppMode::Normal;
         crate::tui::render::request_redraw();
-        return Ok(false); // Don't exit
+        if !splash_key_types_text(&key) {
+            return Ok(false); // Don't exit
+        }
     }
 
     // Command palette mode: handle palette navigation
@@ -6795,5 +6808,39 @@ fn format_progress(progress: &crate::agent::coding::AgentProgress) -> String {
             let status = if *success { "✅" } else { "⚠️" };
             format!("{} Done: {}", status, message)
         }
+    }
+}
+
+#[cfg(test)]
+mod splash_input_tests {
+    use super::splash_key_types_text;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn typed_characters_pass_through_the_splash() {
+        assert!(splash_key_types_text(&KeyEvent::new(
+            KeyCode::Char('h'),
+            KeyModifiers::NONE
+        )));
+        assert!(splash_key_types_text(&KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::SHIFT
+        )));
+    }
+
+    #[test]
+    fn control_keys_only_dismiss_the_splash() {
+        assert!(!splash_key_types_text(&KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL
+        )));
+        assert!(!splash_key_types_text(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE
+        )));
+        assert!(!splash_key_types_text(&KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE
+        )));
     }
 }
