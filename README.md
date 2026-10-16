@@ -134,9 +134,10 @@ default_model = "gpt-4o"
 auto_route = true
 cost_limit_usd = 10.0
 theme = "blackshield"
-# Mascot sprite on the splash screen ("none" disables it).
+# Mascot sprite on the splash screen. Default "none" shows the Black Steel
+# shield; "blackshield-mercenary" brings back the knight.
 # Custom sprites: ~/.config/openshield/sprites/*.ans|*.txt
-sprite = "blackshield-mercenary"
+sprite = "none"
 
 [providers.openai]
 base_url = "https://api.openai.com/v1"

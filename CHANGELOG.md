@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Black Steel look** — New brand system in `docs/brand` (shield, wordmark, tokens). The TUI theme and launch screen use the Black Steel palette and a flat shield with a plain Greek cross.
+- **Launch screen** — No more "Press any key to start": the first typed character goes straight into the prompt.
+- **Default sprite is now `none`** — The launch screen shows the Black Steel shield beside the wordmark by default. The knight is still available: set `sprite = "blackshield-mercenary"` in `config.toml` or run `/sprite blackshield-mercenary`. Configs that already set `sprite` explicitly keep their choice.
+
 ## [1.1.1] - 2026-10-14
 
 ### Security
