@@ -270,6 +270,19 @@ line two
     }
 
     #[test]
+    fn stock_sprite_has_black_steel_footprint() {
+        // 32x28 px knight drawn with half-blocks: 14 rows, at most 32 cells
+        // wide, every frame the same height so the animation does not jump.
+        use crate::tui::components::splash::{max_frame_height, sprite_max_frame_width};
+        let sprite = load_stock_sprite();
+        assert_eq!(max_frame_height(&sprite), 14);
+        assert!(sprite_max_frame_width(&sprite) <= 32);
+        for frame in &sprite.frames {
+            assert_eq!(frame.lines().count(), 14);
+        }
+    }
+
+    #[test]
     fn user_dir_overrides_builtin_name() {
         let dir =
             std::env::temp_dir().join(format!("openshield-sprites-test-{}", std::process::id()));

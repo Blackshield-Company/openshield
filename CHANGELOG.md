@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Black Steel look** — New brand system in `docs/brand` (shield, wordmark, tokens). The TUI theme and launch screen use the Black Steel palette and a flat shield with a plain Greek cross.
 - **Launch screen** — No more "Press any key to start": the first typed character goes straight into the prompt.
 - **Default sprite is now `none`** — The launch screen shows the Black Steel shield beside the wordmark by default. The knight is still available: set `sprite = "blackshield-mercenary"` in `config.toml` or run `/sprite blackshield-mercenary`. Configs that already set `sprite` explicitly keep their choice.
+- **Knight sprite redrawn** — `blackshield-mercenary` is a new Black Steel knight: great helm with a blood plume, pauldrons, crimson cloak, longsword and a heater shield with a plain Greek cross, drawn in truecolor half-blocks (32×14 cells, two frames). Regenerate it with `scripts/knight-sprite.py`; the old `scripts/petdex-to-ans.py` converter is removed.
 
 ## [1.1.1] - 2026-10-14
 

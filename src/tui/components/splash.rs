@@ -344,4 +344,28 @@ mod tests {
         let sprite_x = band_min_start - SPRITE_GAP as usize - sprite_width;
         assert!(sprite_x + sprite_width + SPRITE_GAP as usize <= band_min_start);
     }
+
+    /// The stock sprite must never be taller than the banner, otherwise the
+    /// side-by-side layout is skipped and the sprite stacks above it.
+    #[test]
+    fn stock_sprite_no_taller_than_banner() {
+        let info = ascii_art::SplashInfo {
+            model: "k3".to_string(),
+            provider: "kimi".to_string(),
+            permissions: "coding".to_string(),
+            branch: "main".to_string(),
+            session: "test-session".to_string(),
+            directory: "/tmp/test".to_string(),
+            show_shield: false,
+        };
+        let sprite = crate::tui::sprites::load_stock_sprite();
+        let sprite_height = max_frame_height(&sprite);
+        for width in [100usize, 120, 160, 200] {
+            let banner_height = ascii_art::banner(width, &info).lines().count();
+            assert!(
+                sprite_height <= banner_height,
+                "sprite ({sprite_height} rows) taller than banner ({banner_height} rows) at {width} cols"
+            );
+        }
+    }
 }
