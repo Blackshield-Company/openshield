@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-16
+
+### Added
+
+- **Web terminal demo** — `openshield demo` serves the full TUI in a browser terminal against a built-in mock model, with an isolated config and no API keys. `openshield mock-provider` runs the mock OpenAI-compatible API on its own.
+
 ### Changed
 
 - **Black Steel look** — New brand system in `docs/brand` (shield, wordmark, tokens). The TUI theme and launch screen use the Black Steel palette and a flat shield with a plain Greek cross.
@@ -14,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Default sprite is now `none`** — The launch screen shows the Black Steel shield beside the wordmark by default. The knight is still available: set `sprite = "blackshield-mercenary"` in `config.toml` or run `/sprite blackshield-mercenary`. Configs that already set `sprite` explicitly keep their choice.
 - **Knight sprite redrawn** — `blackshield-mercenary` is a new Black Steel knight: great helm with a blood plume, pauldrons, crimson cloak, longsword and a heater shield with a plain Greek cross, drawn in truecolor half-blocks (32×14 cells, two frames). Regenerate it with `scripts/knight-sprite.py`; the old `scripts/petdex-to-ans.py` converter is removed.
 - **Sprite animation states** — Sprite files can group frames under `---state:<name>---` markers (`idle`, `thinking`, `working`, `success`, `error`); files without markers still load as a single idle animation. The knight ships all five states, and the splash picks the state from agent activity.
+
+### Security
+
+- **Dependencies** — Updated vulnerable crates in `Cargo.lock`, including rustls 0.23.46.
 
 ## [1.1.1] - 2026-10-14
 
