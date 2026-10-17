@@ -1,0 +1,50 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release, tag or commit you are running (the --version output if there is one).
+      placeholder: e.g. v0.4.1
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Operating system and version.
+      placeholder: e.g. Arch Linux, Windows 11, macOS 15, Android 15
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - Release binary / package
+        - Built from source
+        - Package manager (AUR, Homebrew, etc.)
+        - Docker / container
+        - Other (say in steps)
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include what you expected and what happened instead.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log or console output. Remove secrets first.
+      render: text
