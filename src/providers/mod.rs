@@ -2045,6 +2045,9 @@ mod tests {
 
     /// Run a realtime stream against `base` with the given provider kind
     /// and return (content, reasoning, tool calls, finish reasons).
+    /// `XaiOauth` shares the `OpenAiCompatible` stream parser (it differs
+    /// only in auth, which needs a logged-in token file), so the tests use
+    /// `OpenAiCompatible` to exercise the exact code path grok-4.7 hits.
     async fn collect_realtime(
         base: String,
         kind: ProviderKind,
@@ -2091,7 +2094,7 @@ mod tests {
             ]),
         );
         let (content, reasoning, tools, finishes) =
-            collect_realtime(base, ProviderKind::XaiOauth).await;
+            collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert_eq!(content, "Hey! What are we building?");
         assert_eq!(reasoning, "Greeting.");
         assert!(tools.is_empty());
@@ -2107,7 +2110,7 @@ mod tests {
                 r#"{"code":"Some resource has been exhausted","error":"Too many requests for grok-4.7, try again later"}"#,
             ]),
         );
-        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert!(content.starts_with("[API error:"), "{content}");
         assert!(content.contains("Too many requests"), "{content}");
         assert!(tools.is_empty());
@@ -2136,7 +2139,7 @@ mod tests {
             "application/json",
             vec![br#"{"code":"permission-denied","error":"Your team has used all available credits"}"#.to_vec()],
         );
-        let (content, _, _, finishes) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        let (content, _, _, finishes) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert!(content.contains("permission-denied"), "{content}");
         assert!(content.contains("used all available credits"), "{content}");
         assert!(finishes.contains(&"error".to_string()));
@@ -2149,7 +2152,7 @@ mod tests {
             "application/json",
             vec![br#"{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Hey there.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"list_dir","arguments":"{\"path\":\".\"}"}}]},"finish_reason":"tool_calls"}]}"#.to_vec()],
         );
-        let (content, _, tools, _) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        let (content, _, tools, _) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert_eq!(content, "Hey there.");
         assert_eq!(
             tools,
@@ -2183,7 +2186,7 @@ mod tests {
         // Split in the middle of the 4-byte shield emoji.
         let parts = vec![bytes[..shield + 2].to_vec(), bytes[shield + 2..].to_vec()];
         let base = spawn_raw_server("text/event-stream", parts);
-        let (content, _, _, _) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        let (content, _, _, _) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert_eq!(content, "Shields up 🛡 — ready");
     }
 
@@ -2197,7 +2200,7 @@ mod tests {
                 "[DONE]",
             ]),
         );
-        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert_eq!(content, "Let me look around.");
         assert_eq!(
             tools,
