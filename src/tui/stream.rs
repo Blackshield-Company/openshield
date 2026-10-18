@@ -32,6 +32,10 @@ pub(crate) enum StreamEvent {
     },
     /// Follow-up assistant message after tool execution.
     FollowUp(String),
+    /// Text the model wrote alongside its tool calls, before the tools ran.
+    /// Shown as its own assistant message so it is not lost when the
+    /// follow-up replaces the turn's final content.
+    InterimAssistant(String),
     /// Multi-model secondary response.
     MultiModelResponse {
         name: String,
@@ -386,6 +390,12 @@ pub(crate) fn apply_stream_event(app: &mut App, event: StreamEvent) {
                 tool_calls: None,
                 reasoning_content: None,
             });
+        }
+        StreamEvent::InterimAssistant(content) => {
+            let clean = strip_think_tags(&strip_tool_lines(&content));
+            if !clean.trim().is_empty() {
+                app.add_assistant_message(clean, None, None);
+            }
         }
         StreamEvent::FollowUp(content) => {
             // FollowUp is the final response after autonomous tool execution.
