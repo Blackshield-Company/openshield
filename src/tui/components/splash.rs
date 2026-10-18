@@ -174,11 +174,32 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
 
         // Mark as drawn so we never clear again
         SPLASH_DRAWN.store(true, Ordering::Relaxed);
-    } else if app
-        .sprite
-        .as_ref()
-        .is_some_and(|s| s.frames_for(app.sprite_state()).len() > 1)
+    } else if app.reduced_motion
         && SPRITE_HEIGHT.load(Ordering::Relaxed) > 0
+        && SPRITE_FRAME.load(Ordering::Relaxed) != 0
+        && let Some(sprite) = app.sprite.as_ref()
+    {
+        // Reduced motion switched on mid-animation: settle on the still
+        // (first) frame and stop.
+        let top = SPRITE_TOP.load(Ordering::Relaxed) as u16;
+        let x = SPRITE_X.load(Ordering::Relaxed) as u16;
+        let max_width = SPRITE_MAX_WIDTH.load(Ordering::Relaxed);
+        draw_sprite_frame(
+            &mut out,
+            sprite.frames_for(app.sprite_state()),
+            0,
+            top,
+            x,
+            max_width,
+        )?;
+        SPRITE_FRAME.store(0, Ordering::Relaxed);
+        out.flush()?;
+    } else if sprite_animates(
+        app.sprite
+            .as_ref()
+            .map_or(0, |s| s.frames_for(app.sprite_state()).len()),
+        app.reduced_motion,
+    ) && SPRITE_HEIGHT.load(Ordering::Relaxed) > 0
     {
         // Animated redraw: only the sprite region, in place, on frame change.
         // Same-width frames overwrite cleanly (rows are padded to the frame
@@ -198,6 +219,12 @@ pub fn draw_splash_screen(app: &App, term_width: u16, term_height: u16) -> io::R
     }
 
     Ok(())
+}
+
+/// True when the splash sprite should animate: it has more than one frame
+/// and reduced motion is off. Otherwise the first frame stays on screen.
+pub(crate) fn sprite_animates(frame_count: usize, reduced_motion: bool) -> bool {
+    frame_count > 1 && !reduced_motion
 }
 
 /// Draw one sprite frame at (`left`, `top`), padding rows to `max_width`
@@ -300,6 +327,34 @@ pub(crate) fn visible_width(s: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduced_motion_keeps_sprite_still() {
+        assert!(sprite_animates(2, false));
+        assert!(!sprite_animates(2, true));
+        assert!(!sprite_animates(1, false));
+        assert!(!sprite_animates(0, false));
+    }
+
+    /// The stock knight animates, so reduced motion has frames to suppress,
+    /// and the still frame is the first frame of each state.
+    #[test]
+    fn stock_knight_has_still_frame_per_state() {
+        use crate::tui::sprites::SpriteState;
+        let sprite = crate::tui::sprites::load_stock_sprite();
+        for state in [
+            SpriteState::Idle,
+            SpriteState::Thinking,
+            SpriteState::Working,
+            SpriteState::Success,
+            SpriteState::Error,
+        ] {
+            let frames = sprite.frames_for(state);
+            assert!(!frames.is_empty(), "{state:?} has a still frame");
+            assert!(sprite_animates(frames.len(), false), "{state:?} animates");
+            assert!(!sprite_animates(frames.len(), true), "{state:?} still");
+        }
+    }
 
     /// Diagnostic + regression: the side-by-side layout decision with the
     /// real banner at a realistic terminal size (200x60). The sprite must

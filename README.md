@@ -138,6 +138,9 @@ theme = "blackshield"
 # shield; "blackshield-mercenary" brings back the knight.
 # Custom sprites: ~/.config/openshield/sprites/*.ans|*.txt
 sprite = "none"
+# Reduced motion: the knight shows a still frame instead of animating.
+# NO_MOTION=1 or REDUCE_MOTION=1 does the same; /motion on|off toggles it.
+reduced_motion = false
 
 [providers.openai]
 base_url = "https://api.openai.com/v1"
