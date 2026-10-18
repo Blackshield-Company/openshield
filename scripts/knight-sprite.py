@@ -12,8 +12,13 @@ sway), thinking, working (sword ready and strike), success (shield raised)
 and error (stagger with a red flash).
 
 Variants:
-  a  plumed sellsword: great helm, blood plume, heater shield with a plain
-     Greek cross, planted longsword, crimson cloak (the stock sprite)
+  a  plumed sellsword (the stock sprite, reworked 2026-10-18 to match
+     brand/reference/knight-sprite-reference.png): blackened, battered plate,
+     great helm with a narrow eye slit and a long red plume, ragged crimson fur
+     mantle and tattered cloak, a straight longsword upright in his RIGHT hand
+     (viewer's left), a battered black heater shield with a worn red cross
+     pattee on his LEFT arm (viewer's right) with a plain black-steel rim,
+     ember rim-light on the pauldron and arm
   b  shield-wall veteran: barbute, large centred shield, blade over the shoulder
 
 Usage:
@@ -26,28 +31,44 @@ import argparse
 import os
 import sys
 W,H=32,28
+YPAD=0   # extra rows of headroom above the knight (idle_smooth / banner use 1 with H=30)
 C=dict(
- o=(10,10,13),      # outline / deep shadow
+ o=(8,8,10),        # outline
+ n=(20,20,25),      # blackened plate, deep
  d=(34,34,42),      # plate #22222A
- m=(62,67,75),      # mid steel
- s=(110,116,125),   # steel
- S=(154,160,168),   # steel #9AA0A8
- h=(195,199,204),   # highlight #C3C7CC
+ m=(56,58,66),      # battered edge
+ s=(98,102,110),    # dull steel (sparse)
+ S=(140,144,150),   # blade
+ h=(190,192,194),   # glint
  b=(228,222,210),   # bone #E4DED2
  R=(193,18,31),     # blood #C1121F
+ k=(140,20,26),     # plume / cloak light
  c=(92,10,16),      # cloak
- C=(58,6,10),       # cloak shade
- k=(130,14,24),     # cloak light
- i=(23,23,29),      # iron #17171D shield field
+ C=(52,6,10),       # cloak shade
+ f=(70,14,16),      # fur mantle
+ v=(13,13,16),      # shield field, black
+ e=(168,72,28),     # ember rim light
+ r=(84,78,70),      # iron rim rivets
 )
-def canvas(): return [[None]*W for _ in range(H)]
+# variant b keeps its original palette
+CB=dict(o=(10,10,13),d=(34,34,42),m=(62,67,75),s=(110,116,125),S=(154,160,168),h=(195,199,204),
+        b=(228,222,210),R=(193,18,31),c=(92,10,16),C=(58,6,10),k=(130,14,24),i=(23,23,29))
 OFF=[0,0]
+def canvas(): return [[None]*W for _ in range(H)]
 def put(g,x,y,col):
-    x+=OFF[0]; y+=OFF[1]
+    x+=OFF[0]; y+=OFF[1]+YPAD
     if 0<=x<W and 0<=y<H: g[y][x]=col
+def tint(g,x,y,col,skip=(None,'o','R','k','c','C','f')):
+    """Recolour an existing pixel (after outlining), using the same offsets as put()."""
+    x+=OFF[0]; y+=OFF[1]+YPAD
+    if 0<=x<W and 0<=y<H and g[y][x] not in skip: g[y][x]=col
 def rect(g,x0,y0,x1,y1,col):
     for y in range(y0,y1+1):
         for x in range(x0,x1+1): put(g,x,y,col)
+def stamp(g,x0,y0,rows):
+    for dy,row in enumerate(rows):
+        for dx,ch in enumerate(row):
+            if ch!='.': put(g,x0+dx,y0+dy,ch)
 def poly(g,pts,colf):
     ys=[p[1] for p in pts]
     for y in range(int(min(ys)),int(max(ys))+1):
@@ -69,79 +90,269 @@ def shade(x0,x1,cols):  # left-lit horizontal ramp
     return f
 def outline(g):
     out=[row[:] for row in g]
-    for y in range(H):
-        for x in range(W):
+    for y in range(len(g)):
+        for x in range(len(g[0])):
             if g[y][x] is None:
                 for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
                     xx,yy=x+dx,y+dy
-                    if 0<=xx<W and 0<=yy<H and g[yy][xx] not in (None,'o'):
+                    if 0<=xx<len(g[0]) and 0<=yy<len(g) and g[yy][xx] not in (None,'o'):
                         out[y][x]='o'; break
     return out
-def heater(g,x0,y0,w,h,cross=True):
-    x1=x0+w-1; mid=(x0+x1)/2; split=y0+int(h*.5)
-    pts=[(x0,y0),(x1+1,y0),(x1+1,split),(mid+.5,y0+h),(x0,split)]
-    poly(g,pts,'S')
-    inner=[(x0+1,y0+1),(x1,y0+1),(x1,split),(mid+.5,y0+h-1.6),(x0+1,split)]
-    poly(g,inner,'i')
-    rect(g,x0+1,y0+1,x0+1,split-1,'d')  # bevel
-    if cross:
-        cx=int(mid); cy=y0+int(h*.42); a=max(2,w//3); t=max(1,w//8)
-        rect(g,cx-t,cy-a,cx+t,cy+a,'R'); rect(g,cx-a,cy-t,cx+a,cy+t,'R')
-    for x in range(x0+1,x1+1): put(g,x,y0,'h')
 
+# ---- parts (ASCII stamps, '.' = transparent; stamped at absolute x0,y0) ----
+CLOAK=(2,10,[  # tattered crimson cloak behind the body, wind to viewer's right
+ ".......CcccccccccccccC.........",
+ "......CccccccccccccccccC.......",
+ ".....CcccccccccccccccccccC.....",
+ ".....CcccccccccccccccccccCC....",
+ "....CcccccccccccccccccccccCC...",
+ "....CccccccccccccccccccccccC...",
+ "....CcccccccccccccccccccccccC..",
+ "...CccccccccccccccccccccccccC..",
+ "...CccccccccccccccccccccccccCC.",
+ "...CcccccccccccccccccccccccckC.",
+ "..CccccccccccccccccccccccccckC.",
+ "..CccccccccccccccccccccccccckCC",
+ "..CcccccccccccccccccccccccccckC",
+ ".CccccccccccccccccccccccccccckC",
+ ".CcccCccccccccccccccccccccccCkC",
+ ".CcC.CcC..cccccccccccccccc.Cc.C",
+ ".C...C.....................C...",
+ "..............................."])
+CLOAK_HEM=[".CcC.CcC..cccccccccccccccc.Cc.C",".C...C.....................C..."]
+CLOAK_HEM2=["CcC.CcCC..cccccccccccccccc.CcC.","C...C.......................C.."]
+LEGS=(11,20,[
+ "nmdn..nddn",
+ "nmdn..nddn",
+ "nmdn..nddn",
+ "nmdd..nddn",
+ "nmsdn.nddn",
+ "nmddn.ndddn",
+ "ndddnnnnddn",
+ "nnnnn.nnnnn"])
+TABARD=(13,19,["cRRRc","ckRcC","ckRcC","CkccC",".kcC.",".CcC."])
+TORSO=(11,10,[  # blackened breastplate with a battered central ridge
+ "..nnddddnn",
+ ".nmmddmddnn",
+ "nmmsdmdddnn",
+ "nmsddmddddn",
+ "nmddddmdddn",
+ "nmdddmddddn",
+ "nmdddmdddnn",
+ ".nmddmddnn.",
+ "nCCCmsmCCCn",
+ "nCcCCmCCCCn"])
+HELM=(12,1,[  # great helm: flat-topped dome, one narrow eye slit, breath holes
+ "..nmmdn.",
+ ".nmsmddn",
+ "nmsmmddn",
+ "nmsmdddn",
+ "oooooooo",
+ "nmmdmddn",
+ "nmdnmodn",
+ "nmmnmodn",
+ ".nmdmdn.",
+ "..nddn.."])
+PLUMES=[  # long red plume streaming from the crest to viewer's right
+ (13,0,["..okRRkRk.......",
+        "....ocRRRRkk....",
+        ".......cRRRRk...",
+        ".........ccRRk..",
+        "...........cRRk.",
+        "............cRk.",
+        "............ckc.",
+        ".............c.."]),
+ (13,0,["..okRRkRkk......",
+        "....ocRRRRRk....",
+        "........ccRRRk..",
+        "..........ccRRk.",
+        "............cRRk",
+        ".............cRk",
+        ".............c.c",
+        "..............c."]),
+ (13,0,["..okRRkRk.......",   # plume=-1: swayed back toward the helm
+        "....ocRRRRk.....",
+        "......cRRRRk....",
+        "........ccRRk...",
+        "..........cRRk..",
+        "...........cRk..",
+        "...........ck...",
+        "............c..."]),
+]
+MANTLE=(6,8,[  # ragged crimson fur mantle over the pauldrons
+ "......fkf...fkf......",
+ "...fkRkcf....fckRkf..",
+ "..fkRcfnf....fncfkRf.",
+ ".fkcfnnmn....nmnfckkf",
+ ".kcfnmsdn....nddnfcck",
+ ".fcnmsddn....nddddnfc",
+ "..fnmddn......nddnnf.",
+ "..k.nnf........fnn.k.",
+ "....f............f..."])
+ARM_R=(5,13,[  # sword arm, bent, gauntlet on the grip
+ "..nmdn.",
+ "..nmdn.",
+ ".nmsdn.",
+ ".nmddn.",
+ "nmsmdn.",
+ "nmddmn.",
+ "nmdmdn.",
+ ".nddn.."])
+SWORD=(3,0,[  # longsword: perfectly vertical 3px blade centred on x=6, tapering to a sharp 1px point; crossguard, grip, fist and pommel centred on it
+ "...S...",
+ "...S...",
+ "..mSm..",
+ "..SSm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "..Ssm..",
+ "smsmmsm",
+ "...n...",
+ "...n...",
+ "...n...",
+ "...m...",
+ "..nmn.."])
+FIST=(3,17,["nmssmmn","nmddmdn",".nnnnn."])  # gauntlet closed over the grip, centred on the blade
+SHIELD_X,SHIELD_Y=18,11
+SHIELD=[  # blackened, battered heater: same n/d/m/s ramp as breastplate and helm, left-lit;
+          # plain black-steel rim like the pauldrons (m/s lit, n shaded), v = inner bevel shadow, s = rivets.
+          # No red, crimson or ember anywhere on the trim.
+          # The LEFT rim is one unbroken 'm' line (rivets sit just inside it) so the edge never reads as cracked.
+ "smmsmmdmdddn",
+ "mvvvvvvvvvvn",
+ "msdmnnnnvnns",
+ "mvddmnnnmnnn",
+ "mvdnnnnnnnnn",
+ "mvddnnnnnnvd",
+ "mvdnnnnnnvnn",
+ "msdnnnnnnnns",
+ "mvddvnnnnvnn",
+ ".mvdsnnnmvn.",
+ ".mvdnnnnnmn.",
+ ".msdnnnnnvs.",
+ "..mvdnnnvn..",
+ "...mvnnvn...",
+ "....mvvn....",
+ ".....mn.....",
+]
+CROSS=[  # cross pattee (Templar), old paint on steel: cloak crimsons k/c/C following the shield's left-lit ramp,
+         # one sparing R highlight, chips where the paint is gone (d/n steel, m scratch)
+ "..kkcc..",
+ "...kc...",
+ "...km...",
+ "k..kc..c",
+ "kkkRkcnc",
+ "kckccccC",
+ "k..kc..C",
+ "...kc...",
+ "...dc...",
+ "...kc...",
+ "..nkcC..",
+]
+PROTECT=set()   # canvas pixels (shield + helm and their dark rings) kept plain steel: no ember, no error flash
+def _protect(x,y):
+    PROTECT.add((x+OFF[0],y+OFF[1]+YPAD))
+RING=((-1,0),(1,0),(0,1),(0,-1),(-1,1),(1,1),(-1,-1),(1,-1))
+def heater(g,x0,y0,ember='right'):
+    """Battered black heater shield. The whole rim is plain blackened steel (m/s/d/n): no red, no ember.
+    A dark separation ring (all sides, incl. the top edge under the mantle) keeps the crimson mantle and
+    cloak off the trim. `ember` is accepted for API compatibility; the shield takes no rim-light."""
+    for dy,row in enumerate(SHIELD):
+        for dx,ch in enumerate(row):
+            if ch!='.':
+                for ex,ey in RING:
+                    xx,yy=dx+ex,dy+ey
+                    if not (0<=yy<len(SHIELD) and 0<=xx<len(SHIELD[0]) and SHIELD[yy][xx]!='.'):
+                        put(g,x0+xx,y0+yy,'o'); _protect(x0+xx,y0+yy)
+                _protect(x0+dx,y0+dy)
+    stamp(g,x0,y0,SHIELD)
+    stamp(g,x0+2,y0+1,CROSS)
+    put(g,x0+6,y0,'n')                              # nick in the top rim
+
+
+# ---- sword poses (all drawn with the right hand, viewer's left) ----
+SWORD_READY=(3,0,SWORD[2][:4]+SWORD[2][8:])  # raised: hilt at the shoulder, blade straight up beside the helm, point kept in frame
+FIST_READY=(3,13,FIST[2])
+ARM_READY=(5,10,ARM_R[2])
+ARM_STRIKE=(9,10,["nmmdn.",
+                  "nmsddn",
+                  ".nmddn"])
+STRIKE=[  # level backhand cut outward to the viewer's left; the blade never crosses the shield
+ (8,12,["s","m","s","m","m","s"]),          # crossguard (vertical, swung)
+ (2,13,["SSSSSS"]),                         # straight 3px blade with a sharp point at x=0 (viewer's left)
+ (0,14,["sSSShSSS"]),
+ (2,15,["mmmmmm"]),
+ (9,13,["nmsm","nmdm","nnnn"]),             # fist
+ (13,14,["mn"]),                            # pommel
+]
+STRIKE_GLINTS=((2,12),(5,11),(1,17),(6,17))
+
+def S(g,part): stamp(g,part[0],part[1],part[2])
 def knight_a(p):
-    """Draw knight A from a pose dict (see POSES)."""
-    g=canvas(); sway=p.get('hem',0)
-    OFF[:]=[0,0]
-    hem=[(5,27),(8,26),(11,27),(15,26),(19,27),(23,26),(26,27)] if not sway else [(6,27),(9,27),(12,26),(16,27),(20,26),(24,27),(27,26)]
-    poly(g,[(9,9),(23,9),(27,hem[-1][1])]+hem[::-1]+[(5,hem[0][1])],shade(5,27,['k','c','c','C']))
-    rect(g,12,21,14,27,'m'); rect(g,12,21,12,27,'S'); rect(g,17,21,19,27,'m'); rect(g,17,21,17,27,'S')
-    rect(g,11,26,14,27,'d'); rect(g,17,26,20,27,'d')
-    OFF[:]=[0,p.get('breath',0)]
-    poly(g,[(11,18),(21,18),(22,22),(10,22)],shade(10,22,['S','s','m','d']))
-    rect(g,10,22,22,22,'d')
-    poly(g,[(11,10),(21,10),(20,18),(12,18)],shade(11,21,['h','S','s','m','d']))
-    rect(g,15,11,16,17,'S'); put(g,15,11,'h')
-    rect(g,11,18,21,18,'d'); rect(g,15,18,16,18,'b')
+    """Draw knight A from a pose dict (see POSES).
+    Keys: breath, head (px down), plume (-1/0/1 sway), hem (0/1), sword ('planted'|'ready'|'strike'),
+    shield_up (px), dots (thinking dots), dx (shake), flash (error tint), ember ('right'|'left': rim-light side)."""
+    g=canvas(); ember=p.get('ember','right'); PROTECT.clear()
+    by=p.get('breath',0); hy=by+p.get('head',0); su=p.get('shield_up',0)
     sword=p.get('sword','planted')
-    if sword=='planted':
-        rect(g,21,12,23,16,'m'); rect(g,21,12,21,16,'S')
-        rect(g,24,17,24,27,'h'); rect(g,25,17,25,26,'S'); rect(g,22,16,27,16,'b')
-        rect(g,24,14,25,15,'d'); rect(g,24,13,25,13,'b'); rect(g,22,14,23,15,'s')
-    elif sword=='ready':   # raised beside the helm, point up
-        rect(g,21,11,23,15,'m'); rect(g,21,11,21,15,'S')
-        rect(g,24,0,24,11,'h'); rect(g,25,1,25,11,'S'); rect(g,22,12,27,12,'b')
-        rect(g,24,13,25,14,'d'); rect(g,24,15,25,15,'b'); rect(g,22,13,23,14,'s')
-    elif sword=='strike':  # swung forward, blade level
-        rect(g,21,12,24,15,'m'); rect(g,21,12,21,15,'S')
-        rect(g,27,13,31,13,'h'); rect(g,27,14,31,14,'S'); rect(g,26,11,26,16,'b')
-        rect(g,24,13,25,14,'d'); put(g,23,13,'b')
-        for x,y in ((29,11),(31,16),(28,16)): put(g,x,y,'b')  # motion glints
-    ell(g,10.5,11,4,3,shade(6,15,['h','S','s','m']))
-    ell(g,21.5,11,4,3,shade(18,26,['S','s','m','d']))
-    for x in range(7,15): put(g,x,12,'m')
-    for x in range(18,26): put(g,x,12,'d')
-    rect(g,13,10,19,10,'s'); rect(g,13,10,14,10,'S')
-    OFF[:]=[0,p.get('breath',0)+p.get('head',0)]
-    poly(g,[(12,4),(20,4),(20,9),(16,10),(12,9)],shade(12,20,['h','S','S','s','m']))
-    ell(g,16,4.5,4,2,shade(12,20,['h','S','s','m']))
-    rect(g,12,6,19,6,'o'); rect(g,13,6,14,6,'b')
-    rect(g,16,7,16,9,'S'); put(g,14,8,'o'); put(g,18,8,'o')
-    px=p.get('plume',0)
-    for (x,y,col) in [(16,2,'R'),(17,2,'R'),(17,1,'R'),(18,1,'R'),(18+px,0,'R'),(19+px,0,'R'),(19+px,1,'R'),(20+px,1,'c'),(20+px,2,'c'),(18,2,'c'),(16,3,'R'),(17,3,'c')]: put(g,x,y,col)
-    for i in range(p.get('dots',0)):   # thinking dots
-        put(g,8+i*2,2,'b')
-    OFF[:]=[0,p.get('breath',0)-p.get('shield_up',0)]
-    heater(g,2,12,11,14)
     OFF[:]=[0,0]
-    if p.get('shield_up',0)>=4:
-        for x,y in ((1,4),(12,3),(7,2)): put(g,x,y,'b')   # glints
+    x0,y0,rows=CLOAK
+    stamp(g,x0,y0,rows[:15]+(CLOAK_HEM2 if p.get('hem',0) else CLOAK_HEM))
+    S(g,LEGS)
+    OFF[:]=[0,by]
+    S(g,TABARD); S(g,TORSO)
+    if sword=='planted':
+        S(g,ARM_R); S(g,MANTLE); S(g,SWORD); S(g,FIST)   # sword in front of the mantle so the blade stays unbroken
+    elif sword=='ready':
+        S(g,ARM_READY); S(g,MANTLE); S(g,SWORD_READY); S(g,FIST_READY)
+    else:
+        S(g,MANTLE); S(g,ARM_STRIKE)
+    OFF[:]=[0,hy]
+    pl=p.get('plume',0)
+    S(g,PLUMES[1 if pl>0 else (2 if pl<0 else 0)])
+    S(g,HELM)                                       # helm over the plume root: the helm face is all black steel
+    hx,hy0,hrows=HELM
+    for ry,row in enumerate(hrows):
+        for rx,ch in enumerate(row):
+            if ch!='.':
+                for ex,ey in ((0,0),)+RING: _protect(hx+rx+ex,hy0+ry+ey)   # helm + its outline ring
+    OFF[:]=[0,by-su]                                # shield is held on the left arm: it bobs and shifts with the body every frame
+    heater(g,SHIELD_X,SHIELD_Y,ember)              # after the helm: nothing ever cuts the shield's left rim
+    OFF[:]=[0,by]
+    if sword=='strike':
+        for part in STRIKE: S(g,part)
+        for x,y in STRIKE_GLINTS: put(g,x,y,'b')     # motion glints
+    OFF[:]=[0,hy]
+    for x,y in ((9,3),(11,2),(13,1))[:p.get('dots',0)]:   # thinking dots, rising
+        put(g,x,y,'b')
+    OFF[:]=[0,0]
+    if su>=4:
+        for x,y in ((31,6),(30,2),(21,5)): put(g,x,y,'b')   # glints off the raised shield
     g=outline(g)
+    # ember rim light, back-lit (right) or facing a fire on the viewer's left
+    if ember=='right': pts=[(26,11,by),(10,14,by)]   # helm and shield take no ember (plain black steel)
+    else: pts=[(5,17,by),(5,18,by)]
+    for x,y,oy in pts:
+        OFF[:]=[0,oy]
+        if (x,y+oy+YPAD) in PROTECT: continue          # never on the shield rim or helm
+        if sword=='planted' or (x,y) not in ((10,14),(5,17),(5,18)): tint(g,x,y,'e')
+    OFF[:]=[0,0]
     dx=p.get('dx',0)
     if dx:
         g=[([None]*dx+row[:-dx]) if dx>0 else (row[-dx:]+[None]*(-dx)) for row in g]
     if p.get('flash'):
-        g=[[('R' if k=='o' else ('k' if k in ('S','h') else k)) for k in row] for row in g]
+        prot={(x+dx,y) for x,y in PROTECT}
+        g=[[(k if (x,y) in prot else ('R' if k=='o' else ('k' if k in ('s','S','h') else ('c' if k=='m' else k))))
+            for x,k in enumerate(row)] for y,row in enumerate(g)]
     return g
 
 
@@ -183,6 +394,17 @@ POSES = {
 }
 STATES = list(POSES)
 
+def heater_b(g,x0,y0,w,h,cross=True):   # original variant-b shield (palette CB)
+    x1=x0+w-1; mid=(x0+x1)/2; split=y0+int(h*.5)
+    pts=[(x0,y0),(x1+1,y0),(x1+1,split),(mid+.5,y0+h),(x0,split)]
+    poly(g,pts,'S')
+    inner=[(x0+1,y0+1),(x1,y0+1),(x1,split),(mid+.5,y0+h-1.6),(x0+1,split)]
+    poly(g,inner,'i')
+    rect(g,x0+1,y0+1,x0+1,split-1,'d')  # bevel
+    if cross:
+        cx=int(mid); cy=y0+int(h*.42); a=max(2,w//3); t=max(1,w//8)
+        rect(g,cx-t,cy-a,cx+t,cy+a,'R'); rect(g,cx-a,cy-t,cx+a,cy+t,'R')
+    for x in range(x0+1,x1+1): put(g,x,y0,'h')
 
 def variant_b(frame):
     g=canvas(); sway=frame
@@ -210,12 +432,13 @@ def variant_b(frame):
     put(g,16,1,'S'); put(g,16,2,'h')                      # crest ridge
     rect(g,16-0+sway,0,16+sway,0,'R')                     # small red tassel tip
     # big center shield
-    heater(g,8,13,15,15)
+    heater_b(g,8,13,15,15)
     return outline(g)
 
-def to_ans(g):
+def to_ans(g,pal=None):
     lines=[]
-    def col(k): return C[k]
+    pal=pal or C
+    def col(k): return pal[k]
     for y in range(0,H,2):
         s=''
         for x in range(W):
@@ -231,14 +454,15 @@ def to_ans(g):
     return lines
 
 VARIANTS = {
-    "a": (variant_a, "plumed sellsword: great helm, blood plume, heater shield with a plain Greek cross, planted longsword, crimson cloak"),
-    "b": (variant_b, "shield-wall veteran: barbute, large centred heater shield, blade over the shoulder, hooded crimson cloak"),
+    "a": (variant_a, "plumed sellsword: blackened great helm with a long blood plume, straight longsword upright in the right hand, battered black heater shield with a worn red cross pattee on the left arm, fur mantle, tattered crimson cloak", None),
+    "b": (variant_b, "shield-wall veteran: barbute, large centred heater shield, blade over the shoulder, hooded crimson cloak", "CB"),
 }
 STOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "sprites", "blackshield-mercenary.ans")
 
 
 def render(variant):
-    fn, desc = VARIANTS[variant]
+    fn, desc, pal = VARIANTS[variant]
+    pal = CB if pal == "CB" else C
     header = (
         f"# blackshield-mercenary: Black Steel knight, {desc}.\n"
         "# 32x14 cells, truecolor half-blocks.\n"
@@ -250,11 +474,11 @@ def render(variant):
         for state in STATES:
             frames = [knight_a(p) for p in POSES[state]]
             blocks.append(
-                f"---state:{state}---\n" + "\n---frame---\n".join("\n".join(to_ans(f)) for f in frames)
+                f"---state:{state}---\n" + "\n---frame---\n".join("\n".join(to_ans(f, pal)) for f in frames)
             )
         return header + "\n".join(blocks) + "\n"
     frames = [fn(0), fn(1)]
-    return header + "\n---frame---\n".join("\n".join(to_ans(f)) for f in frames) + "\n"
+    return header + "\n---frame---\n".join("\n".join(to_ans(f, pal)) for f in frames) + "\n"
 
 
 def main():
