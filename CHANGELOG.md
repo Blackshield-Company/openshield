@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-17
+
+### Added
+
+- **Reduced motion for the knight** — The terminal knight can show a still frame (the first frame of its current state) instead of animating. Turn it on with `reduced_motion = true` in `config.toml`, by setting `NO_MOTION` or `REDUCE_MOTION` (any value except `0`, `false`, `no` or `off`), or at runtime with `/motion off` (`/motion on` animates again, `/motion toggle` flips it, `/motion` shows the setting; the choice is saved to config). Switching it on mid-animation settles the knight on its still frame. With this, every OpenShield app respects reduced motion: the desktop app and the browser extension already show a still knight under `prefers-reduced-motion`.
+
 ## [1.2.0] - 2026-10-16
 
 ### Added

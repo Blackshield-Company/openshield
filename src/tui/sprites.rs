@@ -86,6 +86,49 @@ pub fn agent_sprite_state(streaming: bool, has_output: bool, tools_active: bool)
     }
 }
 
+/// Environment variables that request reduced motion. Any non-empty value
+/// except `0`, `false`, `no` or `off` turns animation off.
+pub const REDUCED_MOTION_ENV_VARS: &[&str] = &["NO_MOTION", "REDUCE_MOTION"];
+
+/// True when an environment value asks for reduced motion.
+pub fn env_value_requests_reduced_motion(value: Option<&str>) -> bool {
+    match value.map(|v| v.trim().to_ascii_lowercase()) {
+        None => false,
+        Some(v) => !matches!(v.as_str(), "" | "0" | "false" | "no" | "off"),
+    }
+}
+
+/// True when `NO_MOTION` or `REDUCE_MOTION` asks for reduced motion.
+pub fn reduced_motion_from_env() -> bool {
+    REDUCED_MOTION_ENV_VARS
+        .iter()
+        .any(|key| env_value_requests_reduced_motion(std::env::var(key).ok().as_deref()))
+}
+
+/// Argument to the `/motion` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionCommand {
+    /// Show the current setting.
+    Status,
+    /// Animate the sprite (`/motion on`).
+    Animate,
+    /// Still frame only (`/motion off`, `/motion reduce`).
+    Still,
+    /// Flip the current setting.
+    Toggle,
+}
+
+/// Parse the argument of `/motion`. Empty means status.
+pub fn parse_motion_command(arg: &str) -> Option<MotionCommand> {
+    match arg.trim().to_ascii_lowercase().as_str() {
+        "" | "status" => Some(MotionCommand::Status),
+        "on" | "animate" | "full" => Some(MotionCommand::Animate),
+        "off" | "still" | "reduce" | "reduced" => Some(MotionCommand::Still),
+        "toggle" => Some(MotionCommand::Toggle),
+        _ => None,
+    }
+}
+
 /// A loaded mascot sprite: named, with one or more animation frames.
 /// Each frame is a multi-line UTF-8 string; ANSI escapes are pre-baked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,6 +335,33 @@ fn list_sprites_with_user_dir(user_dir: Option<&Path>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduced_motion_env_values() {
+        assert!(!env_value_requests_reduced_motion(None));
+        for off in ["", " ", "0", "false", "FALSE", "no", "off"] {
+            assert!(!env_value_requests_reduced_motion(Some(off)), "{off:?}");
+        }
+        for on in ["1", "true", "yes", "on", "reduce"] {
+            assert!(env_value_requests_reduced_motion(Some(on)), "{on:?}");
+        }
+    }
+
+    #[test]
+    fn motion_command_parsing() {
+        assert_eq!(parse_motion_command(""), Some(MotionCommand::Status));
+        assert_eq!(parse_motion_command("status"), Some(MotionCommand::Status));
+        assert_eq!(parse_motion_command("on"), Some(MotionCommand::Animate));
+        assert_eq!(
+            parse_motion_command("Animate"),
+            Some(MotionCommand::Animate)
+        );
+        assert_eq!(parse_motion_command("off"), Some(MotionCommand::Still));
+        assert_eq!(parse_motion_command("still"), Some(MotionCommand::Still));
+        assert_eq!(parse_motion_command(" reduce "), Some(MotionCommand::Still));
+        assert_eq!(parse_motion_command("toggle"), Some(MotionCommand::Toggle));
+        assert_eq!(parse_motion_command("sideways"), None);
+    }
 
     const MULTI_FRAME: &str = "\
 # comment line, ignored

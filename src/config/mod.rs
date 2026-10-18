@@ -273,6 +273,12 @@ pub struct Config {
     /// same name). Switch at runtime with /sprite.
     #[serde(default = "default_sprite")]
     pub sprite: String,
+    /// Reduced motion: the splash sprite shows a still frame (the first
+    /// frame of the current state) instead of animating. Also enabled by
+    /// the `NO_MOTION` or `REDUCE_MOTION` environment variables. Toggle at
+    /// runtime with /motion.
+    #[serde(default)]
+    pub reduced_motion: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -908,6 +914,7 @@ impl Default for Config {
             effort_level: "medium".to_string(),
             code_index_enabled: true,
             sprite: default_sprite(),
+            reduced_motion: false,
         }
     }
 }
@@ -1067,6 +1074,7 @@ mod tests {
             effort_level: "medium".to_string(),
             code_index_enabled: true,
             sprite: "blackshield-mercenary".to_string(),
+            reduced_motion: false,
         }
     }
 
@@ -1192,5 +1200,30 @@ mod tests {
         let text = toml::to_string(&cfg).expect("serialize config");
         let parsed: Config = toml::from_str(&text).expect("parse config");
         assert_eq!(parsed.sprite, "blackshield-mercenary");
+    }
+
+    #[test]
+    fn reduced_motion_defaults_to_off_when_unset() {
+        assert!(!Config::default().reduced_motion);
+        let full = toml::to_string(&Config::default()).expect("serialize default config");
+        let without: String = full
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("reduced_motion ="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: Config = toml::from_str(&without).expect("parse config");
+        assert!(!parsed.reduced_motion);
+    }
+
+    #[test]
+    fn reduced_motion_in_config_is_kept() {
+        let cfg = Config {
+            reduced_motion: true,
+            ..Config::default()
+        };
+        let text = toml::to_string(&cfg).expect("serialize config");
+        assert!(text.contains("reduced_motion = true"));
+        let parsed: Config = toml::from_str(&text).expect("parse config");
+        assert!(parsed.reduced_motion);
     }
 }

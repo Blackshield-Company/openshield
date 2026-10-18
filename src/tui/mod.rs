@@ -267,6 +267,11 @@ pub(crate) struct App {
     /// Active mascot sprite for the splash screen. None = banner-only
     /// (`sprite = "none"` in config or explicitly disabled).
     sprite: Option<crate::tui::sprites::Sprite>,
+    /// Reduced motion: the splash sprite shows a still frame. Set from
+    /// `reduced_motion` in config, `NO_MOTION`/`REDUCE_MOTION`, or /motion.
+    pub(crate) reduced_motion: bool,
+    /// True when an environment variable forces reduced motion.
+    reduced_motion_env: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -513,6 +518,8 @@ impl App {
                 (Some(sprite), warning)
             };
 
+        let reduced_motion_env = crate::tui::sprites::reduced_motion_from_env();
+
         let mut app = Self {
             input: String::new(),
             cursor_position: 0,
@@ -670,6 +677,8 @@ impl App {
             chat_area_rect: None,
             copy_selected_idx: None,
             sprite,
+            reduced_motion: config.reduced_motion || reduced_motion_env,
+            reduced_motion_env,
         };
 
         // Surface unknown-sprite config warnings as a chat system message.
@@ -712,6 +721,45 @@ impl App {
         }
         if let Err(e) = self.config.save() {
             self.add_system_message(format!("⚠️ Sprite changed but config save failed: {}", e));
+        }
+    }
+
+    /// Handle `/motion [on|off|still|toggle|status]`. Off means reduced
+    /// motion: the sprite shows a still frame. Persisted to config.
+    fn set_motion(&mut self, arg: &str) {
+        use crate::tui::sprites::{MotionCommand, parse_motion_command};
+        let Some(cmd) = parse_motion_command(arg) else {
+            self.add_system_message(
+                "❌ Usage: /motion [on|off|toggle]. Off shows a still sprite.".to_string(),
+            );
+            return;
+        };
+        let want_still = match cmd {
+            MotionCommand::Status => {
+                self.add_system_message(self.motion_status());
+                return;
+            }
+            MotionCommand::Animate => false,
+            MotionCommand::Still => true,
+            MotionCommand::Toggle => !self.reduced_motion,
+        };
+        self.config.reduced_motion = want_still;
+        self.reduced_motion = want_still || self.reduced_motion_env;
+        let mut msg = self.motion_status();
+        if !want_still && self.reduced_motion_env {
+            msg.push_str(" NO_MOTION or REDUCE_MOTION is set, so the sprite stays still.");
+        }
+        self.add_system_message(msg);
+        if let Err(e) = self.config.save() {
+            self.add_system_message(format!("⚠️ Motion changed but config save failed: {}", e));
+        }
+    }
+
+    fn motion_status(&self) -> String {
+        if self.reduced_motion {
+            "🛡 Motion: reduced (still sprite).".to_string()
+        } else {
+            "🛡 Motion: on (animated sprite).".to_string()
         }
     }
 
@@ -2998,6 +3046,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             • /sprite           — List available mascot sprites\n\
             • /sprite <name>    — Switch sprite (persisted to config)\n\
             • /sprite none      — Disable sprite (banner-only splash)\n\
+            • /motion [on|off]  — Animate the sprite or show a still frame\n\
             \n\
             Branch commands:\n\
             • /branch <name>    — Create new branch\n\
@@ -3277,6 +3326,14 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
     }
     if let Some(name) = input.strip_prefix("/sprite ") {
         app.set_sprite(name);
+        return Ok(());
+    }
+    if input == "/motion" {
+        app.set_motion("");
+        return Ok(());
+    }
+    if let Some(arg) = input.strip_prefix("/motion ") {
+        app.set_motion(arg);
         return Ok(());
     }
 

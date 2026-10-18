@@ -556,6 +556,7 @@ impl Agent {
             effort_level: "medium".to_string(),
             code_index_enabled: true,
             sprite: "blackshield-mercenary".to_string(),
+            reduced_motion: false,
         }
     }
 }
