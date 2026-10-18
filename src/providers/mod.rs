@@ -2110,7 +2110,8 @@ mod tests {
                 r#"{"code":"Some resource has been exhausted","error":"Too many requests for grok-4.7, try again later"}"#,
             ]),
         );
-        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
+        let (content, _, tools, finishes) =
+            collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert!(content.starts_with("[API error:"), "{content}");
         assert!(content.contains("Too many requests"), "{content}");
         assert!(tools.is_empty());
@@ -2139,7 +2140,8 @@ mod tests {
             "application/json",
             vec![br#"{"code":"permission-denied","error":"Your team has used all available credits"}"#.to_vec()],
         );
-        let (content, _, _, finishes) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
+        let (content, _, _, finishes) =
+            collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert!(content.contains("permission-denied"), "{content}");
         assert!(content.contains("used all available credits"), "{content}");
         assert!(finishes.contains(&"error".to_string()));
@@ -2200,7 +2202,8 @@ mod tests {
                 "[DONE]",
             ]),
         );
-        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::OpenAiCompatible).await;
+        let (content, _, tools, finishes) =
+            collect_realtime(base, ProviderKind::OpenAiCompatible).await;
         assert_eq!(content, "Let me look around.");
         assert_eq!(
             tools,
