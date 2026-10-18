@@ -5151,8 +5151,16 @@ async fn stream_model_response_task(
                                 crate::harness::HarnessEvent::AssistantComplete {
                                     content,
                                     metrics,
+                                    tool_calls,
                                     ..
                                 } => {
+                                    // Text written alongside tool calls would
+                                    // otherwise be overwritten by the
+                                    // follow-up below and never shown.
+                                    if !tool_calls.is_empty() && !content.trim().is_empty() {
+                                        let _ = tx2
+                                            .send(StreamEvent::InterimAssistant(content.clone()));
+                                    }
                                     final_content = content;
                                     final_metrics = Some(metrics);
                                 }
