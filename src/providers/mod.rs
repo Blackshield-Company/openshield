@@ -87,6 +87,135 @@ pub enum StreamChunk {
     Finish(String),
 }
 
+/// Text from an OpenAI-style `content` value: a plain string, or an array of
+/// content parts (`{"type": "text" | "output_text", "text": "..."}`).
+fn openai_text(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Array(parts) => {
+            let text: String = parts
+                .iter()
+                .filter_map(|p| match p {
+                    serde_json::Value::String(s) => Some(s.as_str()),
+                    _ => p.get("text").and_then(|t| t.as_str()),
+                })
+                .collect();
+            if text.is_empty() { None } else { Some(text) }
+        }
+        _ => None,
+    }
+}
+
+/// Error message carried in an OpenAI-compatible payload that arrived with a
+/// 2xx status, e.g. `{"error": {"message": ...}}` or xAI's
+/// `{"code": ..., "error": "..."}`.
+fn openai_stream_error(event: &serde_json::Value) -> Option<String> {
+    let err = event.get("error").filter(|e| !e.is_null());
+    let message = match err {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(e) => e
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| e.to_string()),
+        None if event.get("type").and_then(|t| t.as_str()) == Some("error") => event
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown stream error")
+            .to_string(),
+        None => return None,
+    };
+    let code = event
+        .get("code")
+        .or_else(|| err.and_then(|e| e.get("code")))
+        .and_then(|c| match c {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        });
+    Some(match code {
+        Some(code) if !message.contains(&code) => format!("{code}: {message}"),
+        _ => message,
+    })
+}
+
+const MAX_UNPARSED_BODY: usize = 8 * 1024;
+
+fn push_unparsed(buf: &mut String, line: &str) {
+    if buf.len() < MAX_UNPARSED_BODY {
+        if !buf.is_empty() {
+            buf.push('\n');
+        }
+        buf.push_str(line);
+    }
+}
+
+/// Chunks to send when a 2xx OpenAI-compatible response produced no content,
+/// reasoning or tool call. `unparsed` is body text that was not an SSE
+/// `data:` chunk. A plain JSON completion (the server ignored `stream`) is
+/// replayed; an error body, or anything else, becomes a visible
+/// `[API error: ...]` so the turn never ends as a silent empty reply.
+fn recover_unstreamed_body(unparsed: &str) -> Vec<StreamChunk> {
+    let body = unparsed.trim();
+    if body.is_empty() {
+        crate::debug_log("provider stream ended with no content, reasoning or tool calls");
+        return Vec::new();
+    }
+    crate::debug_log(&format!(
+        "provider stream had no SSE output; body: {}",
+        crate::utils::truncate_str(body, 500)
+    ));
+    let mut out = Vec::new();
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(err) = openai_stream_error(&json) {
+            out.push(StreamChunk::Content(format!("[API error: {}]", err)));
+            out.push(StreamChunk::Finish("error".to_string()));
+            return out;
+        }
+        if let Some(message) = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+        {
+            if let Some(r) = message
+                .get("reasoning_content")
+                .and_then(|r| r.as_str())
+                .filter(|r| !r.is_empty())
+            {
+                out.push(StreamChunk::Reasoning(r.to_string()));
+            }
+            if let Some(c) = openai_text(message.get("content")).filter(|c| !c.is_empty()) {
+                out.push(StreamChunk::Content(c));
+            }
+            for tc in message
+                .get("tool_calls")
+                .and_then(|t| t.as_array())
+                .into_iter()
+                .flatten()
+            {
+                let f = tc.get("function");
+                let field = |v: Option<&serde_json::Value>| {
+                    v.and_then(|x| x.as_str()).unwrap_or_default().to_string()
+                };
+                out.push(StreamChunk::ToolCall {
+                    id: field(tc.get("id")),
+                    name: field(f.and_then(|f| f.get("name"))),
+                    arguments: field(f.and_then(|f| f.get("arguments"))),
+                });
+            }
+            if !out.is_empty() {
+                return out;
+            }
+        }
+    }
+    out.push(StreamChunk::Content(format!(
+        "[API error: unexpected response from provider: {}]",
+        crate::utils::truncate_str(body, 300)
+    )));
+    out.push(StreamChunk::Finish("error".to_string()));
+    out
+}
+
 /// If `value` is an unresolved `${VAR}` placeholder, return the variable name.
 pub fn unresolved_env_placeholder(value: &str) -> Option<&str> {
     let v = value.trim();
@@ -1353,7 +1482,20 @@ impl Provider {
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
             let mut first_token_time: Option<Instant> = None;
-            let mut buffer = String::new();
+            // Raw bytes, split on '\n' before decoding: a multi-byte UTF-8
+            // character split across two network chunks must not be mangled
+            // into U+FFFD by decoding each chunk on its own.
+            let mut buffer: Vec<u8> = Vec::new();
+            let mut stream_done = false;
+            // Did this response produce anything the caller can use? A 2xx
+            // body with no content, reasoning or tool call is reported
+            // instead of silently becoming an "empty response".
+            let mut emitted_output = false;
+            let mut content_seen = false;
+            let mut stream_errored = false;
+            // Body text that was not an SSE `data:` chunk we understood
+            // (a plain JSON error or a non-streamed completion).
+            let mut unparsed = String::new();
             // Accumulate tool call fragments across SSE chunks, keyed by index
             let mut pending_tool_calls: HashMap<u32, AccumulatedToolCall> = HashMap::new();
 
@@ -1368,8 +1510,8 @@ impl Provider {
                     ));
                     break;
                 }
-                let chunk = match tokio::time::timeout(remaining, stream.next()).await {
-                    Ok(Some(Ok(c))) => c,
+                match tokio::time::timeout(remaining, stream.next()).await {
+                    Ok(Some(Ok(c))) => buffer.extend_from_slice(&c),
                     Ok(Some(Err(e))) => {
                         // CRITICAL FIX: Log chunk error and continue instead of killing the stream.
                         // Transient decode errors (malformed SSE boundaries, network hiccups)
@@ -1377,7 +1519,13 @@ impl Provider {
                         tracing::warn!("SSE chunk decode error (realtime): {}", e);
                         continue;
                     }
-                    Ok(None) => break, // stream ended normally
+                    Ok(None) => {
+                        // Stream ended normally. Terminate a final line that
+                        // arrived without a trailing newline so it is still
+                        // processed below instead of being dropped.
+                        stream_done = true;
+                        buffer.push(b'\n');
+                    }
                     Err(_) => {
                         let _ = tx.send(StreamChunk::Content(
                             "[⏱ Stream timed out after 120s of inactivity]".to_string(),
@@ -1385,31 +1533,84 @@ impl Provider {
                         break;
                     }
                 };
-                let text = String::from_utf8_lossy(&chunk);
-                buffer.push_str(&text);
 
                 // Process complete lines from buffer
-                while let Some(pos) = buffer.find('\n') {
-                    let line = buffer[..pos].trim().to_string();
-                    buffer = buffer[pos + 1..].to_string();
+                while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                    let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
+                    let line = String::from_utf8_lossy(&line_bytes).trim().to_string();
 
-                    if let Some(data) = line.strip_prefix("data:") {
+                    if line.is_empty()
+                        || line.starts_with(':')
+                        || line.starts_with("event:")
+                        || line.starts_with("id:")
+                        || line.starts_with("retry:")
+                    {
+                        continue;
+                    }
+                    let Some(data) = line.strip_prefix("data:") else {
+                        // Not SSE at all: keep it so an error body or a
+                        // non-streamed completion can be reported at the end.
+                        push_unparsed(&mut unparsed, &line);
+                        continue;
+                    };
+                    {
                         let data = data.trim_start();
                         if data == "[DONE]" {
                             continue;
                         }
-                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                        let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
+                            push_unparsed(&mut unparsed, data);
+                            continue;
+                        };
+                        {
                             match kind {
                                 ProviderKind::OpenAiCompatible | ProviderKind::XaiOauth => {
-                                    let delta = event
-                                        .get("choices")
-                                        .and_then(|c| c.get(0))
-                                        .and_then(|c| c.get("delta"));
-                                    let content = delta
-                                        .and_then(|d| d.get("content"))
-                                        .and_then(|c| c.as_str());
+                                    // An error delivered inside a 2xx stream
+                                    // (`data: {"error": ...}`) used to be
+                                    // skipped, so the turn looked like the
+                                    // model had returned nothing.
+                                    if let Some(err) = openai_stream_error(&event) {
+                                        crate::debug_log(&format!(
+                                            "provider stream error event: {}",
+                                            crate::utils::truncate_str(data, 500)
+                                        ));
+                                        let _ = tx.send(StreamChunk::Content(format!(
+                                            "[API error: {}]",
+                                            err
+                                        )));
+                                        let _ = tx.send(StreamChunk::Finish("error".to_string()));
+                                        stream_errored = true;
+                                        continue;
+                                    }
+                                    let choice = event.get("choices").and_then(|c| c.get(0));
+                                    let delta = choice.and_then(|c| c.get("delta"));
+                                    // Text may arrive as a string or as an
+                                    // array of content parts, and some
+                                    // servers send whole `message` chunks
+                                    // instead of deltas. That fallback only
+                                    // applies while no delta text has arrived,
+                                    // so a final chunk repeating the full
+                                    // message cannot duplicate the reply.
+                                    let content = openai_text(delta.and_then(|d| d.get("content")))
+                                        .or_else(|| {
+                                            if content_seen {
+                                                return None;
+                                            }
+                                            openai_text(
+                                                choice
+                                                    .and_then(|c| c.get("message"))
+                                                    .and_then(|m| m.get("content")),
+                                            )
+                                            .or_else(
+                                                || openai_text(choice.and_then(|c| c.get("text"))),
+                                            )
+                                        });
+                                    let content = content.as_deref();
                                     let reasoning = delta
-                                        .and_then(|d| d.get("reasoning_content"))
+                                        .and_then(|d| {
+                                            d.get("reasoning_content")
+                                                .or_else(|| d.get("reasoning"))
+                                        })
                                         .and_then(|c| c.as_str());
                                     let tool_calls = delta
                                         .and_then(|d| d.get("tool_calls"))
@@ -1492,6 +1693,7 @@ impl Provider {
                                     if let Some(r) = reasoning
                                         && !r.is_empty()
                                     {
+                                        emitted_output = true;
                                         let _ = tx.send(StreamChunk::Reasoning(r.to_string()));
                                     }
                                     if let Some(c) = content
@@ -1500,6 +1702,8 @@ impl Provider {
                                         if first_token_time.is_none() {
                                             first_token_time = Some(Instant::now());
                                         }
+                                        emitted_output = true;
+                                        content_seen = true;
                                         let _ = tx.send(StreamChunk::Content(c.to_string()));
                                     }
 
@@ -1510,6 +1714,7 @@ impl Provider {
                                         if fr == "tool_calls" {
                                             // Flush all accumulated tool calls
                                             for (_idx, tc) in pending_tool_calls.drain() {
+                                                emitted_output = true;
                                                 let _ = tx.send(StreamChunk::ToolCall {
                                                     id: tc.id,
                                                     name: tc.name,
@@ -1518,11 +1723,13 @@ impl Provider {
                                             }
                                             let _ = tx.send(StreamChunk::Finish(fr.to_string()));
                                         } else if fr == "stop"
+                                            || fr == "end_turn"
                                             || fr == "length"
                                             || fr == "content_filter"
                                         {
                                             // Flush any remaining tool calls before sending stop
                                             for (_idx, tc) in pending_tool_calls.drain() {
+                                                emitted_output = true;
                                                 let _ = tx.send(StreamChunk::ToolCall {
                                                     id: tc.id,
                                                     name: tc.name,
@@ -1662,15 +1869,32 @@ impl Provider {
                         }
                     }
                 }
+                if stream_done {
+                    break;
+                }
             }
             // Stream ended normally — send Finish so the TUI knows we're done
             // Flush any remaining tool calls that weren't sent due to missing finish_reason
             for (_idx, tc) in pending_tool_calls.drain() {
+                emitted_output = true;
                 let _ = tx.send(StreamChunk::ToolCall {
                     id: tc.id,
                     name: tc.name,
                     arguments: tc.arguments,
                 });
+            }
+            if matches!(
+                kind,
+                ProviderKind::OpenAiCompatible | ProviderKind::XaiOauth
+            ) && !emitted_output
+                && !stream_errored
+            {
+                // Nothing usable came back in a 2xx response. Recover what
+                // we can from a body that was not SSE, and otherwise say so
+                // instead of handing the caller a silent empty turn.
+                for chunk in recover_unstreamed_body(&unparsed) {
+                    let _ = tx.send(chunk);
+                }
             }
             let _ = tx.send(StreamChunk::Finish("stop".to_string()));
         });
@@ -1784,6 +2008,231 @@ mod tests {
             }],
             true,
         )
+    }
+
+    /// Serve one canned response per connection, written in separate
+    /// `parts` with a pause between them so they arrive as separate reads.
+    /// No Content-Length: the body ends when the connection closes.
+    fn spawn_raw_server(content_type: &'static str, parts: Vec<Vec<u8>>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 65536];
+                let _ = stream.read(&mut buf);
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nConnection: close\r\n\r\n",
+                    content_type
+                );
+                let _ = stream.write_all(head.as_bytes());
+                for part in &parts {
+                    let _ = stream.write_all(part);
+                    let _ = stream.flush();
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+            }
+        });
+        format!("http://{}/v1", addr)
+    }
+
+    fn sse(lines: &[&str]) -> Vec<Vec<u8>> {
+        lines
+            .iter()
+            .map(|l| format!("data: {}\n\n", l).into_bytes())
+            .collect()
+    }
+
+    /// Run a realtime stream against `base` with the given provider kind
+    /// and return (content, reasoning, tool calls, finish reasons).
+    async fn collect_realtime(
+        base: String,
+        kind: ProviderKind,
+    ) -> (String, String, Vec<(String, String, String)>, Vec<String>) {
+        let p = Provider::new_without_cache(
+            "xai".to_string(),
+            base,
+            "test-key".to_string(),
+            kind,
+            HashMap::new(),
+        );
+        let mut req = test_request();
+        req.model = "grok-4.7".to_string();
+        let (mut rx, _) = p.chat_stream_realtime(req).await.expect("stream starts");
+        let (mut content, mut reasoning) = (String::new(), String::new());
+        let (mut tools, mut finishes) = (Vec::new(), Vec::new());
+        while let Some(chunk) = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+            .await
+            .expect("stream finished")
+        {
+            match chunk {
+                StreamChunk::Content(c) => content.push_str(&c),
+                StreamChunk::Reasoning(r) => reasoning.push_str(&r),
+                StreamChunk::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => tools.push((id, name, arguments)),
+                StreamChunk::Finish(f) => finishes.push(f),
+            }
+        }
+        (content, reasoning, tools, finishes)
+    }
+
+    #[tokio::test]
+    async fn realtime_grok_stream_keeps_reasoning_and_content() {
+        let base = spawn_raw_server(
+            "text/event-stream",
+            sse(&[
+                r#"{"id":"1","object":"chat.completion.chunk","model":"grok-4.7","choices":[{"index":0,"delta":{"reasoning_content":"Greeting.","role":"assistant"}}]}"#,
+                r#"{"id":"1","object":"chat.completion.chunk","model":"grok-4.7","choices":[{"index":0,"delta":{"content":"Hey!","role":"assistant"}}]}"#,
+                r#"{"id":"1","object":"chat.completion.chunk","model":"grok-4.7","choices":[{"index":0,"delta":{"content":" What are we building?"},"finish_reason":"end_turn"}]}"#,
+                "[DONE]",
+            ]),
+        );
+        let (content, reasoning, tools, finishes) =
+            collect_realtime(base, ProviderKind::XaiOauth).await;
+        assert_eq!(content, "Hey! What are we building?");
+        assert_eq!(reasoning, "Greeting.");
+        assert!(tools.is_empty());
+        assert_eq!(finishes.first().map(String::as_str), Some("end_turn"));
+    }
+
+    #[tokio::test]
+    async fn realtime_error_event_in_2xx_stream_is_surfaced_not_empty() {
+        // xAI-shaped error delivered as an SSE event on a 200 response.
+        let base = spawn_raw_server(
+            "text/event-stream",
+            sse(&[
+                r#"{"code":"Some resource has been exhausted","error":"Too many requests for grok-4.7, try again later"}"#,
+            ]),
+        );
+        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        assert!(content.starts_with("[API error:"), "{content}");
+        assert!(content.contains("Too many requests"), "{content}");
+        assert!(tools.is_empty());
+        assert!(finishes.contains(&"error".to_string()));
+
+        // OpenAI-shaped error object mid-stream, after some output.
+        let base = spawn_raw_server(
+            "text/event-stream",
+            sse(&[
+                r#"{"choices":[{"index":0,"delta":{"content":"Partial"}}]}"#,
+                r#"{"error":{"message":"upstream overloaded","type":"server_error"}}"#,
+            ]),
+        );
+        let (content, _, _, finishes) =
+            collect_realtime(base, ProviderKind::OpenAiCompatible).await;
+        assert!(
+            content.starts_with("Partial[API error: upstream overloaded"),
+            "{content}"
+        );
+        assert!(finishes.contains(&"error".to_string()));
+    }
+
+    #[tokio::test]
+    async fn realtime_plain_json_error_body_with_2xx_is_surfaced() {
+        let base = spawn_raw_server(
+            "application/json",
+            vec![br#"{"code":"permission-denied","error":"Your team has used all available credits"}"#.to_vec()],
+        );
+        let (content, _, _, finishes) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        assert!(content.contains("permission-denied"), "{content}");
+        assert!(content.contains("used all available credits"), "{content}");
+        assert!(finishes.contains(&"error".to_string()));
+    }
+
+    #[tokio::test]
+    async fn realtime_non_streamed_completion_body_is_recovered() {
+        // A server that ignores `stream: true` and answers with one JSON body.
+        let base = spawn_raw_server(
+            "application/json",
+            vec![br#"{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Hey there.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"list_dir","arguments":"{\"path\":\".\"}"}}]},"finish_reason":"tool_calls"}]}"#.to_vec()],
+        );
+        let (content, _, tools, _) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        assert_eq!(content, "Hey there.");
+        assert_eq!(
+            tools,
+            vec![(
+                "call_1".to_string(),
+                "list_dir".to_string(),
+                r#"{"path":"."}"#.to_string()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn realtime_content_parts_array_and_unterminated_last_line() {
+        let mut parts = sse(&[
+            r#"{"choices":[{"index":0,"delta":{"content":[{"type":"text","text":"Hello"}]}}]}"#,
+        ]);
+        // Last event with no trailing newline before the connection closes.
+        parts.push(br#"data: {"choices":[{"index":0,"delta":{"content":", world"},"finish_reason":"stop"}]}"#.to_vec());
+        let base = spawn_raw_server("text/event-stream", parts);
+        let (content, _, _, finishes) =
+            collect_realtime(base, ProviderKind::OpenAiCompatible).await;
+        assert_eq!(content, "Hello, world");
+        assert_eq!(finishes.first().map(String::as_str), Some("stop"));
+    }
+
+    #[tokio::test]
+    async fn realtime_utf8_split_across_network_chunks_is_intact() {
+        let event = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Shields up 🛡 — ready\"}}]}\n\n";
+        let bytes = event.as_bytes();
+        let shield = event.find('🛡').unwrap();
+        // Split in the middle of the 4-byte shield emoji.
+        let parts = vec![bytes[..shield + 2].to_vec(), bytes[shield + 2..].to_vec()];
+        let base = spawn_raw_server("text/event-stream", parts);
+        let (content, _, _, _) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        assert_eq!(content, "Shields up 🛡 — ready");
+    }
+
+    #[tokio::test]
+    async fn realtime_tool_calls_still_stream_normally() {
+        let base = spawn_raw_server(
+            "text/event-stream",
+            sse(&[
+                r#"{"choices":[{"index":0,"delta":{"content":"Let me look around.","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"glob","arguments":"{\"pattern\":"}}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"**/*.md\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "[DONE]",
+            ]),
+        );
+        let (content, _, tools, finishes) = collect_realtime(base, ProviderKind::XaiOauth).await;
+        assert_eq!(content, "Let me look around.");
+        assert_eq!(
+            tools,
+            vec![(
+                "call_a".to_string(),
+                "glob".to_string(),
+                r#"{"pattern":"**/*.md"}"#.to_string()
+            )]
+        );
+        assert_eq!(finishes.first().map(String::as_str), Some("tool_calls"));
+    }
+
+    #[test]
+    fn stream_error_and_text_helpers() {
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"code":"permission-denied","error":"no credits"}"#).unwrap();
+        assert_eq!(
+            openai_stream_error(&v).as_deref(),
+            Some("permission-denied: no credits")
+        );
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"error":{"message":"bad","code":429}}"#).unwrap();
+        assert_eq!(openai_stream_error(&v).as_deref(), Some("429: bad"));
+        let v: serde_json::Value = serde_json::from_str(r#"{"error":null,"choices":[]}"#).unwrap();
+        assert_eq!(openai_stream_error(&v), None);
+        let parts: serde_json::Value = serde_json::from_str(
+            r#"[{"type":"text","text":"a"},{"type":"output_text","text":"b"},{"type":"image_url"}]"#,
+        )
+        .unwrap();
+        assert_eq!(openai_text(Some(&parts)).as_deref(), Some("ab"));
+        assert_eq!(openai_text(Some(&serde_json::Value::Null)), None);
+        // A body that is neither an error nor a completion is still reported.
+        let out = recover_unstreamed_body("<html>502 Bad Gateway</html>");
+        assert!(matches!(&out[0], StreamChunk::Content(c) if c.contains("502 Bad Gateway")));
+        assert!(recover_unstreamed_body("   ").is_empty());
     }
 
     #[test]
