@@ -7,8 +7,8 @@
 <p align="center">AI coding agent in your terminal. Rust. Open source. Any provider.</p>
 
 <p align="center">
-  <a href="https://github.com/Blackshield-Company/openshield/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Blackshield-Company/openshield?sort=semver&display_name=tag&label=release&color=C1121F&labelColor=17171D&cacheSeconds=3600"></a>
-  <a href="https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Blackshield-Company/openshield/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/synthalorian/openshield/releases"><img alt="Release" src="https://img.shields.io/github/v/release/synthalorian/openshield?sort=semver&display_name=tag&label=release&color=C1121F&labelColor=17171D&cacheSeconds=3600"></a>
+  <a href="https://github.com/synthalorian/openshield/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/synthalorian/openshield/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-9AA0A8?labelColor=17171D"></a>
   <a href="https://rust-lang.org"><img alt="Rust 1.91+" src="https://img.shields.io/badge/rust-1.91%2B-D4A72C?labelColor=17171D"></a>
 </p>
@@ -31,14 +31,14 @@
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Blackshield-Company/openshield/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/synthalorian/openshield/main/install.sh | bash
 ```
 
-Downloads the prebuilt binary for your platform (Linux x86_64/aarch64, macOS x86_64/arm64) from [GitHub Releases](https://github.com/Blackshield-Company/openshield/releases), verifies its SHA-256 checksum, and installs it to `~/.local/bin/openshield`. If no prebuilt binary matches, it falls back to `cargo install --git`.
+Downloads the prebuilt binary for your platform (Linux x86_64/aarch64, macOS x86_64/arm64) from [GitHub Releases](https://github.com/synthalorian/openshield/releases), verifies its SHA-256 checksum, and installs it to `~/.local/bin/openshield`. If no prebuilt binary matches, it falls back to `cargo install --git`.
 
 Options: `OPENSHIELD_VERSION=v1.1.0` pins a release, `BIN_DIR=/path` changes the install directory, `OPENSHIELD_FROM_SOURCE=1` forces a source build, `DRY_RUN=1` prints the plan without installing.
 
-Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source anywhere: `cargo install --git https://github.com/Blackshield-Company/openshield --locked`.
+Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source anywhere: `cargo install --git https://github.com/synthalorian/openshield --locked`.
 
 ## First Run
 
@@ -159,7 +159,7 @@ capabilities = ["code", "chat", "analysis"]
 ## Development
 
 ```bash
-git clone https://github.com/Blackshield-Company/openshield
+git clone https://github.com/synthalorian/openshield
 cd openshield
 cargo build --release
 cargo test

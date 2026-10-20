@@ -12,7 +12,7 @@
 Please do **not** open a public issue for security problems.
 
 Report privately through GitHub's
-[private vulnerability reporting](https://github.com/Blackshield-Company/openshield/security/advisories/new)
+[private vulnerability reporting](https://github.com/synthalorian/openshield/security/advisories/new)
 ("Security" tab → "Report a vulnerability"). Include:
 
 - the OpenShield version (`openshield --version`) and OS,
