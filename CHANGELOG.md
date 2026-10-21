@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-20
+
+### Fixed
+
+- **xAI/OpenAI streaming errors are visible** — API errors and non-SSE response bodies from xAI or OpenAI-compatible endpoints now surface as errors instead of producing an empty reply. The shared stream parser has tests that run without an xAI login.
+
 ## [1.2.1] - 2026-10-17
 
 ### Added
