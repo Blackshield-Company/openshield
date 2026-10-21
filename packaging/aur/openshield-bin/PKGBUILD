@@ -1,0 +1,22 @@
+# Maintainer: synthalorian <212206047+synthalorian@users.noreply.github.com>
+pkgname=openshield-bin
+pkgver=1.1.1
+pkgrel=1
+pkgdesc='The harness that learns. The agent that decides.'
+arch=(x86_64 aarch64)
+url='https://github.com/Blackshield-Company/openshield'
+license=(Apache-2.0)
+depends=(gcc-libs glibc)
+provides=(openshield)
+conflicts=(openshield)
+source_x86_64=("https://github.com/Blackshield-Company/openshield/releases/download/v${pkgver}/openshield-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("https://github.com/Blackshield-Company/openshield/releases/download/v${pkgver}/openshield-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('a278128aaff5540d0d49dd6669a3fe9b417acc28ab48b54664c0f401d698e691')
+sha256sums_aarch64=('eacbc335c6ce57fb3602e647b8d1637484dee4f6feaa610b94db11bf720bc879')
+
+package() {
+  cd "$srcdir/openshield-$CARCH-unknown-linux-gnu"
+  install -Dm755 openshield "$pkgdir/usr/bin/openshield"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
