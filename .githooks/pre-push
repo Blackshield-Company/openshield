@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Rejects pushes containing commits not authored/committed with the noreply email.
 # Enable with: git config core.hooksPath .githooks
 set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
@@ -7,11 +8,14 @@ remote="$1"
 while read -r lref lsha rref rsha; do
   [ "$lsha" = "$zero" ] && continue          # branch deletion
   if [ "$rsha" = "$zero" ]; then
-    # new branch: check commits not already on any remote-tracking ref
-    range="$lsha --not --remotes=$remote"
+    # New branch: check commits not already on this remote's tracking refs.
+    # Run `git fetch` first if tracking refs are stale or missing.
+    "$root/scripts/check-noreply.sh" "$lsha" --not "--remotes=$remote"
   else
-    range="$rsha..$lsha"
+    if ! git cat-file -e "$rsha^{commit}" 2>/dev/null; then
+      echo "pre-push: remote tip $rsha not present locally; run 'git fetch $remote' and retry" >&2
+      exit 1
+    fi
+    "$root/scripts/check-noreply.sh" "$rsha..$lsha"
   fi
-  # shellcheck disable=SC2086
-  "$root/scripts/check-noreply.sh" $range
 done
