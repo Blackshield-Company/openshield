@@ -1,0 +1,16 @@
+name: noreply-check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  noreply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Check PR commit emails
+        run: bash scripts/check-noreply.sh "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
