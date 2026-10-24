@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Enable with: git config core.hooksPath .githooks
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+zero=0000000000000000000000000000000000000000
+remote="$1"
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "$zero" ] && continue          # branch deletion
+  if [ "$rsha" = "$zero" ]; then
+    # new branch: check commits not already on any remote-tracking ref
+    range="$lsha --not --remotes=$remote"
+  else
+    range="$rsha..$lsha"
+  fi
+  # shellcheck disable=SC2086
+  "$root/scripts/check-noreply.sh" $range
+done
