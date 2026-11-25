@@ -633,13 +633,9 @@ impl Provider {
                         // Filter out empty assistant messages that have no tool_calls.
                         // Tool messages must always be sent (API requires content field).
                         // Assistant messages with tool_calls are kept (content becomes null).
-                        if m.role == "assistant"
+                        !(m.role == "assistant"
                             && m.content.trim().is_empty()
-                            && m.tool_calls.is_none()
-                        {
-                            return false;
-                        }
-                        true
+                            && m.tool_calls.is_none())
                     })
                     .map(|m| {
                         // For assistant messages with tool_calls, only force content to null
@@ -699,13 +695,9 @@ impl Provider {
                     .iter()
                     .filter(|m| m.role != "system")
                     .filter(|m| {
-                        if (m.role == "assistant" || m.role == "tool")
+                        !((m.role == "assistant" || m.role == "tool")
                             && m.content.trim().is_empty()
-                            && m.tool_calls.is_none()
-                        {
-                            return false;
-                        }
-                        true
+                            && m.tool_calls.is_none())
                     })
                     .map(|m| {
                         // Anthropic uses the same multimodal format as OpenAI
@@ -729,10 +721,9 @@ impl Provider {
             ProviderKind::Gemini => {
                 let contents: Vec<_> = request.messages.iter()
                     .filter(|m| {
-                        if (m.role == "assistant" || m.role == "tool") && m.content.trim().is_empty() && m.tool_calls.is_none() {
-                            return false;
-                        }
-                        true
+                        !((m.role == "assistant" || m.role == "tool")
+                            && m.content.trim().is_empty()
+                            && m.tool_calls.is_none())
                     })
                     .map(|m| {
                         let role = if m.role == "assistant" { "model" } else { &m.role };
