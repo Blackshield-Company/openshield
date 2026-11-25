@@ -64,6 +64,10 @@ impl Tool for TestTool {
             },
         };
 
+        if !matches!(cmd, "run" | "list" | "watch") {
+            return Ok(format!("Unknown test command: {}\n{}", cmd, self.usage()));
+        }
+
         // Validate path before doing anything
         if let Err(e) = validate_test_path(path) {
             return Ok(format!("Test path validation failed: {}", e));
@@ -75,7 +79,7 @@ impl Tool for TestTool {
             "run" => run_tests(path, &framework),
             "list" => list_tests(path, &framework),
             "watch" => watch_tests(path, &framework),
-            _ => Ok(format!("Unknown test command: {}\n{}", cmd, self.usage())),
+            _ => unreachable!(),
         }
     }
 }
@@ -112,8 +116,30 @@ pub(crate) enum TestFramework {
 }
 
 fn validate_test_path(path: &str) -> Result<()> {
-    let canonical = std::fs::canonicalize(path)
-        .with_context(|| format!("Cannot resolve test path: {}", path))?;
+    let canonical = match std::fs::canonicalize(path) {
+        Ok(c) => c,
+        Err(e) => {
+            let raw = Path::new(path);
+            if raw.is_absolute()
+                && !raw
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                for blocked in blocked_path_prefixes() {
+                    if raw.starts_with(&blocked) || raw.starts_with(canonical_or_self(&blocked)) {
+                        anyhow::bail!(
+                            "Path '{}' is in a blocked directory ({}). \
+                             These directories contain system/package files, not project tests. \
+                             Run OpenShield from your project directory or set working_directory in config.",
+                            path,
+                            blocked.display()
+                        );
+                    }
+                }
+            }
+            return Err(e).with_context(|| format!("Cannot resolve test path: {}", path));
+        }
+    };
 
     for blocked in blocked_path_prefixes() {
         if canonical.starts_with(&blocked) || canonical.starts_with(canonical_or_self(&blocked)) {
