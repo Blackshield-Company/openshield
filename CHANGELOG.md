@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **xAI Grok 4.7 out of the box** — the default config now has an `xai` provider (`https://api.x.ai/v1`) with `grok-4.7` (500,000-token context, $2 / $6 per 1M tokens). It uses `XAI_API_KEY` (or `XAI_API_KEY=` in `~/.config/openshield/xai.env`) when set, and the SuperGrok token from `openshield auth xai` otherwise. Before this, `XAI_API_KEY` was documented but no provider read it, and `openshield auth xai` stored a token that nothing used unless the provider was written by hand.
+- **`reasoning_effort` for Grok** — `effort_level` (`/effort low|medium|high|xhigh`) is now sent as `reasoning_effort` to models that declare the `reasoning_effort` capability (the default `grok-4.7` does). Other models never receive the field. Before this, `/effort` only changed a line in the system prompt.
 - **`POST /api/v1/doctor/fix`** — runs `openshield doctor --fix` and returns the post-fix report plus `fixes_applied`, for the Desktop doctor panel.
 
 

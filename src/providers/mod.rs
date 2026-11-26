@@ -216,6 +216,18 @@ fn recover_unstreamed_body(unparsed: &str) -> Vec<StreamChunk> {
     out
 }
 
+/// An `xai_oauth` provider uses a plain API key when one is configured
+/// (`api_key = "${XAI_API_KEY}"` that resolved, or a literal key) and falls
+/// back to the SuperGrok OAuth token from `openshield auth xai` otherwise.
+fn xai_static_key(api_key: &str) -> Option<&str> {
+    let key = api_key.trim();
+    if key.is_empty() || unresolved_env_placeholder(key).is_some() {
+        None
+    } else {
+        Some(key)
+    }
+}
+
 /// If `value` is an unresolved `${VAR}` placeholder, return the variable name.
 pub fn unresolved_env_placeholder(value: &str) -> Option<&str> {
     let v = value.trim();
@@ -368,6 +380,11 @@ pub struct ChatRequest {
     /// Optional tools for function calling (OpenAI-compatible format).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    /// Reasoning depth for models that take it (xAI grok-4.5+:
+    /// `low` / `medium` / `high` / `xhigh`). Sent as `reasoning_effort` on
+    /// OpenAI-compatible chat completions; `None` leaves the provider default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 /// OpenAI-compatible tool definition for function calling.
@@ -394,6 +411,7 @@ impl ChatRequest {
             max_tokens: None,
             temperature: None,
             tools: None,
+            reasoning_effort: None,
         }
     }
 }
@@ -575,6 +593,9 @@ impl Provider {
         builder: reqwest::RequestBuilder,
         force_refresh: bool,
     ) -> Result<reqwest::RequestBuilder> {
+        if let Some(key) = xai_static_key(&self.api_key) {
+            return Ok(builder.header("Authorization", format!("Bearer {key}")));
+        }
         let token = xai_auth::ensure_fresh(force_refresh).await?;
         Ok(builder.header("Authorization", format!("Bearer {token}")))
     }
@@ -680,6 +701,9 @@ impl Provider {
                 if let Some(ref tools) = request.tools {
                     body["tools"] = json!(tools);
                     body["tool_choice"] = json!("auto");
+                }
+                if let Some(ref effort) = request.reasoning_effort {
+                    body["reasoning_effort"] = json!(effort);
                 }
                 body
             }
@@ -1446,7 +1470,10 @@ impl Provider {
                 }
                 Err(e) => anyhow::bail!("codex auth error: {}", e),
             },
-            ProviderKind::XaiOauth => match xai_auth::ensure_fresh(false).await {
+            ProviderKind::XaiOauth => match match xai_static_key(&api_key) {
+                Some(key) => Ok(key.to_string()),
+                None => xai_auth::ensure_fresh(false).await,
+            } {
                 Ok(token) => {
                     request_builder =
                         request_builder.header("Authorization", format!("Bearer {token}"));
@@ -2574,5 +2601,115 @@ mod tests {
         let response = provider.parse_chat_response(json).unwrap();
         assert_eq!(response.choices[0].message.content, "Hello!");
         assert_eq!(response.usage.as_ref().unwrap().total_tokens, 15);
+    }
+
+    #[test]
+    fn reasoning_effort_is_sent_only_when_set() {
+        let p = Provider::new_without_cache(
+            "xai".to_string(),
+            "http://127.0.0.1:9/v1".to_string(),
+            "k".to_string(),
+            ProviderKind::XaiOauth,
+            HashMap::new(),
+        );
+        let mut req = test_request();
+        req.model = "grok-4.7".to_string();
+        assert!(p.build_chat_body(&req).get("reasoning_effort").is_none());
+        for level in ["low", "medium", "high", "xhigh"] {
+            req.reasoning_effort = Some(level.to_string());
+            assert_eq!(p.build_chat_body(&req)["reasoning_effort"], level);
+        }
+    }
+
+    #[test]
+    fn xai_static_key_ignores_placeholders_and_blanks() {
+        assert_eq!(xai_static_key("${XAI_API_KEY}"), None);
+        assert_eq!(xai_static_key("   "), None);
+        assert_eq!(xai_static_key(""), None);
+        assert_eq!(xai_static_key(" xai-abc "), Some("xai-abc"));
+    }
+
+    /// Accept one HTTP request, hand back its raw text, reply with `sse_body`.
+    fn spawn_capturing_server(
+        sse_body: &'static str,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Some(mut stream) = listener.incoming().flatten().next() {
+                let mut raw = Vec::new();
+                let mut buf = [0u8; 65536];
+                // Read headers, then Content-Length bytes of body.
+                loop {
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&raw).to_string();
+                    if let Some(idx) = text.find("\r\n\r\n") {
+                        let len = text[..idx]
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                k.eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        if raw.len() >= idx + 4 + len {
+                            break;
+                        }
+                    }
+                }
+                let _ = tx.send(String::from_utf8_lossy(&raw).to_string());
+                let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(sse_body.as_bytes());
+            }
+        });
+        (format!("http://{}/v1", addr), rx)
+    }
+
+    #[tokio::test]
+    async fn xai_provider_with_api_key_sends_bearer_and_reasoning_effort() {
+        let (base, rx) = spawn_capturing_server(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+        );
+        // A resolved api_key on an `xai_oauth` provider must be used as the
+        // bearer directly; no OAuth token file is needed.
+        let p = Provider::new_without_cache(
+            "xai".to_string(),
+            base,
+            "xai-test-key".to_string(),
+            ProviderKind::XaiOauth,
+            HashMap::new(),
+        );
+        let mut req = test_request();
+        req.model = "grok-4.7".to_string();
+        req.reasoning_effort = Some("xhigh".to_string());
+        let (mut stream, _) = p.chat_stream_realtime(req).await.expect("stream starts");
+        let mut content = String::new();
+        while let Some(chunk) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), stream.recv())
+                .await
+                .expect("stream finished")
+        {
+            if let StreamChunk::Content(c) = chunk {
+                content.push_str(&c);
+            }
+        }
+        assert_eq!(content, "ok");
+        let raw = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(
+            raw.to_ascii_lowercase()
+                .contains("authorization: bearer xai-test-key"),
+            "{raw}"
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["model"], "grok-4.7");
+        assert_eq!(body["reasoning_effort"], "xhigh");
     }
 }
