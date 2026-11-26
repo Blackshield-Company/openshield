@@ -442,7 +442,11 @@ fn collect_json_paths(value: &serde_json::Value, out: &mut Vec<String>) {
                 return;
             }
             // A path with spaces ("/home/u/My Docs/a.txt") counts as a whole...
-            if s.starts_with(['/', '~']) || s.starts_with("./") || s.starts_with("../") {
+            if s.starts_with(['/', '~'])
+                || s.starts_with("./")
+                || s.starts_with("../")
+                || Path::new(s).is_absolute()
+            {
                 out.push(s.clone());
             }
             // ...and so does each path-like word, e.g. a command line inside a
@@ -466,6 +470,12 @@ fn looks_like_path(token: &str) -> bool {
         || token == ".."
         || token.contains("/../")
         || token.ends_with("/..")
+        // Windows: `C:\x`, `\\server\share`, `..\x`, `a\..\b`
+        || Path::new(token).is_absolute()
+        || token.starts_with("..\\")
+        || token.contains("\\..\\")
+        || token.contains("\\../")
+        || token.contains("/..\\")
 }
 
 fn extract_paths_from_text(args: &str, out: &mut Vec<String>) {
@@ -748,17 +758,27 @@ mod tests {
 
     #[test]
     fn test_normalize_lexical_resolves_dotdot() {
+        let base = std::env::temp_dir().canonicalize().unwrap();
+        let missing = format!("os-norm-{}", uuid::Uuid::new_v4().simple());
         assert_eq!(
-            normalize_lexical(Path::new("/a/b/../../etc/passwd")),
-            PathBuf::from("/etc/passwd")
+            normalize_lexical(
+                &base
+                    .join(&missing)
+                    .join("a")
+                    .join("..")
+                    .join("..")
+                    .join("y")
+            ),
+            base.join("y")
         );
         assert_eq!(
-            normalize_lexical(Path::new("/../../etc")),
-            PathBuf::from("/etc")
+            normalize_lexical(&base.join(&missing).join(".").join("b")),
+            base.join(&missing).join("b")
         );
+        #[cfg(unix)]
         assert_eq!(
-            normalize_lexical(Path::new("/a/./b")),
-            PathBuf::from("/a/b")
+            normalize_lexical(Path::new(&format!("/../../{missing}"))),
+            PathBuf::from(format!("/{missing}"))
         );
     }
 
@@ -768,26 +788,31 @@ mod tests {
         std::fs::create_dir_all(&wd).unwrap();
         let mut sandbox = Sandbox::new(Some(wd.clone())).unwrap();
         sandbox.set_external_mode(ExternalMode::Deny);
-        let escape = format!("read {}/missing/../../../../../../etc/passwd", wd.display());
+        let up = "../".repeat(12);
+        let escape_path = format!("{}/missing/{up}etc/passwd", wd.display());
         assert!(
-            sandbox.validate_path("fs", &escape).is_err(),
+            sandbox
+                .validate_path("fs", &format!("read {escape_path}"))
+                .is_err(),
             "traversal through a missing dir"
         );
-        let escape_json = format!(
-            "{{\"path\":\"{}/missing/../../../../../../etc/passwd\"}}",
-            wd.display()
-        );
+        let escape_json = serde_json::json!({ "path": escape_path }).to_string();
         assert!(
             sandbox.validate_path("fs", &escape_json).is_err(),
             "compact JSON traversal"
         );
+        let outside = if cfg!(windows) {
+            "C:\\Windows\\win.ini"
+        } else {
+            "/etc/passwd"
+        };
+        let outside_json = serde_json::json!({ "path": outside }).to_string();
         assert!(
-            sandbox
-                .validate_path("fs", "{\"path\":\"/etc/passwd\"}")
-                .is_err(),
+            sandbox.validate_path("fs", &outside_json).is_err(),
             "compact JSON"
         );
-        let inside = format!("{{\"path\":\"{}/sub/../file.txt\"}}", wd.display());
+        let inside =
+            serde_json::json!({ "path": format!("{}/sub/../file.txt", wd.display()) }).to_string();
         assert!(
             sandbox.validate_path("fs", &inside).is_ok(),
             "dotdot that stays inside"
