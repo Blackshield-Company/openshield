@@ -38,7 +38,7 @@ Downloads the prebuilt binary for your platform (Linux x86_64/aarch64, macOS x86
 
 Options: `OPENSHIELD_VERSION=v1.1.0` pins a release, `BIN_DIR=/path` changes the install directory, `OPENSHIELD_FROM_SOURCE=1` forces a source build, `DRY_RUN=1` prints the plan without installing.
 
-Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source anywhere: `cargo install --git https://github.com/Blackshield-Company/openshield --locked`.
+Windows: download `openshield-x86_64-pc-windows-msvc.zip` from the releases page. From source anywhere: `cargo install --git https://github.com/Blackshield-Company/openshield --locked`. Source builds on Linux need the OpenSSL development headers and pkg-config (see [Development](#development)). The Linux release binaries link `libssl.so.3`.
 
 ## First Run
 
@@ -157,6 +157,10 @@ capabilities = ["code", "chat", "analysis"]
 </details>
 
 ## Development
+
+`discord` is a default feature and uses the system TLS library (native-tls). Source builds on Linux therefore need the OpenSSL development headers and pkg-config: `pkg-config` and `libssl-dev` on Debian/Ubuntu, or `pkgconf-pkg-config` and `openssl-devel` on Fedora. macOS and Windows use the platform TLS stack and do not need those packages.
+
+The Linux release binaries (and a default `cargo build --release` on Linux) link `libssl.so.3`. The runtime library ships with current Debian, Ubuntu, Fedora and similar distributions (`libssl3` or `openssl-libs`).
 
 ```bash
 git clone https://github.com/Blackshield-Company/openshield
