@@ -80,14 +80,7 @@ impl CodingAgent {
         let session_id = Uuid::new_v4().to_string();
 
         let model_name = &config.default_model;
-        let (provider_name, provider_config) = app_config
-            .find_provider_for_model(model_name)
-            .unwrap_or_else(|| {
-                let (n, p) = app_config.providers.iter().next().unwrap_or_else(|| {
-                    panic!("No providers configured in config");
-                });
-                (n.clone(), p.clone())
-            });
+        let (provider_name, provider_config) = app_config.require_provider_for_model(model_name)?;
 
         let provider = Provider::new(
             provider_name.clone(),

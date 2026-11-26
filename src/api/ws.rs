@@ -301,15 +301,8 @@ fn build_provider(
     model: &str,
 ) -> Option<(crate::providers::Provider, String)> {
     // Route to the provider that actually owns the requested model.
-    // Fall back to the first provider for models not listed in config
-    // (e.g. proxies that accept arbitrary model names).
-    let (name, pc) = config.find_provider_for_model(model).or_else(|| {
-        config
-            .providers
-            .iter()
-            .next()
-            .map(|(n, p)| (n.clone(), p.clone()))
-    })?;
+    // Unlisted models only fall back when a single provider is configured.
+    let (name, pc) = config.require_provider_for_model(model).ok()?;
     let provider = crate::providers::Provider::new(
         name.clone(),
         pc.base_url.clone(),
@@ -788,9 +781,14 @@ mod tests {
         let (_, name) = build_provider(&config, "local-fast").unwrap();
         assert_eq!(name, "llama-swap");
 
-        // Unlisted model → first-provider fallback, never a panic.
+        // Unlisted model with several providers → no provider (an error for
+        // the client), never a random HashMap pick and never a panic.
+        assert!(build_provider(&config, "unlisted-model").is_none());
+
+        // With a single provider, unlisted names still go to it (proxies).
+        config.providers.remove("llama-swap");
         let (_, name) = build_provider(&config, "unlisted-model").unwrap();
-        assert!(name == "kimi" || name == "llama-swap");
+        assert_eq!(name, "kimi");
     }
 
     fn mapped_types(events: Vec<crate::harness::HarnessEvent>) -> Vec<(String, serde_json::Value)> {

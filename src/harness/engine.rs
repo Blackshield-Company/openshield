@@ -143,14 +143,8 @@ impl HarnessEngine {
         memory: MemoryStore,
     ) -> Result<Self> {
         // Initialize primary provider
-        let (provider_name, provider_config) = app_config
-            .find_provider_for_model(&harness_config.primary_model)
-            .unwrap_or_else(|| {
-                let (n, p) = app_config.providers.iter().next().unwrap_or_else(|| {
-                    panic!("No providers configured in config");
-                });
-                (n.clone(), p.clone())
-            });
+        let (provider_name, provider_config) =
+            app_config.require_provider_for_model(&harness_config.primary_model)?;
 
         let _primary_provider = Provider::new(
             provider_name,
@@ -176,14 +170,8 @@ impl HarnessEngine {
         let session_id = Uuid::new_v4().to_string();
 
         // Initialize primary provider
-        let (provider_name, provider_config) = app_config
-            .find_provider_for_model(&harness_config.primary_model)
-            .unwrap_or_else(|| {
-                let (n, p) = app_config.providers.iter().next().unwrap_or_else(|| {
-                    panic!("No providers configured in config");
-                });
-                (n.clone(), p.clone())
-            });
+        let (provider_name, provider_config) =
+            app_config.require_provider_for_model(&harness_config.primary_model)?;
 
         let primary_provider = Provider::new(
             provider_name,

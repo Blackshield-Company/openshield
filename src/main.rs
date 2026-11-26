@@ -915,20 +915,14 @@ async fn main() -> anyhow::Result<()> {
                 println!("       openshield chat 'review this' --file src/main.rs");
             } else {
                 let model_name = model.as_deref().unwrap_or(&config.default_model);
-                let (provider_name, provider_config) = config
-                    .find_provider_for_model(model_name)
-                    .unwrap_or_else(|| {
-                        println!("⚠️  Model '{}' not found, using default", model_name);
-                        match config.providers.iter().next() {
-                            Some((n, p)) => (n.clone(), p.clone()),
-                            None => {
-                                eprintln!(
-                                    "❌ No providers configured. Run `openshield setup` first."
-                                );
-                                std::process::exit(1);
-                            }
+                let (provider_name, provider_config) =
+                    match config.require_provider_for_model(model_name) {
+                        Ok(found) => found,
+                        Err(e) => {
+                            eprintln!("❌ {e}");
+                            std::process::exit(1);
                         }
-                    });
+                    };
 
                 println!("🛡 Chat with {} (via {})", model_name, provider_name);
                 println!();
