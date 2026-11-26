@@ -14,7 +14,7 @@
 #   DRY_RUN=1           print what would happen without downloading/installing
 set -euo pipefail
 
-OWNER_REPO="synthalorian/openshield"
+OWNER_REPO="Blackshield-Company/openshield"
 REPO_URL="https://github.com/${OWNER_REPO}"
 VERSION="${OPENSHIELD_VERSION:-latest}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"

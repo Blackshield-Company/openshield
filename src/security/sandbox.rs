@@ -78,6 +78,11 @@ pub struct Sandbox {
 /// ancestor (following symlinks such as macOS `/var` -> `/private/var` or
 /// `/tmp` -> `/private/tmp`) and re-append the missing tail.
 fn canonicalize_lenient(path: &Path) -> PathBuf {
+    // `~` is expanded and `..` / `.` are resolved lexically first, so a path
+    // through a missing directory ("<wd>/missing/../../etc/passwd") cannot
+    // keep the allowed prefix when its tail is re-attached below.
+    let path = normalize_lexical(path);
+    let path = path.as_path();
     if let Ok(c) = path.canonicalize() {
         return c;
     }
@@ -96,6 +101,39 @@ fn canonicalize_lenient(path: &Path) -> PathBuf {
         cur = parent;
     }
     path.to_path_buf()
+}
+
+/// Expand `~`, make the path absolute (against the process cwd) and resolve
+/// `.` and `..` components. Existing prefixes are canonicalized as the walk
+/// goes, so `..` after a symlink follows the real parent; missing components
+/// are resolved lexically. `..` above the root stays at the root.
+fn normalize_lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let expanded = PathBuf::from(shellexpand::tilde(&path.to_string_lossy()).to_string());
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("/"))
+            .join(expanded)
+    };
+    let mut out = PathBuf::new();
+    for comp in absolute.components() {
+        match comp {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            Component::Normal(name) => {
+                out.push(name);
+                if let Ok(real) = out.canonicalize() {
+                    out = real;
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 impl Sandbox {
@@ -356,37 +394,149 @@ impl Sandbox {
 }
 
 /// Extract potential file paths from tool arguments.
-/// Handles both plain-text args ("read /home/user/file.txt") and
-/// JSON-formatted args ("{\"operation\": \"read\", \"path\": \"/home/user/file.txt\"}").
+/// Handles plain-text args ("read /home/user/file.txt"), JSON-formatted args
+/// (pretty or compact, e.g. `{"path":"/etc/passwd"}`, nested values and
+/// several concatenated objects) and relative traversal (`../x`, `..`).
 fn extract_paths_from_args(args: &str) -> Vec<String> {
     let mut paths = Vec::new();
 
-    // Split by common delimiters and check each token
+    // JSON first: walk every string value (keys are ignored).
+    let mut stream = serde_json::Deserializer::from_str(args).into_iter::<serde_json::Value>();
+    let mut parsed_any = false;
+    let mut json_ok = true;
+    for value in stream.by_ref() {
+        match value {
+            Ok(v) => {
+                parsed_any = true;
+                collect_json_paths(&v, &mut paths);
+            }
+            Err(_) => {
+                json_ok = false;
+                break;
+            }
+        }
+    }
+    let is_json = parsed_any && json_ok && args.trim_start().starts_with(['{', '[']);
+
+    if !is_json {
+        extract_paths_from_text(args, &mut paths);
+        // JSON-ish text that did not parse (e.g. a trailing comma): look at
+        // every quoted string as well.
+        for quoted in quoted_strings(args) {
+            extract_paths_from_text(&quoted, &mut paths);
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|p| seen.insert(p.clone()));
+    paths
+}
+
+fn collect_json_paths(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(s) => {
+            if !s.contains(char::is_whitespace) {
+                if looks_like_path(s) {
+                    out.push(s.clone());
+                }
+                return;
+            }
+            // A path with spaces ("/home/u/My Docs/a.txt") counts as a whole...
+            if s.starts_with(['/', '~'])
+                || s.starts_with("./")
+                || s.starts_with("../")
+                || Path::new(s).is_absolute()
+            {
+                out.push(s.clone());
+            }
+            // ...and so does each path-like word, e.g. a command line inside a
+            // value ("cat ../../etc/passwd").
+            extract_paths_from_text(s, out);
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|v| collect_json_paths(v, out)),
+        serde_json::Value::Object(map) => map.values().for_each(|v| collect_json_paths(v, out)),
+        _ => {}
+    }
+}
+
+fn looks_like_path(token: &str) -> bool {
+    if token.starts_with("http://") || token.starts_with("https://") {
+        return false;
+    }
+    token.starts_with('/')
+        || token.starts_with('~')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token == ".."
+        || token.contains("/../")
+        || token.ends_with("/..")
+        // Windows: `C:\x`, `\\server\share`, `..\x`, `a\..\b`
+        || Path::new(token).is_absolute()
+        || token.starts_with("..\\")
+        || token.contains("\\..\\")
+        || token.contains("\\../")
+        || token.contains("/..\\")
+}
+
+fn extract_paths_from_text(args: &str, out: &mut Vec<String>) {
     for token in args.split_whitespace() {
         let token = token.trim_matches('"').trim_matches('\'');
 
+        // `--file=/etc/passwd` / `path=../x`: judge the value.
+        let token = match token.split_once('=') {
+            Some((_, value)) if token.starts_with('-') || !token.starts_with('/') => {
+                value.trim_matches('"').trim_matches('\'')
+            }
+            _ => token,
+        };
+
         // Skip flags and options
-        if token.starts_with('-') || token.starts_with("--") {
+        if token.starts_with('-') {
             continue;
         }
 
-        // Skip URLs
-        if token.starts_with("http://") || token.starts_with("https://") {
-            continue;
-        }
-
-        // Check if it looks like a path
-        if token.starts_with('/') || token.starts_with('~') || token.starts_with("./") {
+        if looks_like_path(token) {
             // Strip trailing JSON delimiters that may leak in from JSON-formatted args.
             // e.g. "/home/synth"}" → "/home/synth"
             let cleaned = token.trim_end_matches(|c: char| {
                 c == '}' || c == ']' || c == ',' || c == '"' || c == '\''
             });
-            paths.push(cleaned.to_string());
+            if !cleaned.is_empty() {
+                out.push(cleaned.to_string());
+            }
         }
     }
+}
 
-    paths
+/// Contents of every double-quoted string (with `\"` escapes) in `text`.
+fn quoted_strings(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '"' {
+            continue;
+        }
+        let mut cur = String::new();
+        let mut closed = false;
+        while let Some(n) = chars.next() {
+            match n {
+                '\\' => {
+                    if let Some(e) = chars.next() {
+                        cur.push(e);
+                    }
+                }
+                '"' => {
+                    closed = true;
+                    break;
+                }
+                other => cur.push(other),
+            }
+        }
+        if closed {
+            out.push(cur);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -560,6 +710,114 @@ mod tests {
         // JSON with trailing comma
         let paths = extract_paths_from_args("{\"operation\": \"list\", \"path\": \"/var/log\",}");
         assert_eq!(paths, vec!["/var/log"]);
+    }
+
+    #[test]
+    fn test_extract_paths_compact_and_nested_json() {
+        assert_eq!(
+            extract_paths_from_args("{\"path\":\"/etc/passwd\"}"),
+            vec!["/etc/passwd"]
+        );
+        assert_eq!(
+            extract_paths_from_args(
+                "{\"op\":\"copy\",\"args\":{\"from\":\"/etc/shadow\",\"to\":[\"../out\"]}}"
+            ),
+            vec!["/etc/shadow", "../out"]
+        );
+        // a command line inside a JSON value
+        assert_eq!(
+            extract_paths_from_args("{\"command\":\"cat ../../etc/passwd\"}"),
+            vec!["../../etc/passwd"]
+        );
+        // a path with spaces is checked whole (and word by word)
+        assert_eq!(
+            extract_paths_from_args("{\"path\":\"/home/u/My Docs/a.txt\"}"),
+            vec!["/home/u/My Docs/a.txt", "/home/u/My"]
+        );
+        // keys never count as paths
+        assert!(extract_paths_from_args("{\"/etc/passwd\":\"x\"}").is_empty());
+    }
+
+    #[test]
+    fn test_extract_paths_traversal() {
+        assert_eq!(
+            extract_paths_from_args("read ../secret.txt"),
+            vec!["../secret.txt"]
+        );
+        assert_eq!(extract_paths_from_args("cd .."), vec![".."]);
+        assert_eq!(
+            extract_paths_from_args("cat foo/../../etc/passwd"),
+            vec!["foo/../../etc/passwd"]
+        );
+        assert_eq!(
+            extract_paths_from_args("grep x --file=/etc/passwd"),
+            vec!["/etc/passwd"]
+        );
+        assert!(extract_paths_from_args("fetch https://example.com/a/../b").is_empty());
+    }
+
+    #[test]
+    fn test_normalize_lexical_resolves_dotdot() {
+        let base = std::env::temp_dir().canonicalize().unwrap();
+        let missing = format!("os-norm-{}", uuid::Uuid::new_v4().simple());
+        assert_eq!(
+            normalize_lexical(
+                &base
+                    .join(&missing)
+                    .join("a")
+                    .join("..")
+                    .join("..")
+                    .join("y")
+            ),
+            base.join("y")
+        );
+        assert_eq!(
+            normalize_lexical(&base.join(&missing).join(".").join("b")),
+            base.join(&missing).join("b")
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            normalize_lexical(Path::new(&format!("/../../{missing}"))),
+            PathBuf::from(format!("/{missing}"))
+        );
+    }
+
+    #[test]
+    fn test_sandbox_blocks_dotdot_through_missing_dir() {
+        let wd = std::env::temp_dir().join(format!("os-sbx-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&wd).unwrap();
+        let mut sandbox = Sandbox::new(Some(wd.clone())).unwrap();
+        sandbox.set_external_mode(ExternalMode::Deny);
+        let up = "../".repeat(12);
+        let escape_path = format!("{}/missing/{up}etc/passwd", wd.display());
+        assert!(
+            sandbox
+                .validate_path("fs", &format!("read {escape_path}"))
+                .is_err(),
+            "traversal through a missing dir"
+        );
+        let escape_json = serde_json::json!({ "path": escape_path }).to_string();
+        assert!(
+            sandbox.validate_path("fs", &escape_json).is_err(),
+            "compact JSON traversal"
+        );
+        let outside = if cfg!(windows) {
+            "C:\\Windows\\win.ini"
+        } else {
+            "/etc/passwd"
+        };
+        let outside_json = serde_json::json!({ "path": outside }).to_string();
+        assert!(
+            sandbox.validate_path("fs", &outside_json).is_err(),
+            "compact JSON"
+        );
+        let inside =
+            serde_json::json!({ "path": format!("{}/sub/../file.txt", wd.display()) }).to_string();
+        assert!(
+            sandbox.validate_path("fs", &inside).is_ok(),
+            "dotdot that stays inside"
+        );
+        let _ = std::fs::remove_dir_all(&wd);
     }
 
     #[test]
