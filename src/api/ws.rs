@@ -68,11 +68,72 @@ enum Envelope {
     Emit(WsEvent),
     /// The turn is finished — return to reading client messages.
     EndTurn,
+    /// Send this final envelope (`turn_done`), then end the turn.
+    EmitAndEnd(WsEvent),
     /// Internal event with no envelope equivalent — skip.
     Drop,
 }
 
+/// Per-turn state for mapping harness events onto the WS stream.
+///
+/// The harness sends `AssistantComplete` after the FIRST model response,
+/// before any tool runs, and `FollowUp` with the full final text after the
+/// tool loop. Mapping those 1:1 sent `turn_done` while tools were still
+/// running (clients stopped listening for the rest of the turn) and echoed
+/// the whole answer a second time as one big `token`. `turn_done` is sent
+/// once, at `Done`, and `FollowUp` only when it carries text that was not
+/// already streamed.
+struct TurnMapper {
+    started: std::time::Instant,
+    streamed: String,
+    tokens: u64,
+}
+
+impl TurnMapper {
+    fn new() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            streamed: String::new(),
+            tokens: 0,
+        }
+    }
+
+    fn envelope(&mut self, session: &str, event: crate::harness::HarnessEvent) -> Envelope {
+        use crate::harness::HarnessEvent as HE;
+        match event {
+            HE::Chunk(text) => {
+                self.streamed.push_str(&text);
+                harness_event_envelope(session, HE::Chunk(text))
+            }
+            HE::AssistantComplete { metrics, .. } => {
+                self.tokens += metrics.tokens_generated as u64;
+                Envelope::Drop
+            }
+            HE::FollowUp(text) => {
+                let trimmed = text.trim();
+                if trimmed.is_empty() || self.streamed.contains(trimmed) {
+                    Envelope::Drop
+                } else {
+                    self.streamed.push_str(&text);
+                    Envelope::Emit(WsEvent::new("token", session, json!({ "text": text })))
+                }
+            }
+            HE::Done => Envelope::EmitAndEnd(WsEvent::new(
+                "turn_done",
+                session,
+                json!({
+                    "tokens": self.tokens,
+                    "ms": self.started.elapsed().as_millis() as u64,
+                }),
+            )),
+            other => harness_event_envelope(session, other),
+        }
+    }
+}
+
 /// Map a harness engine event to its typed WS envelope (design doc §4).
+/// Stateless; `TurnMapper` handles the events whose meaning depends on the
+/// rest of the turn (`AssistantComplete`, `FollowUp`, `Done`).
 fn harness_event_envelope(session: &str, event: crate::harness::HarnessEvent) -> Envelope {
     use crate::harness::HarnessEvent as HE;
     match event {
@@ -355,15 +416,20 @@ async fn handle_chat_ws(mut socket: WebSocket, state: AppState) {
                         // Serialize harness events into the typed envelope (§4),
                         // interleaved with approval_req / approval_res from the
                         // broadcast so a client mid-turn sees its own requests.
+                        let mut mapper = TurnMapper::new();
                         'turn: loop {
                             tokio::select! {
                                 event = h_rx.recv() => {
                                     match event {
-                                        Some(event) => match harness_event_envelope(&session_id, event) {
+                                        Some(event) => match mapper.envelope(&session_id, event) {
                                             Envelope::Emit(ev) => {
                                                 if send_json(&mut socket, &ev).await.is_err() {
                                                     break 'turn;
                                                 }
+                                            }
+                                            Envelope::EmitAndEnd(ev) => {
+                                                let _ = send_json(&mut socket, &ev).await;
+                                                break 'turn;
                                             }
                                             Envelope::EndTurn => break 'turn,
                                             Envelope::Drop => {}
@@ -725,6 +791,97 @@ mod tests {
         // Unlisted model → first-provider fallback, never a panic.
         let (_, name) = build_provider(&config, "unlisted-model").unwrap();
         assert!(name == "kimi" || name == "llama-swap");
+    }
+
+    fn mapped_types(events: Vec<crate::harness::HarnessEvent>) -> Vec<(String, serde_json::Value)> {
+        let mut mapper = TurnMapper::new();
+        let mut out = Vec::new();
+        for event in events {
+            match mapper.envelope("sess-1", event) {
+                Envelope::Emit(ev) => {
+                    let v = serde_json::to_value(&ev).unwrap();
+                    out.push((v["type"].as_str().unwrap().to_string(), v["data"].clone()));
+                }
+                Envelope::EmitAndEnd(ev) => {
+                    let v = serde_json::to_value(&ev).unwrap();
+                    out.push((v["type"].as_str().unwrap().to_string(), v["data"].clone()));
+                    out.push(("<end>".to_string(), serde_json::Value::Null));
+                }
+                Envelope::EndTurn => out.push(("<end>".to_string(), serde_json::Value::Null)),
+                Envelope::Drop => {}
+            }
+        }
+        out
+    }
+
+    fn metrics(tokens: u32) -> crate::providers::StreamMetrics {
+        crate::providers::StreamMetrics {
+            first_token_latency_ms: 1,
+            total_latency_ms: 0,
+            tokens_generated: tokens,
+            cached: false,
+        }
+    }
+
+    #[test]
+    fn turn_done_comes_once_after_tools_and_final_text_is_not_echoed() {
+        use crate::harness::HarnessEvent as HE;
+        use crate::providers::ToolCallRequest;
+        // The engine's real order for a tool-using turn.
+        let events = vec![
+            HE::Start,
+            HE::Chunk("Writing the file.".into()),
+            HE::AssistantComplete {
+                content: "Writing the file.".into(),
+                reasoning: None,
+                tool_calls: Vec::<ToolCallRequest>::new(),
+                metrics: metrics(5),
+                finish_reason: Some("tool_calls".into()),
+            },
+            HE::ToolCall {
+                id: "1".into(),
+                name: "fs".into(),
+                arguments: r#"{"operation":"write"}"#.into(),
+            },
+            HE::ToolResult {
+                tool_call_id: "1".into(),
+                name: "fs".into(),
+                args: "{}".into(),
+                result: "ok".into(),
+                success: true,
+            },
+            HE::Chunk("Done, ".into()),
+            HE::Chunk("file written.".into()),
+            HE::FollowUp("Done, file written.".into()),
+            HE::Done,
+        ];
+        let out = mapped_types(events);
+        let types: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(
+            types,
+            vec![
+                "token",
+                "tool_start",
+                "tool_result",
+                "token",
+                "token",
+                "turn_done",
+                "<end>"
+            ],
+            "turn_done must be last, after the tool result, with no full-text echo"
+        );
+        let done = &out[5].1;
+        assert_eq!(done["tokens"], 5);
+        assert!(done["ms"].is_u64());
+    }
+
+    #[test]
+    fn follow_up_text_that_was_never_streamed_is_sent_once() {
+        use crate::harness::HarnessEvent as HE;
+        let out = mapped_types(vec![HE::FollowUp("non-streamed answer".into()), HE::Done]);
+        let types: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(types, vec!["token", "turn_done", "<end>"]);
+        assert_eq!(out[0].1["text"], "non-streamed answer");
     }
 
     #[test]
