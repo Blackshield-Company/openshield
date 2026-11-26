@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[cfg(feature = "web-api")]
 use std::sync::Arc;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use tracing::info;
 
@@ -313,7 +314,20 @@ async fn main() -> anyhow::Result<()> {
     }));
 
     let cli = Cli::parse();
-    let config = Config::load_or_default()?;
+
+    // `doctor` is the recovery tool for a broken config.toml, so it must run
+    // before the config is loaded: otherwise a parse error makes
+    // `openshield doctor --fix` fail with the very error it is meant to fix.
+    if let Some(Commands::Doctor { fix, .. }) = &cli.command {
+        let report = crate::doctor::run_checks(*fix).await?;
+        report.print();
+        return Ok(());
+    }
+
+    let config = Config::load_or_default().context(
+        "openshield could not load its config. Run `openshield doctor` to see what is wrong, \
+         or `openshield doctor --fix` to back it up to config.toml.bak and write a fresh one",
+    )?;
 
     // Load user-defined custom tools from config
     let custom_tools = crate::tools::custom::load_custom_tools();
