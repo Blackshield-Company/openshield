@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **config.toml no longer collects resolved API keys** — the first-run config copied any `OPENAI_API_KEY`, `KIMI_API_KEY`, `ANTHROPIC_API_KEY` and so on from the environment into `config.toml` as plain text, and every later save (`/sprite`, `/motion`, `openshield setup`, the doctor's Config fix) wrote back whatever keys and bot tokens had been resolved from the environment or `*.env` files. Saves now write the original `${VAR}` text, and config.toml (and its `.bak`) is written owner-only (0600) on Unix.
 - **Legacy TUI HTTP gateway requires the bearer token and is opt-in** — the 127.0.0.1:9876 API (`openshield server`, and the listener the TUI used to start automatically) now requires the same `Authorization: Bearer` token as `openshield serve` (`[desktop] token_path`, usually `~/.config/openshield/desktop.token`). Non-loopback binds need `[desktop] lan_mode = true`. The TUI no longer starts this gateway by default; enable it with `openshield --tui-http` or `[desktop] tui_http = true`. Desktop and Pocket should keep using `openshield serve` on port 9310.
 
 ### Added

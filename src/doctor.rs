@@ -456,9 +456,10 @@ pub(crate) fn write_default_config(config_path: &std::path::Path) -> Result<Stri
     }
     let backup = backup_existing_config(config_path)?;
     let default_config = crate::config::Config::default();
-    let toml =
-        toml::to_string_pretty(&default_config).context("Failed to serialize default config")?;
-    std::fs::write(config_path, toml).context("Failed to write default config")?;
+    let toml = default_config
+        .to_toml_for_disk()
+        .context("Failed to serialize default config")?;
+    crate::config::write_private(config_path, &toml).context("Failed to write default config")?;
     Ok(match backup {
         Some(bak) => format!(
             "Created default config at {} (previous config saved to {})",
@@ -484,7 +485,7 @@ pub(crate) fn backup_existing_config(
         return Ok(None);
     }
     let bak = unique_config_backup_path(config_path);
-    std::fs::write(&bak, &contents).with_context(|| {
+    crate::config::write_private(&bak, &contents).with_context(|| {
         format!(
             "Failed to write config backup at {}; leaving existing config in place",
             bak.display()
