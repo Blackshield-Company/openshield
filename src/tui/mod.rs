@@ -3661,7 +3661,7 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             })
             .collect();
 
-        let export = SessionExport::from_tui_state(
+        let mut export = SessionExport::from_tui_state(
             app.session_id.clone(),
             app.model.clone(),
             export_messages,
@@ -3669,6 +3669,12 @@ async fn process_user_input(app: &mut App, input: String) -> Result<()> {
             app.tokens_used,
             app.tool_calls_count,
         );
+        if let Err(e) = export.attach_from_store(&app.memory) {
+            tracing::warn!("export could not attach memory rows: {e}");
+        }
+        if let Some(mc) = &app.model_config {
+            export.set_cost_estimate(mc.cost_per_1k_input, mc.cost_per_1k_output);
+        }
 
         let result = if let Some(path) = path_override {
             export.save_to_file(path).map(|_| path.to_string())

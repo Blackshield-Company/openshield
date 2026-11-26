@@ -41,6 +41,35 @@ pub struct ToolCall {
     pub created_at: DateTime<Utc>,
 }
 
+/// A persisted human (or timeout) decision on a tool-call approval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalRecord {
+    pub id: String,
+    pub session_id: String,
+    pub tool: String,
+    pub args: String,
+    pub risk: String,
+    pub reason: String,
+    /// `approved`, `rejected`, or `approved_always`.
+    pub decision: String,
+    pub created_at: DateTime<Utc>,
+    pub resolved_at: DateTime<Utc>,
+}
+
+/// A persisted security-audit row (mirrors the in-memory ring, but durable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditRecord {
+    pub id: i64,
+    pub session_id: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub action: String,
+    pub tool: String,
+    pub args: String,
+    pub approved: bool,
+    pub risk_level: String,
+    pub reason: String,
+}
+
 /// Lightweight session row for chat-session pickers: id, when, model,
 /// message count, and a title derived from the first user message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +83,26 @@ pub struct SessionSummary {
 
 pub struct MemoryStore {
     conn: Connection,
+}
+
+fn parse_dt(raw: String) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(&raw)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now())
+}
+
+fn map_audit_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditRecord> {
+    Ok(AuditRecord {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        timestamp: parse_dt(row.get::<_, String>(2)?),
+        action: row.get(3)?,
+        tool: row.get(4)?,
+        args: row.get(5)?,
+        approved: row.get::<_, i64>(6)? != 0,
+        risk_level: row.get(7)?,
+        reason: row.get(8)?,
+    })
 }
 
 impl MemoryStore {
@@ -135,12 +184,40 @@ impl MemoryStore {
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS approvals (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                args TEXT NOT NULL,
+                risk TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                resolved_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                timestamp TEXT NOT NULL,
+                action TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                args TEXT NOT NULL,
+                approved INTEGER NOT NULL,
+                risk_level TEXT NOT NULL,
+                reason TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_messages_content ON messages(content);
             CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
             CREATE INDEX IF NOT EXISTS idx_analysis_results_category ON analysis_results(category);
             CREATE INDEX IF NOT EXISTS idx_perf_metrics_type ON performance_metrics(metric_type);
             CREATE INDEX IF NOT EXISTS idx_perf_metrics_time ON performance_metrics(created_at);
+            CREATE INDEX IF NOT EXISTS idx_approvals_session ON approvals(session_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_session ON audit_log(session_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit_log(timestamp);
             ",
             )
             .context("Failed to create tables")?;
@@ -407,6 +484,117 @@ impl MemoryStore {
             ],
         ).context("Failed to save tool call")?;
         Ok(())
+    }
+
+    /// Persist an approval decision. Sessions that do not exist yet are
+    /// created so a foreign key, if enforced, will not reject the row.
+    pub fn save_approval(&self, row: &ApprovalRecord) -> Result<()> {
+        self.ensure_session(&row.session_id, "unknown", "general")?;
+        self.conn
+            .execute(
+                "INSERT INTO approvals
+                    (id, session_id, tool, args, risk, reason, decision, created_at, resolved_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    row.id,
+                    row.session_id,
+                    row.tool,
+                    row.args,
+                    row.risk,
+                    row.reason,
+                    row.decision,
+                    row.created_at.to_rfc3339(),
+                    row.resolved_at.to_rfc3339(),
+                ],
+            )
+            .context("Failed to save approval")?;
+        Ok(())
+    }
+
+    /// Approvals for a session, oldest first (timeline order).
+    pub fn list_approvals(&self, session_id: &str) -> Result<Vec<ApprovalRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, session_id, tool, args, risk, reason, decision, created_at, resolved_at
+             FROM approvals
+             WHERE session_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(ApprovalRecord {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    tool: row.get(2)?,
+                    args: row.get(3)?,
+                    risk: row.get(4)?,
+                    reason: row.get(5)?,
+                    decision: row.get(6)?,
+                    created_at: parse_dt(row.get::<_, String>(7)?),
+                    resolved_at: parse_dt(row.get::<_, String>(8)?),
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Persist a security-audit event. `session_id` may be None when the
+    /// engine does not have a session context.
+    pub fn save_audit_record(&self, row: &AuditRecord) -> Result<i64> {
+        if let Some(sid) = &row.session_id {
+            self.ensure_session(sid, "unknown", "general")?;
+        }
+        self.conn
+            .execute(
+                "INSERT INTO audit_log
+                    (session_id, timestamp, action, tool, args, approved, risk_level, reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    row.session_id,
+                    row.timestamp.to_rfc3339(),
+                    row.action,
+                    row.tool,
+                    row.args,
+                    if row.approved { 1 } else { 0 },
+                    row.risk_level,
+                    row.reason,
+                ],
+            )
+            .context("Failed to save audit record")?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Audit rows for a session, oldest first. When `session_id` is empty,
+    /// returns the most recent `limit` rows across all sessions.
+    pub fn list_audit_records(
+        &self,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AuditRecord>> {
+        if let Some(sid) = session_id {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, session_id, timestamp, action, tool, args, approved, risk_level, reason
+                 FROM audit_log
+                 WHERE session_id = ?1
+                 ORDER BY timestamp ASC, id ASC
+                 LIMIT ?2",
+            )?;
+            let rows = stmt
+                .query_map(params![sid, limit as i64], map_audit_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, session_id, timestamp, action, tool, args, approved, risk_level, reason
+                 FROM audit_log
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT ?1",
+            )?;
+            let mut rows = stmt
+                .query_map(params![limit as i64], map_audit_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows.reverse();
+            Ok(rows)
+        }
     }
 
     pub fn search_messages(&self, query: &str, limit: usize) -> Result<Vec<Message>> {
@@ -1605,6 +1793,61 @@ mod tests {
         let embedding_json: String = stmt.query_row(params!["msg-1"], |row| row.get(0)).unwrap();
         let embedding: Vec<f32> = serde_json::from_str(&embedding_json).unwrap();
         assert_eq!(embedding.len(), crate::memory::embeddings::EMBEDDING_DIM);
+    }
+
+    #[test]
+    fn approvals_and_audit_round_trip() {
+        let store = create_test_store();
+        store.create_session("sess-a", "k3", "code").unwrap();
+
+        let created = Utc::now();
+        let resolved = created + chrono::Duration::seconds(3);
+        store
+            .save_approval(&ApprovalRecord {
+                id: "appr-1".into(),
+                session_id: "sess-a".into(),
+                tool: "terminal".into(),
+                args: r#"{"command":"rm -rf /tmp/x"}"#.into(),
+                risk: "high".into(),
+                reason: "destructive command".into(),
+                decision: "approved".into(),
+                created_at: created,
+                resolved_at: resolved,
+            })
+            .unwrap();
+
+        let listed = store.list_approvals("sess-a").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "appr-1");
+        assert_eq!(listed[0].decision, "approved");
+        assert_eq!(listed[0].tool, "terminal");
+        assert!(store.list_approvals("other").unwrap().is_empty());
+
+        let id = store
+            .save_audit_record(&AuditRecord {
+                id: 0,
+                session_id: Some("sess-a".into()),
+                timestamp: Utc::now(),
+                action: "tool_execution".into(),
+                tool: "terminal".into(),
+                args: r#"{"command":"ls"}"#.into(),
+                approved: true,
+                risk_level: "low".into(),
+                reason: "approved".into(),
+            })
+            .unwrap();
+        assert!(id > 0);
+
+        let audit = store.list_audit_records(Some("sess-a"), 10).unwrap();
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].tool, "terminal");
+        assert!(audit[0].approved);
+        assert!(
+            store
+                .list_audit_records(Some("missing"), 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 

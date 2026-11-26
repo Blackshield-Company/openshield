@@ -1805,12 +1805,15 @@ async fn main() -> anyhow::Result<()> {
             let mut config = config;
             config.desktop.bind = bind_ip.to_string();
             config.desktop.port = bind_sock.port();
+            let memory_db_path = config.memory_db_path.clone();
             let state = crate::api::AppState {
                 config: Arc::new(config),
                 running_tasks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
                 config_dir: None,
                 auth: Some(auth),
-                approvals: Arc::new(crate::api::approvals::ApprovalsState::new()),
+                approvals: Arc::new(
+                    crate::api::approvals::ApprovalsState::new().with_memory_db(memory_db_path),
+                ),
                 swarm: Arc::new(crate::api::swarm::SwarmState::new()),
                 started: std::time::Instant::now(),
             };

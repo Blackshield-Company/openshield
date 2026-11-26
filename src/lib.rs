@@ -127,12 +127,15 @@ pub fn in_process_state(
     }
     config.desktop.bind = sock.ip().to_string();
     config.desktop.port = sock.port();
+    let memory_db_path = config.memory_db_path.clone();
     Ok(api::AppState {
         config: std::sync::Arc::new(config),
         running_tasks: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
         config_dir: Some(config_dir.to_path_buf()),
         auth: Some(api::auth::AuthState::new(token, true)),
-        approvals: std::sync::Arc::new(api::approvals::ApprovalsState::new()),
+        approvals: std::sync::Arc::new(
+            api::approvals::ApprovalsState::new().with_memory_db(memory_db_path),
+        ),
         swarm: std::sync::Arc::new(api::swarm::SwarmState::new()),
         started: std::time::Instant::now(),
     })

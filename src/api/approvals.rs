@@ -19,6 +19,7 @@
 //!     → broadcast `approval_res` → engine resumes (execute or deny)
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,6 +34,7 @@ use tokio::sync::{broadcast, oneshot};
 
 use super::{ApiError, AppState};
 use crate::harness::{ApprovalGate, ApprovalRequest};
+use crate::memory::{ApprovalRecord, MemoryStore};
 
 /// Default approval window: 120s, then the tool call is denied (doc §6).
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -102,6 +104,9 @@ pub struct ApprovalsState {
     approved_always: Mutex<HashSet<String>>,
     /// Approval window before the request defaults to deny.
     timeout: Duration,
+    /// When set, every resolved decision (human or timeout) is written to
+    /// this `memory.db` so replay can show it after the process exits.
+    memory_db_path: Option<PathBuf>,
 }
 
 impl ApprovalsState {
@@ -119,6 +124,32 @@ impl ApprovalsState {
             ws_clients: AtomicUsize::new(0),
             approved_always: Mutex::new(HashSet::new()),
             timeout,
+            memory_db_path: None,
+        }
+    }
+
+    /// Persist approval decisions to `memory.db`.
+    pub fn with_memory_db(mut self, path: PathBuf) -> Self {
+        self.memory_db_path = Some(path);
+        self
+    }
+
+    fn persist_decision(&self, row: ApprovalRecord) {
+        let Some(path) = &self.memory_db_path else {
+            return;
+        };
+        match MemoryStore::new(path) {
+            Ok(store) => {
+                if let Err(e) = store.save_approval(&row) {
+                    tracing::warn!("failed to persist approval {}: {e}", row.id);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "failed to open memory db to persist approval {}: {e}",
+                    row.id
+                )
+            }
         }
     }
 
@@ -174,7 +205,8 @@ impl ApprovalsState {
         let args = serde_json::from_str(&req.args)
             .unwrap_or_else(|_| serde_json::Value::String(req.args.clone()));
         let (tx, rx) = oneshot::channel();
-        let expires = chrono::Utc::now() + chrono::Duration::from_std(self.timeout).unwrap();
+        let created_at = chrono::Utc::now();
+        let expires = created_at + chrono::Duration::from_std(self.timeout).unwrap();
 
         {
             let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -187,7 +219,7 @@ impl ApprovalsState {
                     tool: req.tool_name.clone(),
                     args: args.clone(),
                     reason: req.reason.clone(),
-                    created_at: chrono::Utc::now(),
+                    created_at,
                     tx,
                 },
             );
@@ -213,10 +245,10 @@ impl ApprovalsState {
             }
         }));
 
-        let decision = match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(d)) => d,
+        let (decision, timed_out) = match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(d)) => (d, false),
             // Timeout or resolver task died — deny (design doc §6).
-            _ => ApprovalDecision::Reject,
+            _ => (ApprovalDecision::Reject, true),
         };
 
         // Whatever the outcome, the request is no longer pending.
@@ -224,6 +256,24 @@ impl ApprovalsState {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&id);
+
+        // Persist here (not in resolve()) so timeouts are recorded too.
+        // resolve() only fires the oneshot that this waiter observes.
+        self.persist_decision(ApprovalRecord {
+            id: id.clone(),
+            session_id: session.clone(),
+            tool: req.tool_name.clone(),
+            args: args.to_string(),
+            risk: risk.clone(),
+            reason: if timed_out {
+                format!("{} (timeout)", req.reason)
+            } else {
+                req.reason.clone()
+            },
+            decision: decision.as_str().to_string(),
+            created_at,
+            resolved_at: chrono::Utc::now(),
+        });
 
         if matches!(decision, ApprovalDecision::ApproveAlways) {
             self.approved_always
@@ -493,5 +543,73 @@ mod tests {
         .await;
         assert!(allowed);
         assert!(state.pending_list().is_empty());
+    }
+
+    #[tokio::test]
+    async fn decisions_are_persisted_including_timeout() {
+        let db = format!("/tmp/openshield_approval_persist_{}.db", std::process::id());
+        let _ = std::fs::remove_file(&db);
+        let path = PathBuf::from(&db);
+
+        let timed =
+            ApprovalsState::with_timeout(Duration::from_millis(50)).with_memory_db(path.clone());
+        let allowed = timed
+            .request(
+                "sess-timeout".to_string(),
+                ApprovalRequest {
+                    tool_name: "terminal".to_string(),
+                    args: r#"{"command":"rm -rf /tmp/x"}"#.to_string(),
+                    risk: crate::security::RiskLevel::High,
+                    reason: "destructive".to_string(),
+                },
+            )
+            .await;
+        assert!(!allowed);
+
+        let store = MemoryStore::new(&path).unwrap();
+        let rows = store.list_approvals("sess-timeout").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].decision, "rejected");
+        assert!(
+            rows[0].reason.contains("timeout"),
+            "timeout should be recorded in the reason: {}",
+            rows[0].reason
+        );
+
+        let state = Arc::new(
+            ApprovalsState::with_timeout(Duration::from_secs(5)).with_memory_db(path.clone()),
+        );
+        let state_req = state.clone();
+        let handle = tokio::spawn(async move {
+            state_req
+                .request(
+                    "sess-human".to_string(),
+                    ApprovalRequest {
+                        tool_name: "fs".to_string(),
+                        args: r#"{"path":"/etc/passwd"}"#.to_string(),
+                        risk: crate::security::RiskLevel::High,
+                        reason: "sensitive path".to_string(),
+                    },
+                )
+                .await
+        });
+        for _ in 0..50 {
+            if !state.pending_list().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let id = state.pending_list()[0].id.clone();
+        assert!(state.resolve(&id, ApprovalDecision::Approve));
+        assert!(handle.await.unwrap());
+
+        let rows = MemoryStore::new(&path)
+            .unwrap()
+            .list_approvals("sess-human")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, id);
+        assert_eq!(rows[0].decision, "approved");
+        assert_eq!(rows[0].tool, "fs");
     }
 }
