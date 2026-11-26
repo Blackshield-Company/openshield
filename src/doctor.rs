@@ -207,12 +207,14 @@ async fn check_config() -> CheckResult {
             if contents.trim().is_empty() {
                 return CheckResult::critical("Config", "Config file is empty", true);
             }
-            match toml::from_str::<serde_json::Value>(&contents) {
+            // Valid TOML is not enough: every command deserializes it into
+            // `Config`, so a wrong type or a missing field breaks them all.
+            match toml::from_str::<crate::config::Config>(&contents) {
                 Ok(_) => CheckResult::healthy(
                     "Config",
-                    format!("Valid TOML at {}", config_path.display()),
+                    format!("Valid config at {}", config_path.display()),
                 ),
-                Err(e) => CheckResult::critical("Config", format!("Invalid TOML: {}", e), true),
+                Err(e) => CheckResult::critical("Config", format!("Invalid config: {}", e), true),
             }
         }
         Err(e) => CheckResult::critical("Config", format!("Cannot read config: {}", e), false),
