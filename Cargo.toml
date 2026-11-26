@@ -2,7 +2,7 @@
 name = "openshield"
 version = "1.2.2"
 edition = "2024"
-authors = ["synth <synthalorian@gmail.com>"]
+authors = ["synthalorian <212206047+synthalorian@users.noreply.github.com>"]
 description = "The harness that learns. The agent that decides."
 license = "Apache-2.0"
 repository = "https://github.com/Blackshield-Company/openshield"
@@ -75,7 +75,7 @@ shellexpand = "3.1.2"
 subtle = "2"
 async-stream = "0.3"
 tower = "0.5"
-serenity = { version = "0.12", features = ["client", "gateway", "model", "cache", "rustls_backend"], optional = true }
+serenity = { version = "0.12", default-features = false, features = ["default_native_tls", "client", "gateway", "model", "cache"], optional = true }
 async-trait = "0.1"
 teloxide = { version = "0.17", features = ["macros"], optional = true }
 slack-morphism = { version = "2.22", optional = true }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Embedded server requires the bearer token** — `serve_in_process` (the Android/Pocket in-app server) no longer runs with `auth: None`. Every REST request, and every WebSocket upgrade, must present the token from `config_dir/desktop.token` (created with mode 0600 on first start; read it with `openshield::embedded_token`) as `Authorization: Bearer`, or `?token=` on `/ws/` upgrades. Non-loopback binds are refused unless `[desktop] lan_mode = true`. `serve_in_process_with_token` accepts a token supplied by the host.
+- **Sandbox path checks cover traversal and compact JSON** — tool arguments such as `{"path":"/etc/passwd"}`, nested JSON values, `--file=/x`, `../x` and `..` are now checked against the working area. `..` is resolved before the allow check, so `<workdir>/missing/../../etc/passwd` no longer passes as inside the working directory. `~` is expanded before the check.
+- **Dependency advisories** — serenity now uses its native-tls backend, which removes `rustls` 0.22 / `rustls-webpki` 0.102.8 (GHSA-82j2-j2ch-gfr8 and related advisories) from the tree. `wayland-scanner` 0.31.11 brings `quick-xml` 0.41.0 (RUSTSEC-2026-0194, RUSTSEC-2026-0195). Linux builds of the `discord` feature now link the system OpenSSL (`libssl-dev`), as reqwest's native-tls does elsewhere.
+
+### Fixed
+
+- **Package author** — `Cargo.toml` `authors` uses the GitHub noreply address.
+- **CI and installer** — three `clippy::needless_bool` errors in `src/providers/mod.rs` are fixed, the test runner tool checks the command before validating paths (and checks blocked prefixes for paths that do not exist), and `install.sh` points at `Blackshield-Company/openshield`.
+
 ## [1.2.2] - 2026-10-20
 
 ### Fixed
