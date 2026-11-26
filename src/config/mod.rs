@@ -420,8 +420,8 @@ impl Config {
             config
         } else {
             let config = Config::default();
-            if let Ok(content) = toml::to_string_pretty(&config) {
-                let _ = std::fs::write(&config_path, content);
+            if let Ok(content) = config.to_toml_for_disk() {
+                let _ = write_private(&config_path, &content);
             }
             config
         };
@@ -471,6 +471,7 @@ impl Config {
     fn resolve_env_keys(&mut self) -> Result<()> {
         for provider in self.providers.values_mut() {
             // If api_key looks like ${VAR}, resolve from env
+            let original_key = provider.api_key.clone();
             if provider.api_key.starts_with("${") && provider.api_key.ends_with("}") {
                 let var_name = &provider.api_key[2..provider.api_key.len() - 1];
                 if let Ok(val) = std::env::var(var_name) {
@@ -503,7 +504,9 @@ impl Config {
                             }
                             // Also insert into headers if they reference env vars
                             for hval in provider.headers.values_mut() {
-                                if hval == &format!("${{{}}}", key) {
+                                let placeholder = format!("${{{}}}", key);
+                                if hval == &placeholder {
+                                    remember_secret(val, &placeholder);
                                     *hval = val.to_string();
                                 }
                             }
@@ -511,6 +514,7 @@ impl Config {
                     }
                 }
             }
+            remember_secret(&provider.api_key, &original_key);
         }
 
         // Resolve gateway tokens from env vars
@@ -530,10 +534,41 @@ impl Config {
         std::fs::create_dir_all(&config_dir)?;
 
         let config_path = config_dir.join("config.toml");
-        let content = toml::to_string_pretty(self).context("Failed to serialize config")?;
-        std::fs::write(&config_path, content)
+        let content = self.to_toml_for_disk()?;
+        write_private(&config_path, &content)
             .with_context(|| format!("Failed to write {}", config_path.display()))?;
         Ok(())
+    }
+
+    /// Serialize for config.toml with every secret that was resolved from
+    /// the environment or an env file put back as the text it came from
+    /// (usually `${VAR}`).
+    pub fn to_toml_for_disk(&self) -> Result<String> {
+        let mut disk = self.clone();
+        for provider in disk.providers.values_mut() {
+            if let Some(orig) = original_for(&provider.api_key) {
+                provider.api_key = orig;
+            }
+            for hval in provider.headers.values_mut() {
+                if let Some(orig) = original_for(hval) {
+                    *hval = orig;
+                }
+            }
+        }
+        for token in [
+            &mut disk.gateway.discord.bot_token,
+            &mut disk.gateway.telegram.bot_token,
+            &mut disk.gateway.slack.bot_token,
+            &mut disk.gateway.slack.app_token,
+            &mut disk.gateway.matrix.access_token,
+        ] {
+            if let Some(t) = token.as_ref()
+                && let Some(orig) = original_for(t)
+            {
+                *token = Some(orig);
+            }
+        }
+        toml::to_string_pretty(&disk).context("Failed to serialize config")
     }
 
     /// Find a provider that has the given model.
@@ -979,7 +1014,61 @@ impl Default for Config {
 }
 
 fn env_or_placeholder(key: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| format!("${{{}}}", key))
+    let placeholder = format!("${{{}}}", key);
+    match std::env::var(key) {
+        Ok(val) => {
+            remember_secret(&val, &placeholder);
+            val
+        }
+        Err(_) => placeholder,
+    }
+}
+
+/// Secrets resolved from the environment or an env file, mapped back to the
+/// config text they came from (`${VAR}` or the original value). `save()`
+/// writes the original text, so a resolved API key or bot token never lands
+/// in config.toml just because a setting such as `/motion` was saved.
+static RESOLVED_SECRETS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+fn remember_secret(resolved: &str, original: &str) {
+    if resolved.is_empty() || resolved == original {
+        return;
+    }
+    if let Ok(mut map) = RESOLVED_SECRETS
+        .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+        .lock()
+    {
+        map.insert(resolved.to_string(), original.to_string());
+    }
+}
+
+fn original_for(value: &str) -> Option<String> {
+    RESOLVED_SECRETS.get()?.lock().ok()?.get(value).cloned()
+}
+
+/// Write `content` to `path`, owner-only (0600) on Unix: config.toml can
+/// hold literal API keys.
+pub fn write_private(path: &std::path::Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        // An existing file keeps its old mode on open; tighten it.
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        f.write_all(content.as_ref())?;
+        f.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content)
+    }
 }
 
 /// Resolve a gateway token from env var if it uses ${VAR} syntax.
@@ -990,6 +1079,7 @@ fn resolve_gateway_token(token: &mut Option<String>) {
     {
         let var_name = &t[2..t.len() - 1];
         if let Ok(val) = std::env::var(var_name) {
+            remember_secret(&val, t);
             *token = Some(val);
         }
     }
@@ -1328,5 +1418,101 @@ mod tests {
         config.effort_level = "high".to_string();
         assert_eq!(config.reasoning_effort_for("gpt-4o"), None);
         assert_eq!(config.reasoning_effort_for("no-such-model"), None);
+    }
+
+    fn provider_with_key(api_key: &str, env_file: Option<String>) -> ProviderConfig {
+        ProviderConfig {
+            base_url: "http://127.0.0.1:9/v1".to_string(),
+            api_key: api_key.to_string(),
+            models: vec![],
+            kind: ProviderKind::OpenAiCompatible,
+            headers: HashMap::new(),
+            env_file,
+        }
+    }
+
+    #[test]
+    fn save_never_writes_secrets_resolved_from_env() {
+        let var = format!("OPENSHIELD_TEST_SAVE_KEY_{}", std::process::id());
+        let secret = "sk-test-env-secret-0001";
+        // SAFETY: unique variable name, only read by this test.
+        unsafe { std::env::set_var(&var, secret) };
+        let mut config = Config::default();
+        config.providers.clear();
+        config.providers.insert(
+            "p".to_string(),
+            provider_with_key(&format!("${{{var}}}"), None),
+        );
+        config.gateway.telegram.bot_token = Some(format!("${{{var}}}"));
+        config.resolve_env_keys().unwrap();
+        assert_eq!(config.providers["p"].api_key, secret, "resolved in memory");
+        assert_eq!(config.gateway.telegram.bot_token.as_deref(), Some(secret));
+
+        let disk = config.to_toml_for_disk().unwrap();
+        assert!(
+            !disk.contains(secret),
+            "secret leaked into config.toml:\n{disk}"
+        );
+        assert!(
+            disk.contains(&format!("api_key = \"${{{var}}}\"")),
+            "{disk}"
+        );
+        // In-memory config is untouched by serialization.
+        assert_eq!(config.providers["p"].api_key, secret);
+        unsafe { std::env::remove_var(&var) };
+    }
+
+    #[test]
+    fn save_never_writes_secrets_resolved_from_env_file() {
+        let dir = std::env::temp_dir().join(format!("openshield-envfile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let env_path = dir.join("p.env");
+        let secret = "sk-test-envfile-secret-0002";
+        std::fs::write(&env_path, format!("P_API_KEY={secret}\n")).unwrap();
+        let mut config = Config::default();
+        config.providers.clear();
+        config.providers.insert(
+            "p".to_string(),
+            provider_with_key("${P_API_KEY}", Some(env_path.to_string_lossy().to_string())),
+        );
+        config.resolve_env_keys().unwrap();
+        assert_eq!(config.providers["p"].api_key, secret);
+        let disk = config.to_toml_for_disk().unwrap();
+        assert!(!disk.contains(secret), "{disk}");
+        assert!(disk.contains("api_key = \"${P_API_KEY}\""), "{disk}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn literal_keys_in_config_are_kept() {
+        let mut config = Config::default();
+        config.providers.clear();
+        config.providers.insert(
+            "p".to_string(),
+            provider_with_key("literal-dummy-key", None),
+        );
+        config.resolve_env_keys().unwrap();
+        assert!(
+            config
+                .to_toml_for_disk()
+                .unwrap()
+                .contains("literal-dummy-key")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_is_owner_only_even_for_existing_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("openshield-private-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
