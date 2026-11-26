@@ -50,6 +50,8 @@ mod skills;
 mod slash_commands;
 mod swarm;
 mod tools;
+// TUI requires crossterm/arboard (desktop-only deps), as in lib.rs.
+#[cfg(not(target_os = "android"))]
 mod tui;
 mod utils;
 mod watch;
@@ -550,7 +552,13 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            #[cfg(not(target_os = "android"))]
             tui::run(config).await?;
+            #[cfg(target_os = "android")]
+            {
+                let _ = config;
+                eprintln!("The TUI is not available on Android. Run `openshield serve` instead.");
+            }
         }
         Some(Commands::Setup) => {
             println!("🛡 OpenShield Setup");
