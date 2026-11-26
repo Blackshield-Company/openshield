@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Legacy TUI HTTP gateway requires the bearer token and is opt-in** — the 127.0.0.1:9876 API (`openshield server`, and the listener the TUI used to start automatically) now requires the same `Authorization: Bearer` token as `openshield serve` (`[desktop] token_path`, usually `~/.config/openshield/desktop.token`). Non-loopback binds need `[desktop] lan_mode = true`. The TUI no longer starts this gateway by default; enable it with `openshield --tui-http` or `[desktop] tui_http = true`. Desktop and Pocket should keep using `openshield serve` on port 9310.
+
+### Added
+
+- **`POST /api/v1/doctor/fix`** — runs `openshield doctor --fix` and returns the post-fix report plus `fixes_applied`, for the Desktop doctor panel.
+
+
 - **Embedded server requires the bearer token** — `serve_in_process` (the Android/Pocket in-app server) no longer runs with `auth: None`. Every REST request, and every WebSocket upgrade, must present the token from `config_dir/desktop.token` (created with mode 0600 on first start; read it with `openshield::embedded_token`) as `Authorization: Bearer`, or `?token=` on `/ws/` upgrades. Non-loopback binds are refused unless `[desktop] lan_mode = true`. `serve_in_process_with_token` accepts a token supplied by the host.
 - **Sandbox path checks cover traversal and compact JSON** — tool arguments such as `{"path":"/etc/passwd"}`, nested JSON values, `--file=/x`, `../x` and `..` are now checked against the working area. `..` is resolved before the allow check, so `<workdir>/missing/../../etc/passwd` no longer passes as inside the working directory. `~` is expanded before the check.
 - **Dependency advisories** — serenity now uses its native-tls backend, which removes `rustls` 0.22 / `rustls-webpki` 0.102.8 (GHSA-82j2-j2ch-gfr8 and related advisories) from the tree. The remaining `rustls-webpki` is 0.103.17 (RUSTSEC-2026-0382). `wayland-scanner` 0.31.11 brings `quick-xml` 0.41.0 (RUSTSEC-2026-0194, RUSTSEC-2026-0195).

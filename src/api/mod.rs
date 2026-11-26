@@ -10,6 +10,7 @@
 //! | GET    | /api/v1/health | Health check (+ version, active model, theme) |
 //! | GET    | /api/v1/models | Providers + models from config.toml (router slots) |
 //! | GET    | /api/v1/doctor | Doctor report (reuses `openshield doctor` checks) |
+//! | POST   | /api/v1/doctor/fix | Run `openshield doctor --fix` and return the new report |
 //! | POST   | /api/v1/pair | Short-lived pairing payload {host, port, token, expires} |
 //! | GET    | /api/v1/tools | List available tools |
 //! | POST   | /api/v1/tools/:name | Execute a tool |
@@ -38,8 +39,9 @@
 //! ## Auth
 //!
 //! `openshield serve` attaches bearer-token auth (see `auth`) and enforces it
-//! on every request, including loopback. Embedded hosts that leave `auth` as
-//! `None` stay open. CORS is an origin allowlist; `Host` is validated.
+//! on every request, including loopback. The legacy TUI HTTP gateway
+//! (`openshield server`, port 9876) uses the same token. CORS is an origin
+//! allowlist; `Host` is validated.
 
 pub mod approvals;
 pub mod auth;
@@ -194,6 +196,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/memory/search", get(handlers::memory_search))
         // Doctor + pairing (desktop/pocket companions, design doc §3.1)
         .route("/api/v1/doctor", get(handlers::doctor))
+        .route("/api/v1/doctor/fix", post(handlers::doctor_fix))
         .route("/api/v1/pair", post(handlers::pair))
         // Chat
         .route("/api/v1/chat", post(handlers::chat))

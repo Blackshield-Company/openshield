@@ -497,6 +497,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_doctor_fix_requires_token() {
+        let app = crate::api::build_router(app_state("master", true));
+        let host = Some("127.0.0.1:9310");
+        assert_eq!(
+            status(&app, "POST", "/api/v1/doctor/fix", None, host).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(&app, "POST", "/api/v1/doctor/fix", Some("wrong"), host).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // A valid token is accepted; the handler may still 500 if doctor
+        // cannot run in the test environment, but it must not be 401.
+        let code = status(&app, "POST", "/api/v1/doctor/fix", Some("master"), host).await;
+        assert_ne!(code, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn test_ws_query_token_ignored_off_ws() {
         let app = crate::api::build_router(app_state("master", true));
         let host = Some("localhost:9310");
