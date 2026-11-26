@@ -279,14 +279,7 @@ pub async fn run() -> Result<()> {
             } else {
                 Some(app_id)
             },
-            guild_ids: vec![],
-            allowed_channels: vec![],
-            require_mention: false,
-            command_prefix: "!shield".to_string(),
-            max_message_length: 2000,
-            typing_indicator: true,
-            multi_model_enabled: false,
-            multi_model_secondary: vec![],
+            ..DiscordConfig::default()
         };
         println!("✅ Discord gateway configured");
     }

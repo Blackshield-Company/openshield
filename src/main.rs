@@ -267,6 +267,14 @@ enum Commands {
         #[arg(default_value = "")]
         name: String,
     },
+    /// Mint a short-lived pairing code from a running `openshield serve`.
+    /// Print it and paste `/pair <code>` in a Telegram or Discord DM.
+    #[cfg(feature = "web-api")]
+    Pair {
+        /// API address (default: `[desktop] bind:port`, usually 127.0.0.1:9310)
+        #[arg(long)]
+        addr: Option<String>,
+    },
     /// Start the HTTP + WebSocket API server (desktop/pocket companion API)
     #[cfg(feature = "web-api")]
     Serve {
@@ -346,196 +354,13 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Tui) | None => {
             info!("Starting OpenShield TUI");
 
-            #[cfg(feature = "discord")]
-            // Spawn Discord gateway if enabled
-            if config.gateway.discord.enabled {
-                info!("Discord gateway enabled — spawning bot");
-                let discord_config = config.clone();
-                std::thread::spawn(move || {
-                    let rt = match tokio::runtime::Runtime::new() {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            tracing::error!("Failed to create Discord runtime: {}", e);
-                            return;
-                        }
-                    };
-                    rt.block_on(async {
-                        let mut event_rx =
-                            crate::gateway::discord::spawn_bot(discord_config.clone());
-                        let mut router = match crate::gateway::message_router::MessageRouter::new(
-                            discord_config,
-                        ) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                tracing::error!("Failed to create message router: {}", e);
-                                return;
-                            }
-                        };
-
-                        while let Some(event) = event_rx.recv().await {
-                            let gateway_event = match event {
-                                crate::gateway::discord::DiscordEvent::UserMessage {
-                                    channel_id,
-                                    user_id,
-                                    username,
-                                    content,
-                                    reply_tx,
-                                } => crate::gateway::events::GatewayEvent::UserMessage {
-                                    channel_id,
-                                    user_id,
-                                    username,
-                                    content,
-                                    reply_tx,
-                                },
-                                crate::gateway::discord::DiscordEvent::SlashCommand {
-                                    interaction,
-                                    reply_tx,
-                                } => {
-                                    router
-                                        .handle_discord_interaction(interaction, reply_tx)
-                                        .await;
-                                    continue;
-                                }
-                                crate::gateway::discord::DiscordEvent::Ready => {
-                                    crate::gateway::events::GatewayEvent::Ready
-                                }
-                                crate::gateway::discord::DiscordEvent::Disconnected => {
-                                    crate::gateway::events::GatewayEvent::Disconnected
-                                }
-                            };
-                            router.handle_event(gateway_event).await;
-                        }
-                    });
-                });
-            }
-
-            #[cfg(feature = "telegram")]
-            // Spawn Telegram gateway if enabled
-            if config.gateway.telegram.enabled {
-                info!("Telegram gateway enabled — spawning bot");
-                let telegram_config = config.clone();
-                std::thread::spawn(move || {
-                    let rt = match tokio::runtime::Runtime::new() {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            tracing::error!("Failed to create Telegram runtime: {}", e);
-                            return;
-                        }
-                    };
-                    rt.block_on(async {
-                        let (mut event_rx, reply_sender) =
-                            crate::gateway::telegram::spawn_bot(telegram_config.clone());
-                        let router = match crate::gateway::message_router::MessageRouter::new(
-                            telegram_config,
-                        ) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                tracing::error!("Failed to create message router: {}", e);
-                                return;
-                            }
-                        };
-
-                        while let Some(event) = event_rx.recv().await {
-                            let mut unified =
-                                match crate::gateway::unified_router::UnifiedRouter::new(
-                                    router.config.clone(),
-                                ) {
-                                    Ok(u) => u,
-                                    Err(e) => {
-                                        tracing::error!("Failed to create unified router: {}", e);
-                                        return;
-                                    }
-                                };
-                            unified.handle_telegram_event(event, &reply_sender).await;
-                        }
-                    });
-                });
-            }
-
-            #[cfg(feature = "slack")]
-            // Spawn Slack gateway if enabled
-            if config.gateway.slack.enabled {
-                info!("Slack gateway enabled — spawning bot");
-                let slack_config = config.clone();
-                std::thread::spawn(move || {
-                    let rt = match tokio::runtime::Runtime::new() {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            tracing::error!("Failed to create Slack runtime: {}", e);
-                            return;
-                        }
-                    };
-                    rt.block_on(async {
-                        let (mut event_rx, reply_sender) =
-                            crate::gateway::slack::spawn_bot(slack_config.clone());
-                        let router = match crate::gateway::message_router::MessageRouter::new(
-                            slack_config,
-                        ) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                tracing::error!("Failed to create message router: {}", e);
-                                return;
-                            }
-                        };
-
-                        while let Some(event) = event_rx.recv().await {
-                            let mut unified =
-                                match crate::gateway::unified_router::UnifiedRouter::new(
-                                    router.config.clone(),
-                                ) {
-                                    Ok(u) => u,
-                                    Err(e) => {
-                                        tracing::error!("Failed to create unified router: {}", e);
-                                        return;
-                                    }
-                                };
-                            unified.handle_slack_event(event, &reply_sender).await;
-                        }
-                    });
-                });
-            }
-
-            #[cfg(feature = "matrix")]
-            // Spawn Matrix gateway if enabled
-            if config.gateway.matrix.enabled {
-                info!("Matrix gateway enabled — spawning bot");
-                let matrix_config = config.clone();
-                std::thread::spawn(move || {
-                    let rt = match tokio::runtime::Runtime::new() {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            tracing::error!("Failed to create Matrix runtime: {}", e);
-                            return;
-                        }
-                    };
-                    rt.block_on(async {
-                        let (mut event_rx, reply_sender) =
-                            crate::gateway::matrix::spawn_bot(matrix_config.clone());
-                        let router =
-                            match crate::gateway::message_router::MessageRouter::new(matrix_config)
-                            {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    tracing::error!("Failed to create message router: {}", e);
-                                    return;
-                                }
-                            };
-
-                        while let Some(event) = event_rx.recv().await {
-                            let mut unified =
-                                match crate::gateway::unified_router::UnifiedRouter::new(
-                                    router.config.clone(),
-                                ) {
-                                    Ok(u) => u,
-                                    Err(e) => {
-                                        tracing::error!("Failed to create unified router: {}", e);
-                                        return;
-                                    }
-                                };
-                            unified.handle_matrix_event(event, &reply_sender).await;
-                        }
-                    });
-                });
+            if crate::gateway_channels_hint(&config) {
+                eprintln!(
+                    "Channels now run inside `openshield serve`, not the TUI.\nStart `openshield serve` to enable Telegram or Discord."
+                );
+                tracing::warn!(
+                    "gateway enabled in config, but bots are no longer spawned by the TUI — use openshield serve"
+                );
             }
 
             #[cfg(feature = "web-api")]
@@ -1748,6 +1573,13 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", openshield_replay::format_output(&output)?);
         }
         #[cfg(feature = "web-api")]
+        #[cfg(feature = "web-api")]
+        Some(Commands::Pair { addr }) => {
+            if let Err(e) = pair_cli(addr).await {
+                eprintln!("❌ {}", e);
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Serve { addr }) => {
             let desktop = config.desktop.clone();
             if !desktop.enabled {
@@ -1821,7 +1653,12 @@ async fn main() -> anyhow::Result<()> {
                 swarm: Arc::new(crate::api::swarm::SwarmState::new()),
                 started: std::time::Instant::now(),
             };
-            if let Err(e) = crate::api::serve(state, &bind_addr).await {
+            let channels = crate::gateway::supervisor::spawn(state.clone());
+            let serve_result = crate::api::serve(state, &bind_addr).await;
+            if let Some(tx) = channels {
+                let _ = tx.send(true);
+            }
+            if let Err(e) = serve_result {
                 eprintln!("❌ API server error: {}", e);
                 std::process::exit(1);
             }
@@ -1878,4 +1715,65 @@ pub fn debug_log(msg: &str) {
         use std::io::Write;
         let _ = writeln!(f, "[{}] {}", chrono::Utc::now().to_rfc3339(), msg);
     }
+}
+
+fn gateway_channels_hint(config: &Config) -> bool {
+    #[cfg(feature = "web-api")]
+    {
+        crate::gateway::supervisor::channels_configured(config)
+    }
+    #[cfg(not(feature = "web-api"))]
+    {
+        config.gateway.telegram.enabled
+            || config.gateway.discord.enabled
+            || config.gateway.slack.enabled
+            || config.gateway.matrix.enabled
+    }
+}
+
+#[cfg(feature = "web-api")]
+async fn pair_cli(addr: Option<String>) -> anyhow::Result<()> {
+    let config = Config::load_or_default()?;
+    let desktop = &config.desktop;
+    let addr = addr.unwrap_or_else(|| format!("{}:{}", desktop.bind, desktop.port));
+    let token = crate::api::auth::ensure_token_file(&desktop.token_path)?;
+    let url = format!("http://{addr}/api/v1/pair");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Host", addr.split(':').next().unwrap_or("127.0.0.1"))
+        .send()
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!("could not reach {url}: {e}\nIs `openshield serve` running?")
+        })?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!("pairing failed ({status}): {body}");
+    }
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| anyhow::anyhow!("unexpected pair response: {e}"))?;
+    let code = json
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("pair response missing token"))?;
+    let expires = json
+        .get("expires")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let host = json.get("host").and_then(|v| v.as_str()).unwrap_or("");
+    let port = json.get("port").map(|v| v.to_string()).unwrap_or_default();
+    println!("Pairing code (expires {expires}):");
+    println!();
+    println!("  /pair {code}");
+    println!();
+    println!("Paste that in a Telegram or Discord DM with your OpenShield bot.");
+    if !host.is_empty() {
+        println!("(issued by {host}:{port})");
+    }
+    Ok(())
 }

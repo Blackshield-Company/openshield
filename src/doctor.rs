@@ -176,6 +176,11 @@ pub async fn run_checks(auto_fix: bool) -> Result<DoctorReport> {
     // Check 8: Built-in companion modules
     report.checks.push(check_modules().await);
 
+    // Check 9: Channels (Telegram / Discord)
+    for check in check_channels().await {
+        report.checks.push(check);
+    }
+
     // Auto-fix if requested
     if auto_fix {
         for check in &report.checks {
@@ -394,6 +399,141 @@ async fn check_modules() -> CheckResult {
     let config = crate::config::Config::load_or_default()
         .unwrap_or_else(|_| crate::config::Config::default());
     CheckResult::healthy("Modules", crate::modules::doctor_message(&config))
+}
+
+async fn check_channels() -> Vec<CheckResult> {
+    let mut out = Vec::new();
+    let config = match crate::config::Config::load_or_default() {
+        Ok(c) => c,
+        Err(e) => {
+            return vec![CheckResult::warning(
+                "Channels",
+                format!("Cannot load config: {e}"),
+                false,
+            )];
+        }
+    };
+    use crate::gateway::parse::token_is_resolved;
+
+    let tg = &config.gateway.telegram;
+    if tg.enabled {
+        #[cfg(not(feature = "telegram"))]
+        out.push(CheckResult::critical(
+            "Telegram",
+            "Enabled in config, but this binary was built without the telegram feature",
+            false,
+        ));
+        #[cfg(feature = "telegram")]
+        {
+            if !token_is_resolved(&tg.bot_token) {
+                out.push(CheckResult::critical(
+                    "Telegram",
+                    "Enabled, but TELEGRAM_BOT_TOKEN is missing or still a ${ENV} placeholder",
+                    false,
+                ));
+            } else if tg.allowed_users.is_empty() {
+                out.push(CheckResult::warning(
+                    "Telegram",
+                    "Enabled with an empty user allowlist; only /pair will be accepted until someone pairs",
+                    false,
+                ));
+            } else {
+                out.push(CheckResult::healthy(
+                    "Telegram",
+                    format!("Enabled, {} allowlisted user(s)", tg.allowed_users.len()),
+                ));
+            }
+        }
+    } else {
+        out.push(CheckResult::healthy("Telegram", "Disabled"));
+    }
+
+    let dc = &config.gateway.discord;
+    if dc.enabled {
+        #[cfg(not(feature = "discord"))]
+        out.push(CheckResult::critical(
+            "Discord",
+            "Enabled in config, but this binary was built without the discord feature",
+            false,
+        ));
+        #[cfg(feature = "discord")]
+        {
+            if !token_is_resolved(&dc.bot_token) {
+                out.push(CheckResult::critical(
+                    "Discord",
+                    "Enabled, but DISCORD_BOT_TOKEN is missing or still a ${ENV} placeholder",
+                    false,
+                ));
+            } else if dc.allowed_users.is_empty() {
+                out.push(CheckResult::warning(
+                    "Discord",
+                    "Enabled with an empty user allowlist; only /pair will be accepted until someone pairs",
+                    false,
+                ));
+            } else {
+                out.push(CheckResult::healthy(
+                    "Discord",
+                    format!("Enabled, {} allowlisted user(s)", dc.allowed_users.len()),
+                ));
+            }
+        }
+    } else {
+        out.push(CheckResult::healthy("Discord", "Disabled"));
+    }
+
+    if config.gateway.slack.enabled {
+        out.push(CheckResult::warning(
+            "Slack",
+            "Enabled in config, but the Slack adapter is scaffolding only and is not started by openshield serve",
+            false,
+        ));
+    }
+    if config.gateway.matrix.enabled {
+        out.push(CheckResult::warning(
+            "Matrix",
+            "Enabled in config, but the Matrix adapter is scaffolding only and is not started by openshield serve",
+            false,
+        ));
+    }
+
+    let allow_path = if config.gateway.allowlist_path.trim().is_empty() {
+        crate::gateway::allowlist::default_path()
+    } else {
+        std::path::PathBuf::from(shellexpand::tilde(&config.gateway.allowlist_path).as_ref())
+    };
+    if allow_path.exists() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&allow_path) {
+                let mode = meta.permissions().mode() & 0o777;
+                if mode & 0o077 != 0 {
+                    out.push(CheckResult::warning(
+                        "Channels allowlist",
+                        format!("{} mode is {:o}; expected 0600", allow_path.display(), mode),
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+    if let Ok(list) = crate::gateway::allowlist::from_config(&config) {
+        use crate::gateway::platform::Platform;
+        let tg_n = list.user_count(Platform::Telegram);
+        let dc_n = list.user_count(Platform::Discord);
+        if tg_n + dc_n > 0 {
+            out.push(CheckResult::healthy(
+                "Channels allowlist",
+                format!(
+                    "{}: {} telegram, {} discord",
+                    list.path().display(),
+                    tg_n,
+                    dc_n
+                ),
+            ));
+        }
+    }
+    out
 }
 
 async fn try_fix(component: &str) -> Result<String> {

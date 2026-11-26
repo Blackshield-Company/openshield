@@ -45,7 +45,7 @@ pub enum PlatformEvent {
 }
 
 /// Supported platforms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 pub enum Platform {
     Discord,
@@ -53,6 +53,8 @@ pub enum Platform {
     Slack,
     WhatsApp,
     Matrix,
+    Signal,
+    Email,
 }
 
 impl std::fmt::Display for Platform {
@@ -63,6 +65,8 @@ impl std::fmt::Display for Platform {
             Platform::Slack => write!(f, "slack"),
             Platform::WhatsApp => write!(f, "whatsapp"),
             Platform::Matrix => write!(f, "matrix"),
+            Platform::Signal => write!(f, "signal"),
+            Platform::Email => write!(f, "email"),
         }
     }
 }

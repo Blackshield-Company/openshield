@@ -204,7 +204,7 @@ fn parse_tool_args(arguments: &str) -> serde_json::Value {
 /// blocking thread with its own current-thread runtime (the headless-mode
 /// pattern). Any startup or turn error is surfaced to the client as a final
 /// `error` event before the channel closes.
-async fn run_harness_turn(
+pub(crate) async fn run_harness_turn(
     config: crate::config::Config,
     model: String,
     session_id: String,

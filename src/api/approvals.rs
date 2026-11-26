@@ -97,8 +97,8 @@ pub struct ApprovalsState {
     /// Broadcast of ready-to-send WS envelopes (`approval_req` / `approval_res`),
     /// in the §4 shape `{type, session, data}`.
     events: broadcast::Sender<serde_json::Value>,
-    /// Number of connected `/ws/v1/chat` clients. The human gate only engages
-    /// when this is non-zero.
+    /// Number of connected human surfaces (`/ws/v1/chat` clients and the
+    /// channel supervisor). The human gate only engages when this is non-zero.
     ws_clients: AtomicUsize,
     /// Tools blessed by an `approve_always` decision.
     approved_always: Mutex<HashSet<String>>,
@@ -322,9 +322,9 @@ impl Default for ApprovalsState {
 ///
 /// Engagement rules (design doc §3.1/§4):
 /// - Only High/Critical risk requests reach the human.
-/// - Only when at least one `/ws/v1/chat` client is connected — otherwise the
-///   engine's existing behavior applies unchanged (no weakening, no new
-///   blocking surfaces).
+/// - Only when at least one human surface is connected (`/ws/v1/chat` or a
+///   running channel supervisor) — otherwise the engine's existing behavior
+///   applies unchanged (no weakening, no new blocking surfaces).
 /// - `approve_always` decisions short-circuit per tool.
 pub fn make_gate(approvals: Arc<ApprovalsState>, session: String) -> ApprovalGate {
     Arc::new(move |req| {

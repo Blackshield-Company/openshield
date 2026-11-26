@@ -170,7 +170,12 @@ pub async fn serve_in_process_with_token(
     token: String,
 ) -> anyhow::Result<()> {
     let state = in_process_state(config_dir, addr, token)?;
-    api::serve(state, addr).await
+    let channels = gateway::supervisor::spawn(state.clone());
+    let result = api::serve(state, addr).await;
+    if let Some(tx) = channels {
+        let _ = tx.send(true);
+    }
+    result
 }
 
 #[cfg(all(test, feature = "web-api"))]

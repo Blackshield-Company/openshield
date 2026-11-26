@@ -564,6 +564,7 @@ impl Config {
             &mut disk.gateway.slack.bot_token,
             &mut disk.gateway.slack.app_token,
             &mut disk.gateway.matrix.access_token,
+            &mut disk.gateway.whatsapp.access_token,
         ] {
             if let Some(t) = token.as_ref()
                 && let Some(orig) = original_for(t)
@@ -993,12 +994,20 @@ impl Default for Config {
                     typing_indicator: true,
                     multi_model_enabled: false,
                     multi_model_secondary: vec![],
+                    allowed_users: vec![],
+                    thread_per_session: true,
+                    rate_limit_per_min: 20,
+                    max_inbound_bytes: 8_000_000,
                 },
                 telegram: crate::gateway::TelegramConfig {
                     enabled: false,
                     bot_token: Some(env_or_placeholder("TELEGRAM_BOT_TOKEN")),
                     allowed_chats: vec![],
                     require_command_prefix: false,
+                    allowed_users: vec![],
+                    dm_only: true,
+                    rate_limit_per_min: 20,
+                    max_inbound_bytes: 5_000_000,
                 },
                 slack: crate::gateway::SlackConfig {
                     enabled: false,
@@ -1015,6 +1024,8 @@ impl Default for Config {
                 },
                 whatsapp: crate::gateway::WhatsAppConfig::default(),
                 mcp: crate::gateway::McpGatewayConfig::default(),
+                allowlist_path: String::new(),
+                persist_paired_users: true,
             },
             user_name: "user".to_string(),
             theme: "blackshield".to_string(),
