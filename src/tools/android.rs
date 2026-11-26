@@ -192,9 +192,20 @@ fn bridge_request(
     Ok(resp.text()?)
 }
 
+/// Log why a bridge call failed before the caller falls back.
+fn logged(result: Result<String>, path: &str) -> Result<String> {
+    if let Err(e) = &result {
+        tracing::debug!("android bridge call {} failed: {:#}", path, e);
+    }
+    result
+}
+
 fn bridge_get(path: &str) -> Result<String> {
-    let token = bridge_token()?;
-    bridge_request(BRIDGE_URL, &token, path, None, "Bridge")
+    let token = logged(bridge_token(), path)?;
+    logged(
+        bridge_request(BRIDGE_URL, &token, path, None, "Bridge"),
+        path,
+    )
 }
 
 fn bridge_post(path: &str, body: serde_json::Value) -> Result<String> {
