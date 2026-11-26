@@ -347,7 +347,14 @@ pub async fn execute_tool(Path(name): Path<String>, body: Json<ToolRequest>) -> 
     let result = if let Some(async_tool) = crate::tools::find_async_tool(&name) {
         async_tool.execute_async(&body.args).await
     } else if let Some(tool) = crate::tools::find_tool(&name) {
-        tool.execute(&body.args)
+        // Sync tools may block (reqwest::blocking, child processes). Run them
+        // off the async workers; dropping a blocking client on a runtime
+        // worker panics.
+        let args = body.args.clone();
+        match tokio::task::spawn_blocking(move || tool.execute(&args)).await {
+            Ok(result) => result,
+            Err(e) => Err(anyhow::anyhow!("tool task failed: {}", e)),
+        }
     } else {
         return (
             StatusCode::NOT_FOUND,
