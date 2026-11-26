@@ -514,8 +514,32 @@ pub async fn list_models(State(state): State<AppState>) -> Json<serde_json::Valu
 
 /// GET /api/v1/doctor — doctor report, reusing `openshield doctor`'s checks.
 pub async fn doctor() -> impl IntoResponse {
-    match crate::doctor::run_checks(false).await {
+    doctor_report(false).await
+}
+
+/// POST /api/v1/doctor/fix — run `openshield doctor --fix`, then re-check
+/// so the GUI shows the post-fix status plus `fixes_applied`.
+pub async fn doctor_fix() -> impl IntoResponse {
+    doctor_report(true).await
+}
+
+async fn doctor_report(auto_fix: bool) -> axum::response::Response {
+    match crate::doctor::run_checks(auto_fix).await {
         Ok(report) => {
+            // After applying fixes, re-run checks so the payload reflects
+            // the new state. Keep the list of fixes from the first pass.
+            let fixes = report.fixes_applied.clone();
+            let report = if auto_fix && !fixes.is_empty() {
+                match crate::doctor::run_checks(false).await {
+                    Ok(mut fresh) => {
+                        fresh.fixes_applied = fixes.clone();
+                        fresh
+                    }
+                    Err(_) => report,
+                }
+            } else {
+                report
+            };
             let checks: Vec<serde_json::Value> = report
                 .checks
                 .iter()
@@ -538,6 +562,7 @@ pub async fn doctor() -> impl IntoResponse {
                 "warnings": report.warning_count(),
                 "critical": report.critical_count(),
                 "checks": checks,
+                "fixes_applied": report.fixes_applied,
             }))
             .into_response()
         }

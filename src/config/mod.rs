@@ -176,6 +176,13 @@ pub struct DesktopConfig {
     /// Extra CORS origins allowed besides Tauri and loopback HTTP origins.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    /// When true, the TUI (`openshield` / `openshield tui`) also starts the
+    /// legacy HTTP gateway on 127.0.0.1:9876. Off by default — Pocket and
+    /// Desktop talk to `openshield serve` on port 9310. The gateway always
+    /// requires the same bearer token as `serve`. Can also be enabled with
+    /// `--tui-http`.
+    #[serde(default)]
+    pub tui_http: bool,
 }
 
 impl Default for DesktopConfig {
@@ -189,6 +196,7 @@ impl Default for DesktopConfig {
             lan_mode: false,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            tui_http: false,
         }
     }
 }

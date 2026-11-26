@@ -100,6 +100,11 @@ fn parse_embedded_tools_cli(text: &str) -> Vec<(String, String)> {
 #[command(about = "🛡 The harness that learns. The agent that decides.")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
+    /// Start the legacy TUI HTTP gateway on 127.0.0.1:9876 (Bearer token
+    /// required, same file as `openshield serve`). Off by default; can also
+    /// be enabled with `[desktop] tui_http = true`.
+    #[arg(long, global = true)]
+    tui_http: bool,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -280,7 +285,10 @@ enum Commands {
         #[arg(short, long)]
         port: Option<u16>,
     },
-    /// Start HTTP server for mobile app connectivity
+    /// Start the legacy HTTP gateway (default 127.0.0.1:9876).
+    /// Requires the same bearer token as `openshield serve`. Non-loopback
+    /// binds need `[desktop] lan_mode = true`. Prefer `openshield serve`
+    /// for Desktop and Pocket.
     #[cfg(feature = "web-api")]
     Server {
         /// Port to bind on (default: 9876)
@@ -510,11 +518,11 @@ async fn main() -> anyhow::Result<()> {
             }
 
             #[cfg(feature = "web-api")]
-            {
+            if cli.tui_http || config.desktop.tui_http {
                 let server_config = config.clone();
                 tokio::spawn(async move {
                     info!(
-                        "Starting OpenShield HTTP server on 127.0.0.1:9876 (mobile app connectivity)"
+                        "Starting legacy TUI HTTP gateway on 127.0.0.1:9876 (Bearer token required)"
                     );
                     if let Err(e) = crate::gateway::http::start_server(
                         server_config,

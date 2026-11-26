@@ -1,22 +1,34 @@
-//! HTTP Gateway for OpenShield Mobile
+//! Legacy HTTP gateway (default 127.0.0.1:9876).
 //!
-//! Axum-based HTTP server that exposes OpenShield's core functionality
-//! over a local REST API + SSE streaming. Designed for Android/Termux
-//! standalone operation.
+//! Started only by `openshield server` or by an explicit TUI opt-in
+//! (`--tui-http` or `[desktop] tui_http = true`). Pocket and Desktop should
+//! use `openshield serve` (port 9310) instead.
+//!
+//! Every request requires the same bearer token as `openshield serve`
+//! (`Authorization: Bearer`, token file `[desktop] token_path`). Non-loopback
+//! binds are refused unless `[desktop] lan_mode = true`. Host and CORS
+//! follow the serve allowlists.
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
-    response::sse::{Event, Sse},
+    extract::{Query, Request, State},
+    http::{StatusCode, header},
+    middleware::{self, Next},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, Sse},
+    },
     routing::{get, post},
 };
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+use crate::api::auth::AuthState;
 use crate::config::Config;
 use crate::memory::{MemoryStore, Message as MemoryMessage};
 use crate::providers::{ChatRequest, Message, Provider};
@@ -25,17 +37,66 @@ use crate::providers::{ChatRequest, Message, Provider};
 pub struct AppState {
     pub config: Config,
     pub memory: Mutex<MemoryStore>,
+    pub auth: Arc<AuthState>,
 }
 
 impl AppState {
-    pub fn new(config: Config) -> anyhow::Result<Arc<Self>> {
+    pub fn new(config: Config, auth: Arc<AuthState>) -> anyhow::Result<Arc<Self>> {
         let memory = MemoryStore::new(&config.memory_db_path)?;
 
         Ok(Arc::new(Self {
             config,
             memory: Mutex::new(memory),
+            auth,
         }))
     }
+}
+
+fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "error": "unauthorized: Bearer token required" })),
+    )
+        .into_response()
+}
+
+/// Same rule as `openshield serve`: Bearer token on every request,
+/// including loopback.
+async fn require_bearer(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
+    match crate::api::auth::bearer_from_headers(req.headers()) {
+        Some(token) if state.auth.accepts(token) => next.run(req).await,
+        _ => unauthorized(),
+    }
+}
+
+async fn require_allowed_host(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if let Some(raw) = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        && !crate::api::auth::host_allowed(raw, &state.config.desktop)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "invalid host" })),
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
+fn bind_is_loopback(bind: &str) -> bool {
+    if let Ok(ip) = bind.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    matches!(
+        bind.to_ascii_lowercase().as_str(),
+        "localhost" | "ip6-localhost"
+    )
 }
 
 /// Chat request body.
@@ -129,6 +190,9 @@ pub struct ToolExecuteResponse {
 
 /// Build the HTTP router.
 pub fn build_router(state: Arc<AppState>) -> Router {
+    let origins = state.config.desktop.allowed_origins.clone();
+    let auth_state = state.clone();
+    let host_state = state.clone();
     Router::new()
         .route("/v1/chat", post(handle_chat))
         .route("/v1/models", get(handle_models))
@@ -140,6 +204,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/tools/execute", post(handle_tool_execute))
         .route("/v1/health", get(handle_health))
         .with_state(state)
+        .layer(middleware::from_fn_with_state(auth_state, require_bearer))
+        .layer(middleware::from_fn_with_state(
+            host_state,
+            require_allowed_host,
+        ))
+        .layer(crate::api::auth::cors_layer(origins))
 }
 
 /// POST /v1/chat — Main chat endpoint with SSE streaming.
@@ -438,14 +508,104 @@ async fn handle_health() -> Json<serde_json::Value> {
 
 /// Start the HTTP server.
 pub async fn start_server(config: Config, bind: String, port: u16) -> anyhow::Result<()> {
-    let state = AppState::new(config)?;
-    let app = build_router(state);
+    if !bind_is_loopback(&bind) && !config.desktop.lan_mode {
+        anyhow::bail!(
+            "Refusing to bind {bind}:{port}: non-loopback addresses require lan_mode = true in [desktop]"
+        );
+    }
+
+    let token = crate::api::auth::ensure_token_file(&config.desktop.token_path)?;
+    let auth = AuthState::new(token, true);
+
+    let mut config = config;
+    config.desktop.bind = bind.clone();
+    config.desktop.port = port;
 
     let addr = format!("{}:{}", bind, port);
-    info!("OpenShield HTTP server starting on http://{}", addr);
+    info!(
+        "OpenShield HTTP server starting on http://{} (Bearer token required, token file {})",
+        addr, config.desktop.token_path
+    );
+
+    let state = AppState::new(config, auth)?;
+    let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    fn test_app(token: &str) -> Router {
+        let mut config = Config::default();
+        let dir = std::env::temp_dir().join(format!(
+            "openshield-gw-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        config.memory_db_path = dir.join("memory.db");
+        let auth = AuthState::new(token.to_string(), true);
+        let state = AppState::new(config, auth).expect("gateway state");
+        build_router(state)
+    }
+
+    async fn status(app: &Router, method: &str, uri: &str, token: Option<&str>) -> StatusCode {
+        let mut builder = Request::builder().method(method).uri(uri);
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let req = builder.body(Body::empty()).unwrap();
+        app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn health_requires_bearer_token() {
+        let app = test_app("master-token");
+        assert_eq!(
+            status(&app, "GET", "/v1/health", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(&app, "GET", "/v1/health", Some("wrong")).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(&app, "GET", "/v1/health", Some("master-token")).await,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_execute_requires_bearer_token() {
+        let app = test_app("master-token");
+        assert_eq!(
+            status(&app, "POST", "/v1/tools/execute", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // A request with the token is authenticated; a missing body may still
+        // be rejected as a bad request, but it must not be 401.
+        let status = status(&app, "POST", "/v1/tools/execute", Some("master-token")).await;
+        assert_ne!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn loopback_detection() {
+        assert!(bind_is_loopback("127.0.0.1"));
+        assert!(bind_is_loopback("::1"));
+        assert!(bind_is_loopback("localhost"));
+        assert!(bind_is_loopback("127.0.0.1"));
+        assert!(!bind_is_loopback("0.0.0.0"));
+        assert!(!bind_is_loopback("192.168.1.10"));
+    }
 }
