@@ -519,7 +519,23 @@ pub async fn doctor() -> impl IntoResponse {
 
 /// POST /api/v1/doctor/fix — run `openshield doctor --fix`, then re-check
 /// so the GUI shows the post-fix status plus `fixes_applied`.
-pub async fn doctor_fix() -> impl IntoResponse {
+///
+/// Only the master desktop token may call this. Pairing tokens receive 403
+/// (they are accepted elsewhere, but a Fix must not rewrite config.toml).
+pub async fn doctor_fix(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    if let Some(auth) = &state.auth {
+        let presented = super::auth::bearer_from_headers(&headers).unwrap_or("");
+        if !auth.is_master(presented) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "forbidden: master token required" })),
+            )
+                .into_response();
+        }
+    }
     doctor_report(true).await
 }
 

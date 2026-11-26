@@ -392,15 +392,8 @@ async fn try_fix(component: &str) -> Result<String> {
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("openshield");
             std::fs::create_dir_all(&config_dir)?;
-            let default_config = crate::config::Config::default();
-            let toml = toml::to_string_pretty(&default_config)
-                .context("Failed to serialize default config")?;
             let config_path = config_dir.join("config.toml");
-            std::fs::write(&config_path, toml).context("Failed to write default config")?;
-            Ok(format!(
-                "Created default config at {}",
-                config_path.display()
-            ))
+            write_default_config(&config_path)
         }
         "Memory DB" => {
             let data_dir = dirs::data_dir()
@@ -448,5 +441,176 @@ async fn try_fix(component: &str) -> Result<String> {
             ))
         }
         _ => Err(anyhow::anyhow!("No fix available for {}", component)),
+    }
+}
+
+/// Write `Config::default()` to `config_path`, backing up a non-empty existing
+/// file first. The first backup is `config.toml.bak`. If that path already
+/// exists, a timestamped `config.toml.bak-<YYYYMMDDThhmmssZ>` is used instead.
+/// A non-empty config is never overwritten unless that backup was written.
+pub(crate) fn write_default_config(config_path: &std::path::Path) -> Result<String> {
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let backup = backup_existing_config(config_path)?;
+    let default_config = crate::config::Config::default();
+    let toml =
+        toml::to_string_pretty(&default_config).context("Failed to serialize default config")?;
+    std::fs::write(config_path, toml).context("Failed to write default config")?;
+    Ok(match backup {
+        Some(bak) => format!(
+            "Created default config at {} (previous config saved to {})",
+            config_path.display(),
+            bak.display()
+        ),
+        None => format!("Created default config at {}", config_path.display()),
+    })
+}
+
+/// Copy a non-empty existing config to a backup path. Returns `Ok(None)` when
+/// the file is missing or empty (those can be replaced without a backup).
+/// Fails without touching `config_path` if the backup cannot be written.
+pub(crate) fn backup_existing_config(
+    config_path: &std::path::Path,
+) -> Result<Option<std::path::PathBuf>> {
+    if !config_path.exists() {
+        return Ok(None);
+    }
+    let contents =
+        std::fs::read(config_path).context("Failed to read existing config for backup")?;
+    if contents.iter().all(|b| b.is_ascii_whitespace()) {
+        return Ok(None);
+    }
+    let bak = unique_config_backup_path(config_path);
+    std::fs::write(&bak, &contents).with_context(|| {
+        format!(
+            "Failed to write config backup at {}; leaving existing config in place",
+            bak.display()
+        )
+    })?;
+    Ok(Some(bak))
+}
+
+fn unique_config_backup_path(config_path: &std::path::Path) -> std::path::PathBuf {
+    let parent = config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let plain = parent.join("config.toml.bak");
+    if !plain.exists() {
+        return plain;
+    }
+    let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let stamped = parent.join(format!("config.toml.bak-{ts}"));
+    if !stamped.exists() {
+        return stamped;
+    }
+    for i in 1..1000 {
+        let candidate = parent.join(format!("config.toml.bak-{ts}-{i}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    parent.join(format!(
+        "config.toml.bak-{ts}-{}",
+        uuid::Uuid::new_v4().simple()
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "openshield-doctor-cfg-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_config_fix_writes_bak_before_overwrite() {
+        let dir = scratch();
+        let path = dir.join("config.toml");
+        let original = "default_model = \"keep-me\"\n";
+        std::fs::write(&path, original).unwrap();
+
+        let msg = write_default_config(&path).unwrap();
+        let bak = dir.join("config.toml.bak");
+        assert!(bak.exists(), "expected config.toml.bak");
+        assert_eq!(std::fs::read_to_string(&bak).unwrap(), original);
+        let rewritten = std::fs::read_to_string(&path).unwrap();
+        assert_ne!(rewritten, original);
+        assert!(!rewritten.trim().is_empty());
+        assert!(msg.contains("config.toml.bak"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_config_fix_timestamps_bak_if_present() {
+        let dir = scratch();
+        let path = dir.join("config.toml");
+        std::fs::write(dir.join("config.toml.bak"), "old-backup").unwrap();
+        let original = "providers = { gone = true }\n";
+        std::fs::write(&path, original).unwrap();
+
+        write_default_config(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(),
+            "old-backup"
+        );
+        let stamped: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("config.toml.bak-"))
+            .collect();
+        assert_eq!(
+            stamped.len(),
+            1,
+            "expected one timestamped backup, got {stamped:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(&stamped[0])).unwrap(),
+            original
+        );
+        let rewritten = std::fs::read_to_string(&path).unwrap();
+        assert_ne!(rewritten, original);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_config_fix_skips_backup_when_missing_or_empty() {
+        let dir = scratch();
+        let path = dir.join("config.toml");
+        write_default_config(&path).unwrap();
+        assert!(path.exists());
+        assert!(!dir.join("config.toml.bak").exists());
+
+        std::fs::write(&path, "  \n").unwrap();
+        write_default_config(&path).unwrap();
+        assert!(!dir.join("config.toml.bak").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Directory write-bit semantics are reliable on Unix; Windows treats
+    // directory readonly differently, so this guarantee is checked here.
+    #[cfg(unix)]
+    #[test]
+    fn test_config_fix_refuses_overwrite_if_backup_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch();
+        let path = dir.join("config.toml");
+        let original = "do-not-lose-me = true\n";
+        std::fs::write(&path, original).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = write_default_config(&path);
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode));
+        assert!(result.is_err(), "expected backup failure, got {result:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
