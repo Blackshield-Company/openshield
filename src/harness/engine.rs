@@ -21,7 +21,9 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::memory::{MemoryStore, Message as MemoryMessage, ToolCall as MemoryToolCall};
+use crate::memory::{
+    AuditRecord, MemoryStore, Message as MemoryMessage, ToolCall as MemoryToolCall,
+};
 use crate::providers::{
     AccumulatedToolCall, ChatRequest, Message, Provider, StreamChunk, StreamMetrics,
     ToolCallRequest,
@@ -1060,6 +1062,33 @@ impl HarnessEngine {
     }
 
     /// Execute a single tool call with security gating.
+    /// Write an audit row to the in-memory ring and to `memory.db`.
+    fn audit_and_persist(
+        &self,
+        tool: &str,
+        args: &str,
+        approved: bool,
+        risk: crate::security::RiskLevel,
+        reason: &str,
+    ) {
+        self.security_engine
+            .audit(tool, args, approved, risk.clone(), reason);
+        let row = AuditRecord {
+            id: 0,
+            session_id: Some(self.session_id.clone()),
+            timestamp: Utc::now(),
+            action: "tool_execution".to_string(),
+            tool: tool.to_string(),
+            args: args.to_string(),
+            approved,
+            risk_level: format!("{risk:?}").to_lowercase(),
+            reason: reason.to_string(),
+        };
+        if let Err(e) = self.memory.save_audit_record(&row) {
+            tracing::warn!("failed to persist audit row: {e}");
+        }
+    }
+
     async fn execute_tool_call(&self, tool_call: &ToolCallRequest) -> Result<ToolExecutionResult> {
         let start = Instant::now();
         let tool_name = &tool_call.function.name;
@@ -1082,7 +1111,7 @@ impl HarnessEngine {
                     })
                     .await;
                     if !approved {
-                        self.security_engine.audit(
+                        self.audit_and_persist(
                             tool_name,
                             args,
                             false,
@@ -1117,7 +1146,7 @@ impl HarnessEngine {
                 }
             }
             SecurityDecision::Deny { reason } => {
-                self.security_engine.audit(
+                self.audit_and_persist(
                     tool_name,
                     args,
                     false,
@@ -1170,7 +1199,7 @@ impl HarnessEngine {
                 // Tools report usage/parse failures as Ok(String) — detect them
                 // so the DB and analytics record the real outcome.
                 let ok = !crate::tools::tool_output_indicates_failure(&sanitized);
-                self.security_engine.audit(
+                self.audit_and_persist(
                     tool_name,
                     args,
                     ok,
@@ -1195,7 +1224,7 @@ impl HarnessEngine {
                 }
             }
             Some(Err(e)) => {
-                self.security_engine.audit(
+                self.audit_and_persist(
                     tool_name,
                     args,
                     false,
