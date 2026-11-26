@@ -1462,7 +1462,13 @@ async fn main() -> anyhow::Result<()> {
             model,
             output,
         }) => {
-            println!("🛡 OpenShield Headless Mode");
+            // `--json` promises NDJSON on stdout, so human-readable text goes
+            // to stderr in that mode.
+            if json {
+                eprintln!("🛡 OpenShield Headless Mode");
+            } else {
+                println!("🛡 OpenShield Headless Mode");
+            }
             let mut cfg = config.clone();
             if let Some(ref m) = model {
                 cfg.default_model = m.clone();

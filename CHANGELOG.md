@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`headless --json` stdout is pure NDJSON** — the `🛡 OpenShield Headless Mode` banner went to stdout ahead of the JSON events, and with `--yolo` / `--autonomous` the self-improvement report printed its tables there too, so line-by-line JSON parsing failed. In `--json` mode the banner goes to stderr and the report is skipped.
 - **`openshield doctor --fix` works on a broken config** — `doctor` used to load `config.toml` before running, so an invalid or empty config made `doctor --fix` fail with the same parse error it is meant to repair. It now runs before the config is loaded. The Config check also deserializes into the real config type, so valid TOML of the wrong shape (for example `default_model = 5`) is reported instead of passing as healthy. Other commands that hit a bad config now point at `openshield doctor --fix`.
 - **Package author** — `Cargo.toml` `authors` uses the GitHub noreply address.
 - **CI and installer** — three `clippy::needless_bool` errors in `src/providers/mod.rs` are fixed, the test runner tool checks the command before validating paths (and checks blocked prefixes for paths that do not exist), and `install.sh` points at `Blackshield-Company/openshield`.
