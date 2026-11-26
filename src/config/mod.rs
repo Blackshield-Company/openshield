@@ -597,6 +597,35 @@ impl Config {
             .then_some(level)
     }
 
+    /// The provider that lists `model_name`. An unlisted model goes to the
+    /// only provider when exactly one is configured (proxies and local
+    /// servers that accept any model name). With several, it is an error
+    /// naming the known models: `providers` is a HashMap, so "the first
+    /// one" was a random pick that could send the prompt, and a bogus model
+    /// name, to a provider nobody chose.
+    pub fn require_provider_for_model(&self, model_name: &str) -> Result<(String, ProviderConfig)> {
+        if let Some(found) = self.find_provider_for_model(model_name) {
+            return Ok(found);
+        }
+        if self.providers.is_empty() {
+            anyhow::bail!("No providers configured. Run `openshield setup` first.");
+        }
+        if self.providers.len() == 1
+            && let Some((n, p)) = self.providers.iter().next()
+        {
+            return Ok((n.clone(), p.clone()));
+        }
+        let mut known: Vec<String> = self.all_models().into_iter().map(|(m, _)| m).collect();
+        known.sort();
+        known.dedup();
+        anyhow::bail!(
+            "Unknown model '{}': no provider in config.toml lists it. Known models: {}. \
+             Add it under [[providers.<name>.models]] or pick one of these.",
+            model_name,
+            known.join(", ")
+        )
+    }
+
     /// Get all models across all providers as (model_name, provider_name) tuples.
     pub fn all_models(&self) -> Vec<(String, String)> {
         self.providers
@@ -1514,5 +1543,32 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unknown_model_is_an_error_not_a_random_provider() {
+        let config = Config::default();
+        let err = config
+            .require_provider_for_model("no-such-model-xyz")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Unknown model 'no-such-model-xyz'"), "{err}");
+        assert!(err.contains("gpt-4o"), "should list known models: {err}");
+        let (provider, _) = config.require_provider_for_model("gpt-4o").unwrap();
+        assert_eq!(provider, "openai");
+
+        // A single provider still takes unlisted names (proxies, Ollama).
+        let mut single = Config::default();
+        single.providers.retain(|name, _| name == "local");
+        let (provider, _) = single.require_provider_for_model("llama3:8b").unwrap();
+        assert_eq!(provider, "local");
+
+        let mut empty = Config::default();
+        empty.providers.clear();
+        let err = empty
+            .require_provider_for_model("gpt-4o")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("No providers configured"), "{err}");
     }
 }

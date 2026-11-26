@@ -807,27 +807,20 @@ pub async fn chat(State(state): State<AppState>, body: Json<ApiChatRequest>) -> 
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Route to the provider that owns the requested model; fall back to
-    // the first provider for unlisted models (proxies, passthroughs).
-    let (provider_name, provider_config) =
-        match config.find_provider_for_model(&model).or_else(|| {
-            config
-                .providers
-                .iter()
-                .next()
-                .map(|(n, p)| (n.clone(), p.clone()))
-        }) {
-            Some(x) => x,
-            None => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiError {
-                        error: "No providers configured".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
+    // Route to the provider that owns the requested model. Unlisted models
+    // (proxies, passthroughs) only fall back when one provider is configured.
+    let (provider_name, provider_config) = match config.require_provider_for_model(&model) {
+        Ok(x) => x,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError {
+                    error: e.to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
 
     let provider = crate::providers::Provider::new(
         provider_name,
@@ -930,26 +923,20 @@ pub async fn start_agent_task(
 
         let model = model_override.unwrap_or_else(|| config.default_model.clone());
 
-        // Route to the provider that owns the model; fall back to first.
-        let (provider_name, provider_config) =
-            match config.find_provider_for_model(&model).or_else(|| {
-                config
-                    .providers
-                    .iter()
-                    .next()
-                    .map(|(n, p)| (n.clone(), p.clone()))
-            }) {
-                Some(x) => x,
-                None => {
-                    let mut tasks = state_clone.running_tasks.write().await;
-                    if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
-                        t.status = AgentTaskStatus::Failed;
-                        t.result = Some("No providers configured".to_string());
-                        t.updated_at = chrono::Utc::now().to_rfc3339();
-                    }
-                    return;
+        // Route to the provider that owns the model (single-provider
+        // configs also take unlisted model names).
+        let (provider_name, provider_config) = match config.require_provider_for_model(&model) {
+            Ok(x) => x,
+            Err(e) => {
+                let mut tasks = state_clone.running_tasks.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id_clone) {
+                    t.status = AgentTaskStatus::Failed;
+                    t.result = Some(e.to_string());
+                    t.updated_at = chrono::Utc::now().to_rfc3339();
                 }
-            };
+                return;
+            }
+        };
 
         let provider = crate::providers::Provider::new(
             provider_name,
