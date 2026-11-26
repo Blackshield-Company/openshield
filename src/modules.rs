@@ -11,11 +11,22 @@ pub fn host_from_config(config: &Config) -> ModuleHost {
 /// Like [`host_from_config`], with an explicit config directory for
 /// embedded hosts that have no XDG paths.
 pub fn host_from_parts(config: &Config, config_dir: Option<std::path::PathBuf>) -> ModuleHost {
+    let mut rates = Vec::new();
+    for provider in config.providers.values() {
+        for model in &provider.models {
+            rates.push((
+                model.name.clone(),
+                model.cost_per_1k_input,
+                model.cost_per_1k_output,
+            ));
+        }
+    }
     ModuleHost::new(
         config.memory_db_path.clone(),
         config.modules.clone(),
         config_dir,
     )
+    .with_model_cost_rates(rates)
 }
 
 /// Module ids that have a compiled crate in this build.

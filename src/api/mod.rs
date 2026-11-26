@@ -29,6 +29,9 @@
 //! | POST   | /api/v1/agent | Run agent task (returns task ID) |
 //! | GET    | /api/v1/agent/:id | Get agent task status |
 //! | GET    | /api/v1/replay/status | Replay module status (compiled/enabled) |
+//! | GET    | /api/v1/replay/sessions | List recorded sessions (plus token cost estimates) |
+//! | GET    | /api/v1/replay/sessions/:id | Session timeline: messages, tool calls, approvals, audit, cost |
+//! | POST   | /api/v1/replay/sessions/:id/export | Write/return a share pack; body `{ "redact": true }`
 //!
 //! ## WebSocket
 //!
