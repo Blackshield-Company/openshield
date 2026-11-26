@@ -198,6 +198,32 @@ If this project saved you time, solved a problem, or kept your terminal a little
 
 [![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://buymeacoffee.com/synthalorian)
 
+## xAI (Grok)
+
+The default config includes an `xai` provider with `grok-4.7` (500k context). Sign in one of two ways:
+
+- **API key:** export `XAI_API_KEY`, or put `XAI_API_KEY=...` in `~/.config/openshield/xai.env` (chmod 600).
+- **SuperGrok subscription:** run `openshield auth xai`, open the URL it prints, and enter the code. The token is stored in `~/.config/openshield/xai-auth.json` and refreshed automatically. It is used whenever no API key is set.
+
+Then set `default_model = "grok-4.7"`, pick it with `/model grok-4.7` in the TUI, or pass `--model grok-4.7` to `openshield agent`, `chat` or `headless`. `/effort low|medium|high|xhigh` sets Grok's `reasoning_effort` (`effort_level` in config).
+
+A config written by an older version has no `xai` provider. Add it:
+
+```toml
+[providers.xai]
+base_url = "https://api.x.ai/v1"
+api_key = "${XAI_API_KEY}"
+kind = "xai_oauth"
+env_file = "xai.env"
+
+[[providers.xai.models]]
+name = "grok-4.7"
+context_length = 500000
+cost_per_1k_input = 0.002
+cost_per_1k_output = 0.006
+capabilities = ["code", "chat", "analysis", "reasoning", "reasoning_effort", "vision"]
+```
+
 ## Demo: web terminal + mock provider (no API keys)
 
 ```bash

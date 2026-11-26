@@ -128,6 +128,14 @@ pub struct HarnessEngine {
 
 #[allow(dead_code)]
 impl HarnessEngine {
+    /// `reasoning_effort` for the active model, from `effort_level`
+    /// (`/effort`). `None` for models that don't declare the
+    /// `reasoning_effort` capability, so other providers never see the field.
+    fn reasoning_effort(&self) -> Option<String> {
+        self.app_config
+            .reasoning_effort_for(&self.config.primary_model)
+    }
+
     /// Create a new harness engine.
     pub fn new(
         harness_config: HarnessConfig,
@@ -286,6 +294,7 @@ impl HarnessEngine {
             max_tokens: None,
             temperature: None,
             tools: Some(tools.clone()),
+            reasoning_effort: self.reasoning_effort(),
         };
 
         // Query primary model
@@ -347,6 +356,7 @@ impl HarnessEngine {
                     max_tokens: None,
                     temperature: None,
                     tools: Some(tools.clone()),
+                    reasoning_effort: self.reasoning_effort(),
                 };
 
                 let follow_up = self.primary_provider.chat(follow_up_request).await?;
@@ -452,6 +462,7 @@ impl HarnessEngine {
             max_tokens: None,
             temperature: None,
             tools: Some(tools.clone()),
+            reasoning_effort: self.reasoning_effort(),
         };
 
         let (mut rx, mut primary_metrics) =
@@ -617,6 +628,7 @@ impl HarnessEngine {
                         max_tokens: None,
                         temperature: None,
                         tools: Some(tools.clone()),
+                        reasoning_effort: self.reasoning_effort(),
                     };
 
                     let (mut follow_rx, _follow_metrics) = self

@@ -327,6 +327,9 @@ fn default_theme() -> String {
     "blackshield".to_string()
 }
 
+/// Reasoning-effort levels accepted by xAI's `reasoning_effort` parameter.
+pub const REASONING_EFFORT_LEVELS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+
 fn default_effort() -> String {
     "medium".to_string()
 }
@@ -541,6 +544,24 @@ impl Config {
             .map(|(n, p)| (n.clone(), p.clone()))
     }
 
+    /// The `reasoning_effort` to send for `model_name`: the configured
+    /// `effort_level` when the model declares the `reasoning_effort`
+    /// capability and the level is one xAI accepts, otherwise `None`.
+    pub fn reasoning_effort_for(&self, model_name: &str) -> Option<String> {
+        let supports = self.providers.values().any(|p| {
+            p.models.iter().any(|m| {
+                m.name == model_name && m.capabilities.iter().any(|c| c == "reasoning_effort")
+            })
+        });
+        if !supports {
+            return None;
+        }
+        let level = self.effort_level.trim().to_ascii_lowercase();
+        REASONING_EFFORT_LEVELS
+            .contains(&level.as_str())
+            .then_some(level)
+    }
+
     /// Get all models across all providers as (model_name, provider_name) tuples.
     pub fn all_models(&self) -> Vec<(String, String)> {
         self.providers
@@ -617,6 +638,36 @@ impl Default for Config {
                 kind: ProviderKind::OpenAiCompatible,
                 headers: HashMap::new(),
                 env_file: None,
+            },
+        );
+
+        // xAI (Grok). One provider, two ways in: an API key from
+        // XAI_API_KEY (or ~/.config/openshield/xai.env), or, when no key is
+        // set, the SuperGrok subscription token from `openshield auth xai`.
+        providers.insert(
+            "xai".to_string(),
+            ProviderConfig {
+                base_url: "https://api.x.ai/v1".to_string(),
+                api_key: env_or_placeholder("XAI_API_KEY"),
+                models: vec![ModelConfig {
+                    name: "grok-4.7".to_string(),
+                    context_length: 500_000,
+                    // Standard (< 200k prompt tokens) rates; xAI bills
+                    // longer prompts at 2x.
+                    cost_per_1k_input: 0.002,
+                    cost_per_1k_output: 0.006,
+                    capabilities: vec![
+                        "code".to_string(),
+                        "chat".to_string(),
+                        "analysis".to_string(),
+                        "reasoning".to_string(),
+                        "reasoning_effort".to_string(),
+                        "vision".to_string(),
+                    ],
+                }],
+                kind: ProviderKind::XaiOauth,
+                headers: HashMap::new(),
+                env_file: Some("xai.env".to_string()),
             },
         );
 
@@ -1233,5 +1284,49 @@ mod tests {
         assert!(text.contains("reduced_motion = true"));
         let parsed: Config = toml::from_str(&text).expect("parse config");
         assert!(parsed.reduced_motion);
+    }
+
+    #[test]
+    fn default_config_ships_grok_4_7_on_xai() {
+        let config = Config::default();
+        let xai = config.providers.get("xai").expect("xai provider");
+        assert_eq!(xai.base_url, "https://api.x.ai/v1");
+        assert_eq!(xai.kind, ProviderKind::XaiOauth);
+        assert_eq!(xai.env_file.as_deref(), Some("xai.env"));
+        let grok = xai
+            .models
+            .iter()
+            .find(|m| m.name == "grok-4.7")
+            .expect("grok-4.7 model");
+        assert_eq!(grok.context_length, 500_000);
+        assert!(grok.capabilities.iter().any(|c| c == "reasoning_effort"));
+        let (provider, _) = config.find_provider_for_model("grok-4.7").unwrap();
+        assert_eq!(provider, "xai");
+        // Round-trips through TOML the way it is written to disk.
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.providers["xai"].models[0].context_length, 500_000);
+    }
+
+    #[test]
+    fn reasoning_effort_follows_effort_level_for_capable_models_only() {
+        let mut config = Config::default();
+        for level in ["low", "medium", "high", "xhigh"] {
+            config.effort_level = level.to_string();
+            assert_eq!(
+                config.reasoning_effort_for("grok-4.7").as_deref(),
+                Some(level)
+            );
+        }
+        config.effort_level = " XHigh ".to_string();
+        assert_eq!(
+            config.reasoning_effort_for("grok-4.7").as_deref(),
+            Some("xhigh")
+        );
+        config.effort_level = "max".to_string();
+        assert_eq!(config.reasoning_effort_for("grok-4.7"), None);
+        config.effort_level = "high".to_string();
+        assert_eq!(config.reasoning_effort_for("gpt-4o"), None);
+        assert_eq!(config.reasoning_effort_for("no-such-model"), None);
     }
 }

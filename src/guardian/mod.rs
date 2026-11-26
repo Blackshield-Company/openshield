@@ -109,6 +109,7 @@ pub async fn review(
         max_tokens: Some(4000),
         temperature: Some(0.2),
         tools: None,
+        reasoning_effort: None,
     };
 
     let response = provider.chat(request).await?;

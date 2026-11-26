@@ -6586,6 +6586,7 @@ async fn generate_commit_message(app: &mut App) -> Result<String> {
         temperature: Some(0.3),
         max_tokens: Some(100),
         tools: None,
+        reasoning_effort: None,
     };
 
     let response = match app.provider.chat(request).await {
