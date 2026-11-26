@@ -15,9 +15,9 @@
 //! in `[desktop] allowed_hosts`. This blocks DNS rebinding. CORS is an
 //! origin allowlist (`allowed_origin`), not `CorsLayer::permissive()`.
 //!
-//! `POST /api/v1/pair` requires the master token (pairing tokens cannot mint
-//! new ones), allows at most 5 requests per 60s, and stores at most 32
-//! pairing tokens.
+//! `POST /api/v1/pair` and `POST /api/v1/doctor/fix` require the master
+//! token (pairing tokens cannot mint new ones or rewrite config). Pair
+//! allows at most 5 requests per 60s, and stores at most 32 pairing tokens.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -508,10 +508,35 @@ mod tests {
             status(&app, "POST", "/api/v1/doctor/fix", Some("wrong"), host).await,
             StatusCode::UNAUTHORIZED
         );
-        // A valid token is accepted; the handler may still 500 if doctor
-        // cannot run in the test environment, but it must not be 401.
+        // A valid master token is accepted; the handler may still 500 if
+        // doctor cannot run in the test environment, but it must not be 401
+        // or 403.
         let code = status(&app, "POST", "/api/v1/doctor/fix", Some("master"), host).await;
         assert_ne!(code, StatusCode::UNAUTHORIZED);
+        assert_ne!(code, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_doctor_fix_rejects_pairing_token() {
+        let auth = AuthState::new("master".to_string(), true);
+        auth.store_pair_token(
+            "pairing".to_string(),
+            chrono::Utc::now() + chrono::Duration::seconds(120),
+        );
+        let app = crate::api::build_router(state_with(auth));
+        let host = Some("localhost:9310");
+        assert_eq!(
+            status(&app, "POST", "/api/v1/doctor/fix", Some("pairing"), host).await,
+            StatusCode::FORBIDDEN
+        );
+        // Pairing tokens still work on ordinary routes.
+        assert_eq!(
+            status(&app, "GET", "/api/v1/health", Some("pairing"), host).await,
+            StatusCode::OK
+        );
+        let code = status(&app, "POST", "/api/v1/doctor/fix", Some("master"), host).await;
+        assert_ne!(code, StatusCode::UNAUTHORIZED);
+        assert_ne!(code, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
