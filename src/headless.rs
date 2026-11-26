@@ -375,15 +375,19 @@ pub async fn run_headless(
             }
         }
 
-        tokio::spawn(async move {
-            if let Err(e) = crate::self_improve::trigger_analysis(
-                &crate::config::Config::load_or_default().unwrap_or_default(),
-            )
-            .await
-            {
-                tracing::warn!("Self-improvement analysis failed: {}", e);
-            }
-        });
+        // The analysis prints a human-readable report to stdout, which would
+        // corrupt the NDJSON stream in `--json` mode.
+        if !config.json {
+            tokio::spawn(async move {
+                if let Err(e) = crate::self_improve::trigger_analysis(
+                    &crate::config::Config::load_or_default().unwrap_or_default(),
+                )
+                .await
+                {
+                    tracing::warn!("Self-improvement analysis failed: {}", e);
+                }
+            });
+        }
     }
 
     let duration = start.elapsed().as_secs();
