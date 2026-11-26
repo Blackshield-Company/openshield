@@ -8,11 +8,14 @@ use crate::config::ModulesConfig;
 ///
 /// Kept small on purpose: a database path, the `[modules]` table, and an
 /// optional config directory (embedded/Android hosts have no XDG dirs).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModuleHost {
     pub memory_db_path: PathBuf,
     pub modules: ModulesConfig,
     pub config_dir: Option<PathBuf>,
+    /// `(model_name, cost_per_1k_input, cost_per_1k_output)` from the host
+    /// config, used to label replay cost estimates.
+    pub model_cost_rates: Vec<(String, f64, f64)>,
 }
 
 impl ModuleHost {
@@ -27,7 +30,23 @@ impl ModuleHost {
             memory_db_path,
             modules,
             config_dir,
+            model_cost_rates: Vec::new(),
         }
+    }
+
+    /// Attach per-model token cost rates from the host config.
+    pub fn with_model_cost_rates(mut self, rates: Vec<(String, f64, f64)>) -> Self {
+        self.model_cost_rates = rates;
+        self
+    }
+
+    /// Look up per-1k input/output rates for a model name, if the host
+    /// provided them.
+    pub fn cost_rates_for(&self, model: &str) -> Option<(f64, f64)> {
+        self.model_cost_rates
+            .iter()
+            .find(|(name, _, _)| name == model)
+            .map(|(_, inp, out)| (*inp, *out))
     }
 
     /// Runtime switch for the replay module.

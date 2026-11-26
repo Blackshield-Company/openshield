@@ -1740,8 +1740,12 @@ async fn main() -> anyhow::Result<()> {
         #[cfg(feature = "replay")]
         Some(Commands::Replay { command }) => {
             let host = modules::host_from_config(&config);
-            let status = openshield_replay::run_cli(command, &host)?;
-            println!("{}", openshield_replay::format_status(&status));
+            let output = openshield_replay::run_cli(command, &host)?;
+            if matches!(output, openshield_replay::CliOutput::Disabled) {
+                eprintln!("{}", openshield_replay::format_output(&output)?);
+                std::process::exit(i32::from(openshield_replay::DISABLED_EXIT));
+            }
+            println!("{}", openshield_replay::format_output(&output)?);
         }
         #[cfg(feature = "web-api")]
         Some(Commands::Serve { addr }) => {
