@@ -103,8 +103,11 @@ For llama.cpp `llama-server` or llama-swap, use the same layout with `base_url =
 | `openshield stats` | Token usage and model performance |
 | `openshield models` | List available models |
 | `openshield config` | Show configuration |
-| `openshield serve` | Desktop/Pocket API. Bearer token required on every request, including loopback (`~/.config/openshield/desktop.token`; WebSocket may use `?token=`) |
+| `openshield serve` | Desktop/Pocket API, and the host for Telegram/Discord channels. Bearer token required on every request, including loopback (`~/.config/openshield/desktop.token`; WebSocket may use `?token=`) |
+| `openshield pair` | Mint a short-lived pairing code from a running `openshield serve`. Paste `/pair <code>` in a Telegram or Discord DM. |
 | `openshield server` | Legacy HTTP gateway on 127.0.0.1:9876. Same bearer token as `serve`. The TUI does not start this unless you pass `--tui-http` or set `[desktop] tui_http = true`. Prefer `openshield serve`. |
+
+Telegram and Discord setup, systemd, and Termux:Boot notes are in [docs/channels.md](docs/channels.md).
 
 ## TUI Keybindings
 

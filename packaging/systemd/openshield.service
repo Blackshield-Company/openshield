@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenShield API and channel supervisor (Telegram / Discord)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Run as a dedicated user that owns ~/.config/openshield and ~/.local/share/openshield.
+User=openshield
+Group=openshield
+ExecStart=/usr/bin/openshield serve
+Restart=on-failure
+RestartSec=5
+# Tokens and provider keys belong here (mode 0600), not in this unit file.
+EnvironmentFile=-/etc/openshield/env
+# Example /etc/openshield/env:
+#   TELEGRAM_BOT_TOKEN=...
+#   DISCORD_BOT_TOKEN=...
+
+[Install]
+WantedBy=multi-user.target
