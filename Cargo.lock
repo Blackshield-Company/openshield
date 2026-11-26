@@ -3205,6 +3205,8 @@ dependencies = [
  "matrix-sdk",
  "mimalloc",
  "octocrab",
+ "openshield-replay",
+ "openshield-sdk",
  "portable-pty",
  "regex",
  "reqwest 0.12.28",
@@ -3231,6 +3233,27 @@ dependencies = [
  "urlencoding",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "openshield-replay"
+version = "1.2.2"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "openshield-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "openshield-sdk"
+version = "1.2.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]

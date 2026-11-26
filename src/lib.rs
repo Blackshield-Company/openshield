@@ -32,6 +32,7 @@ pub mod lsp;
 pub mod mcp;
 pub mod mcp_server;
 pub mod memory;
+pub mod modules;
 pub mod plugins;
 pub mod providers;
 pub mod repo_map;

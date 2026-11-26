@@ -28,6 +28,7 @@
 //! | POST   | /api/v1/chat | Send a chat message (non-streaming) |
 //! | POST   | /api/v1/agent | Run agent task (returns task ID) |
 //! | GET    | /api/v1/agent/:id | Get agent task status |
+//! | GET    | /api/v1/replay/status | Replay module status (compiled/enabled) |
 //!
 //! ## WebSocket
 //!
@@ -89,6 +90,12 @@ impl AppState {
             Some(dir) => crate::config::Config::load_from_dir(dir),
             None => crate::config::Config::load_or_default(),
         }
+    }
+}
+
+impl axum::extract::FromRef<AppState> for openshield_sdk::ModuleHost {
+    fn from_ref(state: &AppState) -> Self {
+        crate::modules::host_from_parts(&state.config, state.config_dir.clone())
     }
 }
 
@@ -176,7 +183,8 @@ pub fn build_router(state: AppState) -> Router {
     let origins = state.config.desktop.allowed_origins.clone();
     let auth_state = state.clone();
     let host_state = state.clone();
-    Router::new()
+    #[allow(unused_mut)]
+    let mut router = Router::new()
         // Health
         .route("/api/v1/health", get(handlers::health))
         // Tools
@@ -226,7 +234,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/{id}", get(handlers::get_agent_task))
         // WebSocket
         .route("/ws/v1/chat", get(ws::ws_chat))
-        .route("/ws/v1/agent", get(ws::ws_agent))
+        .route("/ws/v1/agent", get(ws::ws_agent));
+
+    #[cfg(feature = "replay")]
+    if state.config.modules.replay.is_enabled() {
+        router = router.nest("/api/v1/replay", openshield_replay::router());
+    }
+
+    router
         .with_state(state)
         // Bearer token whenever `auth` is Some, including loopback.
         .layer(middleware::from_fn_with_state(

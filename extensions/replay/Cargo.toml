@@ -1,0 +1,22 @@
+[package]
+name = "openshield-replay"
+version = "1.2.2"
+edition = "2024"
+authors = ["synthalorian <212206047+synthalorian@users.noreply.github.com>"]
+description = "Built-in session replay module for OpenShield."
+license = "Apache-2.0"
+repository = "https://github.com/Blackshield-Company/openshield"
+rust-version = "1.91"
+publish = false
+
+[features]
+default = []
+web-api = ["openshield-sdk/web-api", "dep:axum"]
+
+[dependencies]
+openshield-sdk = { path = "../../crates/openshield-sdk" }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+axum = { version = "0.8", features = ["ws"], optional = true }

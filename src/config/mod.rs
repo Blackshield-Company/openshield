@@ -287,6 +287,9 @@ pub struct Config {
     /// runtime with /motion.
     #[serde(default)]
     pub reduced_motion: bool,
+    /// Built-in companion modules (replay, eval, armory, guard).
+    #[serde(default)]
+    pub modules: openshield_sdk::ModulesConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1038,6 +1041,7 @@ impl Default for Config {
             code_index_enabled: true,
             sprite: default_sprite(),
             reduced_motion: false,
+            modules: Default::default(),
         }
     }
 }
@@ -1253,6 +1257,7 @@ mod tests {
             code_index_enabled: true,
             sprite: "blackshield-mercenary".to_string(),
             reduced_motion: false,
+            modules: Default::default(),
         }
     }
 
@@ -1570,5 +1575,41 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("No providers configured"), "{err}");
+    }
+
+    #[test]
+    fn modules_default_when_table_missing() {
+        let full = toml::to_string(&Config::default()).expect("serialize default config");
+        let mut without = String::new();
+        let mut skipping = false;
+        for line in full.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("[modules") {
+                skipping = true;
+                continue;
+            }
+            if skipping && trimmed.starts_with('[') {
+                skipping = false;
+            }
+            if skipping {
+                continue;
+            }
+            without.push_str(line);
+            without.push('\n');
+        }
+        let parsed: Config = toml::from_str(&without).expect("parse config without modules");
+        assert!(parsed.modules.replay.is_enabled());
+        assert!(!parsed.modules.armory.require_signatures);
+    }
+
+    #[test]
+    fn modules_replay_can_be_disabled() {
+        let mut cfg = Config::default();
+        cfg.modules.replay.enabled = false;
+        let text = toml::to_string(&cfg).expect("serialize");
+        assert!(text.contains("[modules.replay]"));
+        let parsed: Config = toml::from_str(&text).expect("parse");
+        assert!(!parsed.modules.replay.is_enabled());
+        assert!(parsed.modules.eval.is_enabled());
     }
 }

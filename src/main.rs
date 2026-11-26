@@ -37,6 +37,7 @@ mod lsp;
 mod mcp;
 mod mcp_server;
 mod memory;
+mod modules;
 mod plugins;
 mod providers;
 mod repo_map;
@@ -245,6 +246,12 @@ enum Commands {
     Export {
         #[arg(default_value = "session")]
         name: String,
+    },
+    /// Replay recorded sessions (built-in module)
+    #[cfg(feature = "replay")]
+    Replay {
+        #[command(subcommand)]
+        command: openshield_replay::ReplayCli,
     },
     /// Watch files and auto-run commands
     Watch {
@@ -1729,6 +1736,12 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+        #[cfg(feature = "replay")]
+        Some(Commands::Replay { command }) => {
+            let host = modules::host_from_config(&config);
+            let status = openshield_replay::run_cli(command, &host)?;
+            println!("{}", openshield_replay::format_status(&status));
         }
         #[cfg(feature = "web-api")]
         Some(Commands::Serve { addr }) => {

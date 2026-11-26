@@ -557,6 +557,7 @@ impl Agent {
             code_index_enabled: true,
             sprite: "blackshield-mercenary".to_string(),
             reduced_motion: false,
+            modules: Default::default(),
         }
     }
 }
