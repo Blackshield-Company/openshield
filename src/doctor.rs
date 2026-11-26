@@ -173,6 +173,9 @@ pub async fn run_checks(auto_fix: bool) -> Result<DoctorReport> {
     // Check 7: Session exports directory
     report.checks.push(check_sessions_dir().await);
 
+    // Check 8: Built-in companion modules
+    report.checks.push(check_modules().await);
+
     // Auto-fix if requested
     if auto_fix {
         for check in &report.checks {
@@ -385,6 +388,12 @@ async fn check_sessions_dir() -> CheckResult {
         }
         Err(e) => CheckResult::warning("Sessions", format!("Cannot read sessions: {}", e), false),
     }
+}
+
+async fn check_modules() -> CheckResult {
+    let config = crate::config::Config::load_or_default()
+        .unwrap_or_else(|_| crate::config::Config::default());
+    CheckResult::healthy("Modules", crate::modules::doctor_message(&config))
 }
 
 async fn try_fix(component: &str) -> Result<String> {

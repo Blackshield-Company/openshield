@@ -1,0 +1,20 @@
+[package]
+name = "openshield-sdk"
+version = "1.2.2"
+edition = "2024"
+authors = ["synthalorian <212206047+synthalorian@users.noreply.github.com>"]
+description = "Built-in module contract for OpenShield (hooks, config, host types)."
+license = "Apache-2.0"
+repository = "https://github.com/Blackshield-Company/openshield"
+rust-version = "1.91"
+publish = false
+
+[features]
+default = []
+# Reserved for later hook/route helpers; currently a no-op.
+web-api = []
+
+[dependencies]
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
