@@ -1,0 +1,18 @@
+pkgbase = openshield-bin
+	pkgdesc = The harness that learns. The agent that decides.
+	pkgver = 1.1.1
+	pkgrel = 1
+	url = https://github.com/Blackshield-Company/openshield
+	arch = x86_64
+	arch = aarch64
+	license = Apache-2.0
+	depends = gcc-libs
+	depends = glibc
+	provides = openshield
+	conflicts = openshield
+	source_x86_64 = https://github.com/Blackshield-Company/openshield/releases/download/v1.1.1/openshield-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums_x86_64 = a278128aaff5540d0d49dd6669a3fe9b417acc28ab48b54664c0f401d698e691
+	source_aarch64 = https://github.com/Blackshield-Company/openshield/releases/download/v1.1.1/openshield-aarch64-unknown-linux-gnu.tar.gz
+	sha256sums_aarch64 = eacbc335c6ce57fb3602e647b8d1637484dee4f6feaa610b94db11bf720bc879
+
+pkgname = openshield-bin
